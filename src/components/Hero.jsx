@@ -18,7 +18,7 @@ export default function Hero() {
         <div>
           {/* Figma: 244 x 28 */}
           <span className="inline-flex h-7 items-center gap-2 rounded-full bg-white pl-[1px] pr-4
-                           text-[11.722px] font-normal leading-none tracking-[-0.352px] text-ink
+                           text-[13.722px] font-normal leading-none tracking-[-0.352px] text-ink
                            shadow-[0_10px_26px_-16px_rgba(2,45,87,0.18)] ring-1 ring-ink/[0.05]">
             {/* Figma: 30x26, radius full, gradiente 180deg, shadow lilás */}
             <span className="flex h-[26px] w-[30px] shrink-0 items-center justify-center rounded-full
@@ -69,7 +69,7 @@ export default function Hero() {
           </div>
 
           {/* Figma: uma linha, gap 16, itens 96 / 102 / auto / auto */}
-          <ul className="mt-6 flex items-start gap-4 text-[11.722px] font-normal
+          <ul className="mt-6 flex items-start gap-4 text-[13.722px] font-normal
                          leading-none tracking-[-0.352px] text-body">
             {perks.map(({ label, w }) => (
               <li key={label} className={`flex shrink-0 items-center gap-1 ${w}`}>
@@ -114,19 +114,13 @@ export default function Hero() {
           </div>
 
           {/* BANDEIRA — Figma: 62.36 x 59.2, rotate -10.174°, radius 19 */}
-          {/* rotação no wrapper: sobrevive quando a animação está desligada */}
-          <div className="absolute -bottom-[30px] -left-[19px] z-30 -rotate-[10.174deg]">
-            <div className="animate-floaty flex h-[59px] w-[62px] items-center justify-center
-                            overflow-hidden rounded-[22px] bg-badge-grad
-                            shadow-[0_1.872px_28.168px_0_rgba(106,13,168,0.25)]">
-              <img
-                src="/assets/flag.svg"
-                alt="Inglês"
-                className="h-auto w-[42px] max-w-none object-contain"
-              />
-            </div>
-          </div>
-
+          {/* BANDEIRA — SVG completo do Figma (chip + bandeira + rotação embutidos) */}
+          <img
+            src="/assets/flag.svg"
+            alt="Inglês"
+            className="animate-floaty absolute -bottom-[38px] -left-[30px] z-30 w-[80px]"
+          />
+          
           {/* ESPERMATOZOIDE — SVG do Figma, 159 x 152 */}
           <svg
             width="159" height="152" viewBox="0 0 159 152" fill="none"
