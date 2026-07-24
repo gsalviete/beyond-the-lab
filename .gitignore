@@ -1,0 +1,8 @@
+node_modules
+dist
+*.local
+vite.config.js.timestamp-*
+shot.mjs
+
+# design reference exports (source PNG + slices)
+design/
