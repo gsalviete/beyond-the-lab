@@ -37,8 +37,8 @@ export default function Hero() {
           </span>
 
           {/* Figma: flex column, gap 24, width 665 (conteúdo 608) */}
-          <div className="mt-[26px] flex max-w-[608px] flex-col items-start gap-6">
-            <h1 className="font-display text-[2rem] font-semibold leading-[normal] text-ink md:text-[46px]">
+          <div className="mt-[26px] flex max-w-[665px] flex-col items-start gap-6">
+            <h1 className="max-w-[608px] font-display text-[2rem] font-semibold leading-[normal] text-ink md:text-[46px]">
               Desenvolva o <span className="text-grad">inglês</span> que te impulsiona no laboratório da{' '}
               <span className="text-grad">Reprodução Humana.</span>
             </h1>
@@ -77,14 +77,23 @@ export default function Hero() {
           {/* CARD — Figma: 480 x 656, radius 24, border 0.873px #FF5986, bg #FFF */}
           <div className="relative h-[560px] w-full overflow-hidden rounded-[24px]
                           border-[0.873px] border-brand-line bg-white sm:h-[656px]">
-            {/* washes rosa por cima do branco */}
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#FFE9F0] via-[#FFF4F8] to-white" />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_0%,rgba(255,197,214,0.55)_0%,transparent_60%)]" />
+            {/* washes rosa */}
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#FFEAF1] via-[#FFF6F9] to-white" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(130%_70%_at_50%_0%,rgba(255,205,220,0.38)_0%,transparent_65%)]" />
+
+            {/* grade sutil — o Figma tem essa textura */}
+            <div className="pointer-events-none absolute inset-0 opacity-40
+                            bg-[linear-gradient(to_right,rgba(255,255,255,0.65)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.65)_1px,transparent_1px)]
+                            bg-[length:38px_38px]" />
+
+            {/* brilho — ATRÁS dela, z-0 */}
+            <div className="pointer-events-none absolute left-[10%] top-[8%] z-0 h-24 w-24 rounded-full
+                            bg-[radial-gradient(circle,rgba(255,255,255,0.85)_0%,transparent_70%)]" />
 
             <img
               src={PORTRAIT}
               alt="Profissional de laboratório sorrindo em jaleco branco"
-              className="relative z-10 h-full w-full object-cover object-top"
+              className="absolute bottom-0 left-1/2 z-10 h-[95%] w-auto max-w-none -translate-x-1/2 object-contain"
             />
 
             <div className="pointer-events-none absolute left-[36%] top-[7%] z-20 h-16 w-16 rounded-full
@@ -94,7 +103,7 @@ export default function Hero() {
           {/* BADGE — transborda 42px à direita, 52px acima do topo do card */}
           {/* Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
           <div className="absolute -top-[52px] -right-[42px] z-30 rounded-2xl bg-badge-grad
-                py-[13px] pl-4 pr-[37px] text-white shadow-badge">
+                py-[13px] pl-4 pr-[37px] text-white">
             <p className="text-[13px] leading-[17px] text-white/80">Primeira turma</p>
             <p className="font-display text-[30px] font-semibold leading-[37px]">Setembro</p>
           </div>
