@@ -1,5 +1,4 @@
 import { ArrowUpRight, Check } from './Icons.jsx'
-import { Cell } from './Decor.jsx'
 
 const perks = [
   { label: 'Conteúdo especializado',       w: 'w-[96px]'  },
@@ -19,13 +18,12 @@ export default function Hero() {
         <div>
           {/* Figma: 244 x 28 */}
           <span className="inline-flex h-7 items-center gap-2 rounded-full bg-white pl-[1px] pr-4
-                 text-[11.722px] font-normal leading-none tracking-[-0.352px] text-ink
-                 shadow-[0_10px_26px_-16px_rgba(2,45,87,0.18)] ring-1 ring-ink/[0.05]">
-
+                           text-[11.722px] font-normal leading-none tracking-[-0.352px] text-ink
+                           shadow-[0_10px_26px_-16px_rgba(2,45,87,0.18)] ring-1 ring-ink/[0.05]">
             {/* Figma: 30x26, radius full, gradiente 180deg, shadow lilás */}
             <span className="flex h-[26px] w-[30px] shrink-0 items-center justify-center rounded-full
-                            bg-[linear-gradient(180deg,rgba(196,68,222,0)_0%,rgba(255,69,119,0.17)_100%)]
-                            shadow-[0_3.168px_4.816px_0_rgba(97,83,238,0.10)]">
+                             bg-[linear-gradient(180deg,rgba(196,68,222,0)_0%,rgba(255,69,119,0.17)_100%)]
+                             shadow-[0_3.168px_4.816px_0_rgba(97,83,238,0.10)]">
               <svg
                 width="25" height="23" viewBox="0 0 25 23" fill="none"
                 xmlns="http://www.w3.org/2000/svg"
@@ -49,7 +47,7 @@ export default function Hero() {
             Especialista em Reprodução Humana
           </span>
 
-          {/* Figma: flex column, gap 24, width 665 (conteúdo 608) */}
+          {/* Figma: flex column, gap 24, width 665 (H1 limitado a 608) */}
           <div className="mt-[26px] flex max-w-[665px] flex-col items-start gap-6">
             <h1 className="max-w-[608px] font-display text-[46px] font-semibold leading-[55px] text-ink">
               Desenvolva o <span className="text-grad">inglês</span> que te impulsiona no laboratório da{' '}
@@ -70,10 +68,9 @@ export default function Hero() {
             </div>
           </div>
 
-          {/* Figma: UMA linha só, ~480px, fonte 12px */}
-          {/* sem max-w no ul; shrink-0 impede o esmagamento */}
+          {/* Figma: uma linha, gap 16, itens 96 / 102 / auto / auto */}
           <ul className="mt-6 flex items-start gap-4 text-[11.722px] font-normal
-               leading-none tracking-[-0.352px] text-body">
+                         leading-none tracking-[-0.352px] text-body">
             {perks.map(({ label, w }) => (
               <li key={label} className={`flex shrink-0 items-center gap-1 ${w}`}>
                 <Check className="h-3 w-3 shrink-0 text-cobalt" />
@@ -87,20 +84,20 @@ export default function Hero() {
         {/* card 41px mais baixo que o texto (Figma: badge y=190, card y=231) */}
         <div className="relative lg:mt-[41px]">
 
-          {/* CARD — Figma: 480 x 656, radius 24, border 0.873px #FF5986, bg #FFF */}
+          {/* CARD — Figma: 480 x 656, radius 24, border 0.873px #FF5986 */}
           <div className="relative h-[560px] w-full overflow-hidden rounded-[24px]
                           border-[0.873px] border-brand-line bg-white sm:h-[656px]">
-            {/* washes rosa */}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#FFEAF1] via-[#FFF6F9] to-white" />
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(130%_70%_at_50%_0%,rgba(255,205,220,0.38)_0%,transparent_65%)]" />
 
-            {/* grade sutil — o Figma tem essa textura */}
+            {/* grade sutil */}
             <div className="pointer-events-none absolute inset-0 opacity-40
                             bg-[linear-gradient(to_right,rgba(255,255,255,0.65)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.65)_1px,transparent_1px)]
                             bg-[length:38px_38px]" />
 
+            {/* brilho — atrás da foto */}
             <div className="pointer-events-none absolute left-[12%] top-[6%] z-0 h-20 w-20 rounded-full
-                bg-[radial-gradient(circle,rgba(255,255,255,0.75)_0%,transparent_70%)]" /> 
+                            bg-[radial-gradient(circle,rgba(255,255,255,0.75)_0%,transparent_70%)]" />
 
             <img
               src={PORTRAIT}
@@ -109,27 +106,64 @@ export default function Hero() {
             />
           </div>
 
-          {/* BADGE — transborda 42px à direita, 52px acima do topo do card */}
-          {/* Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
+          {/* BADGE — Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
           <div className="absolute -top-[52px] -right-[42px] z-30 rounded-2xl bg-badge-grad
-                py-[13px] pl-4 pr-[37px] text-white">
+                          py-[13px] pl-4 pr-[37px] text-white">
             <p className="text-[13px] leading-[17px] text-white/80">Primeira turma</p>
             <p className="font-display text-[30px] font-semibold leading-[37px]">Setembro</p>
           </div>
 
-          {/* BANDEIRA — Figma: ~35px acima da base do card */}
-          <img
-            src="/assets/flag.png"
-            alt="Inglês"
-            className="animate-floaty absolute bottom-[35px] -left-8 z-30 h-16 w-16 rounded-2xl shadow-card"
-          />
+          {/* BANDEIRA — Figma: 62.36 x 59.2, rotate -10.174°, radius 19 */}
+          {/* rotação no wrapper: sobrevive quando a animação está desligada */}
+          <div className="absolute -bottom-[30px] -left-[19px] z-30 -rotate-[10.174deg]">
+            <div className="animate-floaty flex h-[59px] w-[62px] items-center justify-center
+                            overflow-hidden rounded-[22px] bg-badge-grad
+                            shadow-[0_1.872px_28.168px_0_rgba(106,13,168,0.25)]">
+              <img
+                src="/assets/flag.svg"
+                alt="Inglês"
+                className="h-auto w-[42px] max-w-none object-contain"
+              />
+            </div>
+          </div>
 
-          {/* ESPERMATOZOIDE — cabeça fora do canto inferior direito */}
-          <img
-            src="/assets/sperm.png"
-            alt=""
-            className="animate-floaty pointer-events-none absolute -bottom-16 -right-10 z-20 h-[180px] w-auto"
-          />
+          {/* ESPERMATOZOIDE — SVG do Figma, 159 x 152 */}
+          <svg
+            width="159" height="152" viewBox="0 0 159 152" fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+            className="animate-floaty pointer-events-none absolute -bottom-[63px] -right-[78px] z-20"
+          >
+            <g clipPath="url(#spermClip)">
+              <path
+                opacity="0.85"
+                d="M118.785 62.1585L117.617 62.2754C110.882 58.1271 104.556 52.521 100.067 46.1139C100.232 45.979 100.383 45.61 100.183 45.3401C98.2613 42.717 96.7233 40.1119 95.7114 36.9534C93.955 31.4642 94.8109 25.4801 98.6937 20.9043C106.571 11.6133 117.194 4.90931 128.923 1.65631C137.054 -0.597838 149.309 -1.36272 154.814 4.73834C160.632 11.1858 159.468 23.6939 156.851 32.1481C153.504 42.9509 147.329 52.6559 138.949 60.1113C133.104 65.3125 125.392 65.6949 118.785 62.154V62.1585Z"
+                fill="url(#spermGradA)"
+              />
+              <path
+                opacity="0.85"
+                d="M100.062 46.1126C100.7 45.9867 101.065 46.5131 101.466 47.026C105.835 52.5826 112.825 58.9582 118.781 62.1527C111.675 66.139 102.385 65.1132 96.955 67.7903C93.1747 69.6575 90.4821 73.2839 89.4657 77.3648L87.794 84.0958C86.7687 88.2306 84.7448 91.6411 82.1191 94.8896C76.2926 102.097 68.1213 106.106 58.9068 106.633C50.4323 107.119 43.2551 112 40.7453 120.275L37.6158 130.583C33.5859 140.612 24.0148 146.695 13.3827 147.208C8.30513 147.45 4.07013 149.133 -0.00439453 151.995C3.4906 148.044 8.25164 145.957 13.4496 144.976C22.8334 143.199 30.5055 136.594 32.36 126.97L33.2828 118.862C33.7107 115.096 35.1729 112.018 37.1701 108.905C41.8107 101.666 48.9166 96.7568 57.4045 95.2451C59.941 94.7951 62.2725 93.8593 64.4925 92.6445C74.5094 87.1598 72.1869 75.3896 74.9329 67.7633C78.9718 56.551 88.6276 48.4163 100.062 46.1126Z"
+                fill="url(#spermGradB)"
+              />
+            </g>
+            <defs>
+              <linearGradient id="spermGradA" x1="94.8408" y1="54.6244" x2="164.624" y2="49.005"
+                              gradientUnits="userSpaceOnUse">
+                <stop stopColor="#F75883" />
+                <stop offset="0.514976" stopColor="#FF7EA1" />
+                <stop offset="1" stopColor="#FF487A" />
+              </linearGradient>
+              <linearGradient id="spermGradB" x1="-0.00439405" y1="135.815" x2="128.96" y2="124.111"
+                              gradientUnits="userSpaceOnUse">
+                <stop stopColor="#F75883" />
+                <stop offset="0.514976" stopColor="#FF7EA1" />
+                <stop offset="1" stopColor="#FF487A" />
+              </linearGradient>
+              <clipPath id="spermClip">
+                <rect width="159" height="152" fill="white" />
+              </clipPath>
+            </defs>
+          </svg>
         </div>
       </div>
     </section>
