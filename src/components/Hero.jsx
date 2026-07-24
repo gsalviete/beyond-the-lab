@@ -51,7 +51,7 @@ export default function Hero() {
 
           {/* Figma: flex column, gap 24, width 665 (conteúdo 608) */}
           <div className="mt-[26px] flex max-w-[665px] flex-col items-start gap-6">
-            <h1 className="max-w-[608px] font-display text-[2rem] font-semibold leading-[normal] text-ink md:text-[46px]">
+            <h1 className="max-w-[608px] font-display text-[46px] font-semibold leading-[55px] text-ink">
               Desenvolva o <span className="text-grad">inglês</span> que te impulsiona no laboratório da{' '}
               <span className="text-grad">Reprodução Humana.</span>
             </h1>
