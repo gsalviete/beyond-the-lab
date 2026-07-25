@@ -3,7 +3,7 @@ import { Sperm, RingDot } from './Decor.jsx'
 
 export default function FinalCta() {
   return (
-    <section className="pb-20">
+    <section id="final-cta" className="pb-20">
       <div className="container-page">
         <div className="relative overflow-hidden rounded-[32px] bg-cta-grad px-8 py-16 text-center shadow-card md:py-20">
           {/* faint grid, like the pink band */}
