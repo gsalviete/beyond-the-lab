@@ -21,19 +21,19 @@ export default function PainPoints() {
       />
       {/* soft highlight */}
       <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-white/40 blur-3xl" />
+
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
-        <div>
-          <h2 className="reveal font-display text-[1.75rem] font-bold leading-tight text-ink md:text-[2.2rem]">
-            Seu <span className="text-grad">inglês</span>
-            <br /> acompanha
-            <br /> sua carreira?
+        <div className="flex flex-col gap-6">
+          <h2 className="max-w-[332px] font-display text-[46px] font-semibold leading-normal text-ink">
+            Seu <span className="text-brand-line">inglês</span> acompanha sua carreira?
           </h2>
-          <p className="reveal mt-5 max-w-md text-base text-body" style={{ '--reveal-delay': '120ms' }}>
+          <p className="font-sans text-[18px] font-normal leading-normal text-body">
             Se você se identifica com alguma dessas situações, talvez seja hora de dar um novo passo na sua carreira.
           </p>
-          <a href="#lista" className="btn-brand reveal mt-8" style={{ '--reveal-delay': '220ms' }}>
+
+          <a href="#lista" className="btn-brand w-[300px]">
             Lista de espera
-            <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
+            <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
           </a>
         </div>
 
