@@ -35,7 +35,7 @@ export default function Personas() {
           Feito para profissionais e estudantes da reprodução humana
         </h2>
         <p className="reveal mt-4 text-base text-body" style={{ '--reveal-delay': '120ms' }}>
-          Se você se identifica com algum desses perfis, o <span className="font-semibold text-brand">Beyond The Lab</span> foi pensado para você
+          Se você se identifica com algum desses perfis, o <span className="font-semibold text-grad">Beyond The Lab</span> foi pensado para você
         </p>
 
         <div className="mt-12 grid gap-6 text-left sm:grid-cols-2 lg:grid-cols-4">

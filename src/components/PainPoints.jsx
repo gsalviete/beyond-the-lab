@@ -24,7 +24,7 @@ export default function PainPoints() {
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
         <div>
           <h2 className="reveal font-display text-[1.75rem] font-bold leading-tight text-ink md:text-[2.2rem]">
-            Seu <span className="text-brand">inglês</span>
+            Seu <span className="text-grad">inglês</span>
             <br /> acompanha
             <br /> sua carreira?
           </h2>

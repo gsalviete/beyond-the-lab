@@ -26,7 +26,7 @@ export default function Skills() {
       <Cell className="pointer-events-none absolute bottom-16 right-1/4 h-12 w-12 opacity-70" />
       <div className="container-page relative text-center">
         <h2 className="reveal font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
-          Habilidades para a sua <span className="text-brand">rotina real</span>
+          Habilidades para a sua <span className="text-grad">rotina real</span>
         </h2>
 
         <div className="mt-12 grid gap-6 text-left md:grid-cols-3">

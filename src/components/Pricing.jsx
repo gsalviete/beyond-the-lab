@@ -33,11 +33,11 @@ export default function Pricing() {
                 stroke="#FFCBDB"
                 strokeWidth={2.4}
               />
-              <span className="reveal inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-brand shadow-soft">
-                <span className="h-2 w-2 rounded-full bg-brand" /> Beyond The Lab
+              <span className="reveal inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-semibold shadow-soft">
+                <span className="h-2 w-2 rounded-full bg-brand" /> <span className="text-grad">Beyond The Lab</span>
               </span>
               <h2 className="reveal mt-5 font-display text-[1.7rem] font-bold leading-tight text-ink md:text-[2.1rem]" style={{ '--reveal-delay': '90ms' }}>
-                O curso completo pra <span className="text-brand">transformar seu inglês.</span>
+                O curso completo pra <span className="text-grad">transformar seu inglês.</span>
               </h2>
               <p className="reveal mt-4 max-w-md text-base text-body" style={{ '--reveal-delay': '170ms' }}>
                 Turmas, aulas ao vivo e materiais práticos pra estudar, praticar e evoluir do início ao fim.
@@ -62,17 +62,14 @@ export default function Pricing() {
               {/* offset ghost card behind (as in Figma) */}
               <div className="pointer-events-none absolute -bottom-10 -right-6 hidden h-full w-full rounded-[26px] bg-rose-100/70 md:block" />
               <div
-                className="reveal-scale relative overflow-hidden rounded-[26px] p-8 shadow-pill"
-                style={{
-                  '--reveal-delay': '150ms',
-                  background: 'linear-gradient(172deg, #FFF7FA 0%, #FFD9E5 26%, #FC7BA4 58%, #F35684 100%)',
-                }}
+                className="reveal-scale relative overflow-hidden rounded-[26px] bg-price-grad p-8 shadow-pill"
+                style={{ '--reveal-delay': '150ms' }}
               >
                 <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/25" />
                 <div className="pointer-events-none absolute -bottom-12 -left-8 h-44 w-44 rounded-full bg-white/10" />
                 <div className="relative z-10">
                   <div className="flex items-end gap-2">
-                    <span className="font-display text-5xl font-extrabold text-brand-deep md:text-6xl">R$ 299,99</span>
+                    <span className="text-grad font-display text-5xl font-extrabold md:text-6xl">R$ 299,99</span>
                     <span className="pb-2 text-sm font-medium text-body/70">por mês</span>
                   </div>
 
@@ -85,8 +82,8 @@ export default function Pricing() {
                   </a>
 
                   <div className="mt-5 flex flex-wrap gap-3">
-                    <span className="rounded-full bg-white/85 px-4 py-1.5 text-sm font-semibold text-brand">6 Meses</span>
-                    <span className="rounded-full bg-white/85 px-4 py-1.5 text-sm font-semibold text-brand">Passo a passo prático</span>
+                    <span className="rounded-full bg-white/85 px-4 py-1.5 text-sm font-semibold"><span className="text-grad">6 Meses</span></span>
+                    <span className="rounded-full bg-white/85 px-4 py-1.5 text-sm font-semibold"><span className="text-grad">Passo a passo prático</span></span>
                   </div>
 
                   <div className="mt-8 grid grid-cols-3 gap-3 border-t border-white/40 pt-6">

@@ -35,7 +35,7 @@ export default function FinalCta() {
             id="spermCta2"
           />
           <div className="relative">
-            <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-brand">Vagas limitadas</p>
+            <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Vagas limitadas</p>
             <h2 className="reveal mx-auto mt-4 max-w-2xl font-display text-[1.9rem] font-bold leading-tight text-ink md:text-[2.4rem]" style={{ '--reveal-delay': '100ms' }}>
               Prepare-se para crescer em um mercado cada vez mais global.
             </h2>
