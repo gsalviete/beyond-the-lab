@@ -36,13 +36,18 @@
            hover:-translate-y-0.5 hover:shadow-[0_18px_38px_-10px_rgba(247,88,131,0.45)]
            active:translate-y-0 active:scale-[.98];
   }
-  .btn-brand::after {
+  /* brilho diagonal reutilizável — dispara no próprio hover ou no hover do .group pai */
+  .shine { @apply relative overflow-hidden; }
+  .btn-brand::after,
+  .shine::after {
     content: '';
     @apply pointer-events-none absolute inset-0 -translate-x-[130%];
     background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%);
     transition: transform 0.7s ease;
   }
-  .btn-brand:hover::after { transform: translateX(130%); }
+  .btn-brand:hover::after,
+  .shine:hover::after,
+  .group:hover .shine::after { transform: translateX(130%); }
 
   /* variante do header — Figma: 190x41, sem sombra */
   .btn-brand-sm {

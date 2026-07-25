@@ -9,19 +9,12 @@ const cards = [
 
 export default function PainPoints() {
   return (
-    <section id="pain-points" className="relative overflow-hidden bg-rose-grad py-20">
-      {/* subtle grid across the whole band */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-60"
-        style={{
-          backgroundImage:
-            'linear-gradient(#ffffff66 1px, transparent 1px), linear-gradient(90deg, #ffffff66 1px, transparent 1px)',
-          backgroundSize: '46px 46px',
-        }}
-      />
-      {/* soft highlight */}
-      <div className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-white/40 blur-3xl" />
-
+    <section
+        id="pain-points"
+        className="relative overflow-hidden bg-cover bg-center bg-no-repeat py-20"
+        style={{ backgroundImage: "url('/assets/painpoints-bg.png')" }}
+      >
+      
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
         <div className="flex flex-col gap-6">
           <h2 className="max-w-[332px] font-display text-[46px] font-semibold leading-normal text-ink">
@@ -50,7 +43,7 @@ export default function PainPoints() {
               >
                 {c.n}
               </span>
-              <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-grad text-white shadow-pill transition-transform duration-300 group-hover:scale-110">
+              <span className="shine grid h-11 w-11 place-items-center rounded-xl bg-brand-grad text-white shadow-pill transition-transform duration-300 group-hover:scale-110">
                 <FileText className="h-5 w-5" />
               </span>
               <p className="mt-8 max-w-[15rem] font-medium leading-snug text-ink">{c.text}</p>
