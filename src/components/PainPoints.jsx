@@ -9,7 +9,7 @@ const cards = [
 
 export default function PainPoints() {
   return (
-    <section className="relative overflow-hidden bg-rose-grad py-20">
+    <section id="pain-points" className="relative overflow-hidden bg-rose-grad py-20">
       {/* subtle grid across the whole band */}
       <div
         className="pointer-events-none absolute inset-0 opacity-60"

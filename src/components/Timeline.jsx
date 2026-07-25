@@ -10,7 +10,7 @@ const steps = [
 
 export default function Timeline() {
   return (
-    <section className="py-16">
+    <section id="timeline" className="py-16">
       <div className="container-page text-center">
         <h2 className="reveal font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
           Do cadastro a <span className="text-grad">primeira aula</span>
