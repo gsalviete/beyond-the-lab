@@ -13,7 +13,7 @@ export default function Timeline() {
     <section className="py-16">
       <div className="container-page text-center">
         <h2 className="reveal font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
-          Do cadastro a <span className="text-brand">primeira aula</span>
+          Do cadastro a <span className="text-grad">primeira aula</span>
         </h2>
         <p className="reveal mx-auto mt-4 max-w-lg text-base text-body" style={{ '--reveal-delay': '110ms' }}>
           Um processo simples e transparente, pensado para formar turmas coesas e no nível certo.
@@ -40,7 +40,7 @@ export default function Timeline() {
                     <Icon className="h-5 w-5" />
                   </span>
                   <span className="mt-5 text-xs font-bold tracking-wide text-ink">{s.etapa}</span>
-                  <h3 className="mt-1 whitespace-nowrap font-display text-[15px] font-semibold leading-snug text-brand md:text-base lg:whitespace-nowrap">
+                  <h3 className="mt-1 whitespace-nowrap font-display text-[15px] font-semibold leading-snug text-grad md:text-base lg:whitespace-nowrap">
                     {s.title}
                   </h3>
                   <p className="mt-1.5 max-w-[13rem] text-sm text-body">{s.text}</p>

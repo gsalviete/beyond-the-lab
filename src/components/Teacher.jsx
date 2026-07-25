@@ -71,9 +71,9 @@ export default function Teacher() {
       </div>
       <div className="container-page relative">
         <div className="text-center">
-          <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-brand">Sobre a professora</p>
+          <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Sobre a professora</p>
           <h2 className="reveal mt-3 font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]" style={{ '--reveal-delay': '90ms' }}>
-            Quem ensina <span className="text-brand">entende seu cenário</span>
+            Quem ensina <span className="text-grad">entende seu cenário</span>
           </h2>
         </div>
 
