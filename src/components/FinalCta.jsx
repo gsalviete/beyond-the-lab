@@ -1,5 +1,4 @@
 import { ArrowUpRight } from './Icons.jsx'
-import { Sperm, RingDot } from './Decor.jsx'
 
 export default function FinalCta() {
   return (
@@ -15,25 +14,12 @@ export default function FinalCta() {
               backgroundSize: '46px 46px',
             }}
           />
-          {/* big ovum on the right with a small white sperm swimming toward it */}
+          {/* big ovum on the right */}
           <div className="pointer-events-none absolute -right-24 top-1/2 h-[420px] w-[420px] -translate-y-1/2">
             <div className="animate-ring absolute inset-0 rounded-full bg-brand-light/30" />
             <div className="absolute inset-10 rounded-full border-[22px] border-white/40" />
             <div className="absolute inset-28 rounded-full bg-white/25" />
-            <Sperm
-              className="animate-swim absolute -left-16 top-8 h-28 w-28 -scale-x-100"
-              gradFrom="#FFFFFF"
-              gradTo="#FFE3EC"
-              id="spermCta"
-            />
           </div>
-          {/* small line-art accents */}
-          <RingDot className="pointer-events-none absolute left-14 top-10 h-12 w-12 opacity-80" />
-          <RingDot className="pointer-events-none absolute bottom-10 right-1/3 h-8 w-8 opacity-60" />
-          <Sperm
-            className="pointer-events-none absolute -left-8 bottom-0 h-24 w-24 rotate-[165deg] opacity-90"
-            id="spermCta2"
-          />
           <div className="relative">
             <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Vagas limitadas</p>
             <h2 className="reveal mx-auto mt-4 max-w-2xl font-display text-[1.9rem] font-bold leading-tight text-ink md:text-[2.4rem]" style={{ '--reveal-delay': '100ms' }}>
