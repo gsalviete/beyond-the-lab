@@ -14,6 +14,8 @@ export default {
           line: '#FF5986',      // borda do card (Figma)
         },
         cobalt: '#114883',
+        'decor-blue': '#115CA4',   // line-art decorativo (microscópio) — SPEC §1
+        'border-soft': '#E8E3E3',  // selection colors de Personas — SPEC §1
         rose: {
           50: '#FFF5F8',
           100: '#FFE8EF',

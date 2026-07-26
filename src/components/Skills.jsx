@@ -16,16 +16,12 @@ const skills = [
   },
 ]
 
-import { Microscope, Cell, Bubble } from './Decor.jsx'
-
 export default function Skills() {
   return (
     <section id="como-funciona" className="relative overflow-hidden py-16">
-      <Bubble className="pointer-events-none absolute right-6 top-2 hidden h-40 w-48 lg:block" strokeWidth={9} />
-      <Microscope className="pointer-events-none absolute bottom-10 left-6 h-24 w-24" />
-      <Cell className="pointer-events-none absolute bottom-16 right-1/4 h-12 w-12 opacity-70" />
       <div className="container-page relative text-center">
-        <h2 className="reveal font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
+        {/* ⚠️ DERIVADO do token de Personas — validar no Dev Mode */}
+        <h2 className="reveal w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink">
           Habilidades para a sua <span className="text-grad">rotina real</span>
         </h2>
 

@@ -1,4 +1,4 @@
-import { Microscope } from './icons.jsx'
+import { Microscope } from './Icons.jsx'
 
 const personas = [
   {
@@ -34,9 +34,9 @@ export default function Personas() {
           estudantes da reprodução humana
         </h2>
 
-        {/* Subtítulo — Geist 18/400, line-height normal, #345372 */}
+        {/* Subtítulo — Geist 18/400, line-height normal, body */}
         <p
-          className="reveal w-full text-center font-display text-[18px] font-normal leading-[normal] text-[#345372]"
+          className="reveal w-full text-center font-display text-[18px] font-normal leading-[normal] text-body"
           style={{ '--reveal-delay': '120ms' }}
         >
           Se você se identifica com algum desses perfis, o{' '}
@@ -45,17 +45,15 @@ export default function Personas() {
 
         {/* wrapper de ancoragem: microscópio preso à fileira de cards */}
         <div className="relative w-full">
-          {/* Microscópio — 536×759, #115CA4, opacity 0.15 embutida no path
+          {/* Microscópio — 536×759, decor-blue, opacity 0.15 embutida no path
               ⚠️ left/top DERIVADOS por medição no print (escala 1.045×) */}
           <div
-  aria-hidden="true"
-  className="pointer-events-none absolute select-none"
-  style={{ left: '823.5px', top: '-182px', width: '536px', height: '759px' }}
-></div>
-          <Microscope
+            aria-hidden="true"
             className="pointer-events-none absolute select-none"
-            style={{ left: '823.5px', top: '-182px' }}
-          />
+            style={{ left: '823.5px', top: '-182px', width: '536px', height: '759px' }}
+          >
+            <Microscope />
+          </div>
 
           <div className="relative z-10 grid w-full gap-6 text-left sm:grid-cols-2 lg:grid-cols-4">
             {personas.map((p, i) => (

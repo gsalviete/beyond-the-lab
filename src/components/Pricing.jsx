@@ -1,5 +1,4 @@
 import { ArrowUpRight, ChevronRight, Shield, Trophy, Lock } from './Icons.jsx'
-import { Dna } from './Decor.jsx'
 
 const features = [
   'Turmas reduzidas, com aulas ao vivo',
@@ -27,12 +26,6 @@ export default function Pricing() {
           <div className="grid items-center gap-10 lg:grid-cols-2">
             {/* left */}
             <div className="relative">
-              {/* DNA helix behind the feature list (as in Figma) */}
-              <Dna
-                className="pointer-events-none absolute -left-6 top-40 hidden h-[430px] w-24 md:block"
-                stroke="#FFCBDB"
-                strokeWidth={2.4}
-              />
               <span className="reveal inline-flex items-center gap-2 rounded-full bg-white px-4 py-1.5 text-sm font-semibold shadow-soft">
                 <span className="h-2 w-2 rounded-full bg-brand" /> <span className="text-grad">Beyond The Lab</span>
               </span>
