@@ -62,14 +62,24 @@ function PhoneVideo() {
 
 export default function Teacher() {
   return (
-    <section id="sobre" className="relative overflow-hidden py-20">
+    <section id="sobre" className="relative py-20">
       {/* faint decorative rings behind the phone */}
-      <div className="pointer-events-none absolute -left-28 bottom-10 h-96 w-96">
-        <div className="animate-ring absolute inset-0 rounded-full border-[3px] border-rose-200/80" />
-        <div className="animate-ring absolute inset-10 rounded-full border-[3px] border-rose-200/60" style={{ animationDelay: '1.2s' }} />
-        <div className="absolute inset-24 rounded-full border-[3px] border-rose-100" />
-      </div>
-      <div className="container-page relative">
+      {/* decor: célula — asset completo do Figma, não rotacionar nem envolver em wrapper */}
+      <img
+        src="/assets/cell.svg"
+        alt=""
+        aria-hidden="true"
+        draggable="false"
+        className="pointer-events-none absolute select-none"
+        style={{
+          width: 439,
+          height: 439,
+
+          left: -13,  /* ⚠️ derivado */
+          top: 505,   /* ⚠️ derivado */
+        }}
+      />
+      <div className="container-page relative z-10">
         <div className="text-center">
           <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Sobre a professora</p>
           {/* H2 — mesma tipografia de Skills: Geist 46/600/normal/ink */}
@@ -94,11 +104,11 @@ export default function Teacher() {
               para encurtar esse caminho, com proximidade, profundidade técnica e um método pensado para gente como você.
             </p>
 
-            <div className="mt-7 flex flex-wrap gap-3">
+            <div className="mt-7 flex flex-wrap" style={{ rowGap: 10, columnGap: 24 /* ⚠️ derivado */ }}>
               {tags.map((t, i) => (
                 <span
                   key={t}
-                  className="reveal rounded-full bg-white px-4 py-2 text-sm font-medium text-body shadow-soft ring-1 ring-ink/5 transition-all duration-300 hover:-translate-y-0.5 hover:text-brand hover:shadow-card hover:ring-brand/30"
+                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[12px] font-medium leading-[16px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
                   style={{ '--reveal-delay': `${120 + i * 70}ms` }}
                 >
                   {t}
