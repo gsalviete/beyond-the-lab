@@ -127,4 +127,9 @@
   .animate-floaty, .animate-drift, .animate-ring, .animate-swim {
     animation: none !important;
   }
+  /* microinterações da timeline */
+  .timeline-step * {
+    transition: none !important;
+    transform: none !important;
+  }
 }

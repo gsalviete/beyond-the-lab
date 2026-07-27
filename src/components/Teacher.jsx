@@ -72,7 +72,11 @@ export default function Teacher() {
       <div className="container-page relative">
         <div className="text-center">
           <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Sobre a professora</p>
-          <h2 className="reveal mt-3 font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]" style={{ '--reveal-delay': '90ms' }}>
+          {/* H2 — mesma tipografia de Skills: Geist 46/600/normal/ink */}
+          <h2
+            className="reveal mt-3 w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink"
+            style={{ '--reveal-delay': '90ms' }}
+          >
             Quem ensina <span className="text-grad">entende seu cenário</span>
           </h2>
         </div>
@@ -83,7 +87,8 @@ export default function Teacher() {
           </div>
 
           <div>
-            <p className="reveal text-base leading-relaxed text-body">
+            {/* Texto — Geist 18/400/normal/body (mesmo padrão de Personas e PainPoints) */}
+            <p className="reveal font-display text-[18px] font-normal leading-[1.6] text-body">
               Idealizado por Giovanna, uma profissional que viveu a rotina do laboratório, participou de congressos
               internacionais e sentiu na pele a diferença que o inglês certo faz na carreira. O Beyond The Lab nasceu
               para encurtar esse caminho, com proximidade, profundidade técnica e um método pensado para gente como você.
