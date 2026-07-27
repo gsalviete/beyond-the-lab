@@ -12,15 +12,21 @@ export default function Timeline() {
   return (
     <section id="timeline" className="py-16">
       <div className="container-page text-center">
-        <h2 className="reveal font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
+        {/* H2 — mesma tipografia de Skills: Geist 46/600/normal/ink */}
+        <h2 className="reveal w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink">
           Do cadastro a <span className="text-grad">primeira aula</span>
         </h2>
-        <p className="reveal mx-auto mt-4 max-w-lg text-base text-body" style={{ '--reveal-delay': '110ms' }}>
+
+        {/* Subtítulo da seção — Geist 18/400/normal/body (igual Personas e PainPoints) */}
+        <p
+          className="reveal mx-auto mt-4 max-w-[640px] font-display text-[18px] font-normal leading-[normal] text-body"
+          style={{ '--reveal-delay': '110ms' }}
+        >
           Um processo simples e transparente, pensado para formar turmas coesas e no nível certo.
         </p>
 
-        <div className="relative mt-16">
-          {/* connecting line */}
+        <div className="timeline-track relative mt-16">
+          {/* linha de conexão + traço que "desenha" no hover da etapa */}
           <div className="absolute left-0 right-0 top-6 hidden h-px bg-gradient-to-r from-transparent via-rose-300 to-transparent md:block" />
           <div className="grid gap-10 md:grid-cols-5">
             {steps.map((s, i) => {
@@ -29,21 +35,40 @@ export default function Timeline() {
               return (
                 <div
                   key={s.etapa}
-                  className="reveal relative flex flex-col items-center text-center"
+                  className="reveal timeline-step group relative flex cursor-default flex-col items-center text-center"
                   style={{ '--reveal-delay': `${i * 120}ms` }}
                 >
+                  {/* segmento da linha que se preenche no hover */}
+                  {i < steps.length - 1 && (
+                    <span className="pointer-events-none absolute left-1/2 right-[-50%] top-6 hidden h-px origin-left scale-x-0 bg-brand-grad transition-transform duration-500 ease-out group-hover:scale-x-100 md:block" />
+                  )}
+
                   <span
-                    className={`relative z-10 grid h-12 w-12 place-items-center rounded-full transition-transform duration-300 hover:scale-110 ${
-                      active ? 'bg-brand-grad text-white shadow-pill' : 'bg-white text-brand ring-1 ring-rose-200'
+                    className={`relative z-10 grid h-12 w-12 place-items-center rounded-full transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:scale-110 group-hover:shadow-[0_14px_28px_-10px_rgba(247,88,131,0.55)] ${
+                      active
+                        ? 'bg-brand-grad text-white shadow-pill'
+                        : 'bg-white text-brand ring-1 ring-rose-200 group-hover:bg-brand-grad group-hover:text-white group-hover:ring-transparent'
                     }`}
                   >
-                    <Icon className="h-5 w-5" />
+                    {/* halo pulsante no hover */}
+                    <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-brand/30 opacity-0 transition-all duration-500 ease-out group-hover:scale-[1.35] group-hover:opacity-100" />
+                    <Icon className="h-5 w-5 transition-transform duration-300 ease-out group-hover:scale-110" />
                   </span>
-                  <span className="mt-5 text-xs font-bold tracking-wide text-ink">{s.etapa}</span>
-                  <h3 className="mt-1 whitespace-nowrap font-display text-[15px] font-semibold leading-snug text-grad md:text-base lg:whitespace-nowrap">
+
+                  {/* ETAPA — Geist 14/600/normal/ink */}
+                  <span className="mt-5 font-display text-[14px] font-semibold leading-[normal] tracking-wide text-ink transition-colors duration-300 group-hover:text-brand">
+                    {s.etapa}
+                  </span>
+
+                  {/* Título — Geist 16/600/normal */}
+                  <h3 className="mt-1 whitespace-nowrap font-display text-[16px] font-semibold leading-[normal] text-grad transition-transform duration-300 ease-out group-hover:-translate-y-0.5">
                     {s.title}
                   </h3>
-                  <p className="mt-1.5 max-w-[13rem] text-sm text-body">{s.text}</p>
+
+                  {/* Descrição — Geist 14/400/normal/ink */}
+                  <p className="mt-1.5 max-w-[13rem] font-display text-[14px] font-normal leading-[normal] text-ink transition-opacity duration-300 group-hover:opacity-100 md:opacity-90">
+                    {s.text}
+                  </p>
                 </div>
               )
             })}
