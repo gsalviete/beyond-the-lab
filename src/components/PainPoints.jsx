@@ -35,7 +35,8 @@ export default function PainPoints() {
             <div
               key={c.n}
               className="reveal card-lift group relative overflow-hidden rounded-2xl bg-white p-6 shadow-card"
-              style={{ '--reveal-delay': `${i * 90}ms` }}
+              /* stagger por linha (2 colunas) — sobem de baixo pra cima, sem varredura lateral */
+              style={{ '--reveal-delay': `${Math.floor(i / 2) * 120}ms` }}
             >
               <span
                 className="pointer-events-none absolute right-4 top-2 select-none font-display text-6xl font-extrabold text-transparent transition-colors duration-300 group-hover:[-webkit-text-stroke-color:#FFB3C8]"

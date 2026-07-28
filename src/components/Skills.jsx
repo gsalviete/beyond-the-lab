@@ -27,11 +27,12 @@ export default function Skills() {
 
         {/* ⚠️ gap entre cards DERIVADO do card de persona (24px) — não medido aqui */}
         <div className="grid w-full gap-6 text-left md:grid-cols-3">
-          {skills.map((s, i) => (
+          {skills.map((s) => (
             <article
               key={s.title}
+              /* linha única no desktop — todos sobem juntos, sem varredura lateral */
               className="reveal card-lift group flex items-center justify-center rounded-2xl border border-border-soft bg-white pb-[30px] pl-[13px] pr-[10px] pt-[6px]"
-              style={{ '--reveal-delay': `${i * 110}ms` }}
+              style={{ '--reveal-delay': '180ms' }}
             >
               {/* ⚠️ gap interno DERIVADO do card de persona (6px) — não medido aqui */}
               <div className="flex w-full flex-col items-start gap-[6px]">

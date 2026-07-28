@@ -17,7 +17,7 @@ export default function Hero() {
         {/* ---------- COLUNA ESQUERDA ---------- */}
         <div>
           {/* Figma: 244 x 28 */}
-          <span className="inline-flex h-7 items-center gap-2 rounded-full bg-white pl-[1px] pr-4
+          <span className="reveal inline-flex h-7 items-center gap-2 rounded-full bg-white pl-[1px] pr-4
                            text-[13.722px] font-normal leading-none tracking-[-0.352px] text-ink
                            shadow-[0_10px_26px_-16px_rgba(2,45,87,0.18)] ring-1 ring-ink/[0.05]">
             {/* Figma: 30x26, radius full, gradiente 180deg, shadow lilás */}
@@ -49,17 +49,20 @@ export default function Hero() {
 
           {/* Figma: flex column, gap 24, width 665 (H1 limitado a 608) */}
           <div className="mt-[26px] flex max-w-[665px] flex-col items-start gap-6">
-            <h1 className="max-w-[608px] font-display text-[46px] font-semibold leading-[55px] text-ink">
+            <h1
+              className="reveal max-w-[608px] font-display text-[46px] font-semibold leading-[55px] text-ink"
+              style={{ '--reveal-delay': '90ms' }}
+            >
               Desenvolva o <span className="text-grad">inglês</span> que te impulsiona no laboratório da{' '}
               <span className="text-grad">Reprodução Humana.</span>
             </h1>
 
-            <p className="text-[16px] leading-6 text-body">
+            <p className="reveal text-[16px] leading-6 text-body" style={{ '--reveal-delay': '180ms' }}>
               Um curso com duração de 6 meses desenvolvido por quem entende o cenário para quem quer estudar,
               pesquisar e atuar com mais segurança em um mercado cada vez mais global.
             </p>
 
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="reveal flex flex-wrap items-center gap-4" style={{ '--reveal-delay': '270ms' }}>
               <a href="#lista" className="btn-brand w-[300px]">
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
@@ -71,8 +74,12 @@ export default function Hero() {
           {/* Figma: uma linha, gap 16, itens 96 / 102 / auto / auto */}
           <ul className="mt-6 flex items-start gap-4 text-[13.722px] font-normal
                          leading-none tracking-[-0.352px] text-body">
-            {perks.map(({ label, w }) => (
-              <li key={label} className={`flex shrink-0 items-center gap-1 ${w}`}>
+            {perks.map(({ label, w }, i) => (
+              <li
+                key={label}
+                className={`reveal flex shrink-0 items-center gap-1 ${w}`}
+                style={{ '--reveal-delay': `${360 + i * 70}ms` }}
+              >
                 <Check className="h-3 w-3 shrink-0 text-cobalt" />
                 <span>{label}</span>
               </li>
@@ -85,8 +92,9 @@ export default function Hero() {
         <div className="relative lg:mt-[41px]">
 
           {/* CARD — Figma: 480 x 656, radius 24, border 0.873px #FF5986 */}
-          <div className="relative h-[560px] w-full overflow-hidden rounded-[24px]
-                          border-[0.873px] border-brand-line bg-white sm:h-[656px]">
+          <div className="reveal-scale relative h-[560px] w-full overflow-hidden rounded-[24px]
+                          border-[0.873px] border-brand-line bg-white sm:h-[656px]"
+               style={{ '--reveal-delay': '150ms' }}>
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#FFEAF1] via-[#FFF6F9] to-white" />
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(130%_70%_at_50%_0%,rgba(255,205,220,0.38)_0%,transparent_65%)]" />
 
@@ -107,8 +115,9 @@ export default function Hero() {
           </div>
 
           {/* BADGE — Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
-          <div className="absolute -top-[52px] -right-[42px] z-30 rounded-2xl bg-badge-grad
-                          py-[13px] pl-4 pr-[37px] text-white">
+          <div className="reveal absolute -top-[52px] -right-[42px] z-30 rounded-2xl bg-badge-grad
+                          py-[13px] pl-4 pr-[37px] text-white"
+               style={{ '--reveal-delay': '480ms' }}>
             <p className="text-[13px] leading-[17px] text-white/80">Primeira turma</p>
             <p className="font-display text-[30px] font-semibold leading-[37px]">Setembro</p>
           </div>
@@ -118,7 +127,7 @@ export default function Hero() {
           <img
             src="/assets/flag.svg"
             alt="Inglês"
-            className="animate-floaty absolute -bottom-[38px] -left-[30px] z-30 w-[80px]"
+            className="animate-floaty absolute -bottom-[38px] -left-[30px] z-30 w-[82px]"
           />
           
           {/* ESPERMATOZOIDE — SVG do Figma, 159 x 152 */}

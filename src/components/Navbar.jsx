@@ -20,7 +20,7 @@ export default function Navbar() {
 
   return (
     <header
-      className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
+      className={`intro-nav fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
         scrolled ? 'bg-white/85 shadow-soft backdrop-blur-md' : 'bg-transparent'
       }`}
     >
