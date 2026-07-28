@@ -69,30 +69,48 @@ export const Lock = ({ className = 'h-5 w-5' }) => (
   </svg>
 )
 
-// Timeline step icons
+// Timeline step icons — Lucide 20×20, stroke 1.58333 (= 1.9 em viewBox 24)
+// Cor via currentColor: o wrapper de cada etapa define text-white ou text-[#F15D89]
 export const Clipboard = ({ className = 'h-5 w-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="7" y="4" width="10" height="16" rx="2" /><path d="M9 4V3h6v1M9 10h6M9 14h4" />
+  <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.58333" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12.4998 1.66797H7.49984C7.0396 1.66797 6.6665 2.04106 6.6665 2.5013V4.16797C6.6665 4.62821 7.0396 5.0013 7.49984 5.0013H12.4998C12.9601 5.0013 13.3332 4.62821 13.3332 4.16797V2.5013C13.3332 2.04106 12.9601 1.66797 12.4998 1.66797Z" />
+    <path d="M13.3335 3.33203H15.0002C15.4422 3.33203 15.8661 3.50763 16.1787 3.82019C16.4912 4.13275 16.6668 4.55667 16.6668 4.9987V16.6654C16.6668 17.1074 16.4912 17.5313 16.1787 17.8439C15.8661 18.1564 15.4422 18.332 15.0002 18.332H5.00016C4.55814 18.332 4.13421 18.1564 3.82165 17.8439C3.50909 17.5313 3.3335 17.1074 3.3335 16.6654V4.9987C3.3335 4.55667 3.50909 4.13275 3.82165 3.82019C4.13421 3.50763 4.55814 3.33203 5.00016 3.33203H6.66683" />
+    <path d="M10 9.16797H13.3333" />
+    <path d="M10 13.332H13.3333" />
+    <path d="M6.6665 9.16797H6.67484" />
+    <path d="M6.6665 13.332H6.67484" />
   </svg>
 )
+
 export const Cap = ({ className = 'h-5 w-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m3 9 9-4 9 4-9 4-9-4Z" /><path d="M7 11v4c0 1 2.5 2.5 5 2.5s5-1.5 5-2.5v-4" />
+  <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.58333" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17.8498 9.10131C17.999 9.0355 18.1256 8.92737 18.2139 8.79032C18.3023 8.65326 18.3485 8.49331 18.3468 8.33026C18.3451 8.16722 18.2956 8.00825 18.2045 7.87305C18.1133 7.73785 17.9845 7.63236 17.834 7.56965L10.6915 4.31631C10.4744 4.21727 10.2385 4.16602 9.99983 4.16602C9.76117 4.16602 9.5253 4.21727 9.30816 4.31631L2.1665 7.56631C2.01814 7.63129 1.89193 7.73809 1.8033 7.87366C1.71468 8.00923 1.66748 8.16768 1.66748 8.32965C1.66748 8.49161 1.71468 8.65007 1.8033 8.78563C1.89193 8.9212 2.01814 9.028 2.1665 9.09298L9.30816 12.3496C9.5253 12.4487 9.76117 12.4999 9.99983 12.4999C10.2385 12.4999 10.4744 12.4487 10.6915 12.3496L17.8498 9.10131Z" />
+    <path d="M18.3335 8.33203V13.332" />
+    <path d="M5 10.418V13.3346C5 13.9977 5.52678 14.6336 6.46447 15.1024C7.40215 15.5712 8.67392 15.8346 10 15.8346C11.3261 15.8346 12.5979 15.5712 13.5355 15.1024C14.4732 14.6336 15 13.9977 15 13.3346V10.418" />
   </svg>
 )
+
 export const Users = ({ className = 'h-5 w-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="9" cy="8" r="3" /><path d="M3 20a6 6 0 0 1 12 0" /><path d="M16 6a3 3 0 0 1 0 6M18 20a6 6 0 0 0-3-5" />
+  <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.58333" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14.9998 17.4987C14.9998 15.7306 14.2975 14.0349 13.0472 12.7847C11.797 11.5344 10.1013 10.832 8.33317 10.832C6.56506 10.832 4.86937 11.5344 3.61913 12.7847C2.36888 14.0349 1.6665 15.7306 1.6665 17.4987" />
+    <path d="M8.33335 10.8333C10.6345 10.8333 12.5 8.96785 12.5 6.66667C12.5 4.36548 10.6345 2.5 8.33335 2.5C6.03217 2.5 4.16669 4.36548 4.16669 6.66667C4.16669 8.96785 6.03217 10.8333 8.33335 10.8333Z" />
+    <path d="M18.3333 16.6654C18.3333 13.857 16.6667 11.2487 15 9.9987C15.5478 9.58767 15.9859 9.04794 16.2755 8.42725C16.565 7.80657 16.6971 7.12409 16.66 6.4402C16.6229 5.75631 16.4178 5.0921 16.0629 4.50636C15.7079 3.92063 15.2141 3.43142 14.625 3.08203" />
   </svg>
 )
+
 export const Rocket = ({ className = 'h-5 w-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 15c-1 1-1.5 4-1.5 4s3-.5 4-1.5" /><path d="M9 15a15 15 0 0 1 8-11c3 0 4 1 4 4a15 15 0 0 1-11 8Z" /><circle cx="15" cy="9" r="1.6" />
+  <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.58333" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 12.4987V16.6654C10 16.6654 12.525 16.207 13.3333 14.9987C14.2333 13.6487 13.3333 10.832 13.3333 10.832" />
+    <path d="M2.08331 17.9167C2.08331 17.9167 2.49998 14.8 3.74998 13.75C4.09238 13.4615 4.52928 13.3095 4.97683 13.3234C5.42439 13.3372 5.85107 13.5159 6.17498 13.825C6.83331 14.475 6.84165 15.55 6.24998 16.25C5.19998 17.5 2.08331 17.9167 2.08331 17.9167Z" />
+    <path d="M7.5 9.99956C7.94345 8.84908 8.50184 7.74627 9.16667 6.70789C10.1377 5.15538 11.4897 3.8771 13.0942 2.99463C14.6986 2.11217 16.5022 1.65486 18.3333 1.66622C18.3333 3.93289 17.6833 7.91622 13.3333 10.8329C12.2806 11.4982 11.1639 12.0566 10 12.4996L7.5 9.99956Z" />
+    <path d="M7.49998 9.99991H3.33331C3.33331 9.99991 3.79165 7.47491 4.99998 6.66658C6.34998 5.76658 9.16665 6.70824 9.16665 6.70824" />
   </svg>
 )
+
 export const TrendUp = ({ className = 'h-5 w-5' }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m3 17 6-6 4 4 8-8" /><path d="M17 7h4v4" />
+  <svg className={className} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.58333" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M13.3335 5.83203H18.3335V10.832" />
+    <path d="M18.3332 5.83203L11.2498 12.9154L7.08317 8.7487L1.6665 14.1654" />
   </svg>
 )
 
