@@ -15,6 +15,10 @@ export default function App() {
   // Scroll-reveal: observe every .reveal / .reveal-scale element once.
   useEffect(() => {
     const els = document.querySelectorAll('.reveal, .reveal-scale')
+    if (!('IntersectionObserver' in window)) {
+      els.forEach((el) => el.classList.add('in-view'))
+      return
+    }
     const io = new IntersectionObserver(
       (entries) => {
         entries.forEach((e) => {

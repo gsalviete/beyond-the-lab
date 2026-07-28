@@ -3,6 +3,9 @@ import { ArrowUpRight, Play } from './Icons.jsx'
 
 const tags = ['Experiência internacional', 'Especialista em Reprodução Humana', 'Vivência prática', 'Mercado internacional']
 
+// Geometria lida direto do SVG — nada estimado
+const SCREEN = { left: 13, top: 8, width: 317, height: 626, radius: 16 }
+
 function PhoneVideo() {
   const ref = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -10,52 +13,52 @@ function PhoneVideo() {
   const toggle = () => {
     const v = ref.current
     if (!v) return
-    if (v.paused) {
-      v.muted = false
-      v.play()
-      setPlaying(true)
-    } else {
-      v.pause()
-      setPlaying(false)
-    }
+    if (v.paused) { v.muted = false; v.play(); setPlaying(true) }
+    else { v.pause(); setPlaying(false) }
   }
 
   return (
-    <div className="relative mx-auto w-[290px] max-w-full">
-      {/* phone frame */}
-      <div className="relative aspect-[9/19.2] rounded-[44px] bg-gradient-to-b from-[#3a3542] to-[#241f2b] p-[7px] shadow-[0_30px_60px_-20px_rgba(2,45,87,0.45)] ring-1 ring-black/40">
-        {/* side buttons */}
-        <span className="absolute -left-[2.5px] top-[110px] h-9 w-[3px] rounded-l bg-[#2a2531]" />
-        <span className="absolute -left-[2.5px] top-[158px] h-14 w-[3px] rounded-l bg-[#2a2531]" />
-        <span className="absolute -right-[2.5px] top-[130px] h-16 w-[3px] rounded-r bg-[#2a2531]" />
-        <div className="relative h-full w-full overflow-hidden rounded-[37px] bg-black">
-          <video
-            ref={ref}
-            className="h-full w-full cursor-pointer object-cover"
-            src="/assets/teacher.mp4"
-            poster="/assets/teacher_poster.png"
-            playsInline
-            loop
-            preload="metadata"
-            onClick={toggle}
-            onEnded={() => setPlaying(false)}
-          />
-          {/* dynamic island */}
-          <div className="absolute left-1/2 top-2.5 h-[22px] w-[88px] -translate-x-1/2 rounded-full bg-black" />
-          {/* play overlay */}
-          {!playing && (
-            <button
-              onClick={toggle}
-              aria-label="Reproduzir vídeo"
-              className="absolute left-1/2 top-1/2 grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-ink shadow-[0_10px_30px_-8px_rgba(0,0,0,0.45)] transition-all duration-300 hover:scale-110 hover:text-brand"
-            >
-              <Play className="h-6 w-6 translate-x-0.5" />
-            </button>
-          )}
-        </div>
-      </div>
-      {/* soft glow under the phone */}
-      <div className="pointer-events-none absolute -bottom-6 left-1/2 h-10 w-3/4 -translate-x-1/2 rounded-full bg-ink/20 blur-2xl" />
+    /* ⚠️ 343×642 é o tamanho natural do SVG — confirmar o tamanho do nó no Dev Mode */
+    <div className="relative mx-auto" style={{ width: 343, height: 642 }}>
+      {/* moldura vetorial */}
+      <img
+        src="/assets/phone-frame.svg"
+        alt=""
+        aria-hidden="true"
+        draggable="false"
+        className="pointer-events-none absolute inset-0 select-none"
+        style={{ width: 343, height: 642 }}
+      />
+
+      {/* vídeo por cima (o rect da tela no SVG é branco opaco) */}
+      <video
+        ref={ref}
+        className="absolute cursor-pointer object-cover"
+        src="/assets/teacher.mp4"
+        playsInline
+        loop
+        preload="metadata"
+        onClick={toggle}
+        onEnded={() => setPlaying(false)}
+        style={{
+          left: SCREEN.left,
+          top: SCREEN.top,
+          width: SCREEN.width,
+          height: SCREEN.height,
+          borderRadius: SCREEN.radius,
+        }}
+      />
+
+      {!playing && (
+        <button
+          onClick={toggle}
+          aria-label="Reproduzir vídeo"
+          className="absolute grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#2B2A35] text-white transition-all duration-300 hover:scale-110"
+          style={{ left: SCREEN.left + SCREEN.width / 2, top: SCREEN.top + SCREEN.height / 2 }}
+        >
+          <Play className="h-3.5 w-3.5 translate-x-px" />
+        </button>
+      )}
     </div>
   )
 }
@@ -108,7 +111,8 @@ export default function Teacher() {
               {tags.map((t, i) => (
                 <span
                   key={t}
-                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[12px] font-medium leading-[16px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
+                  /* ⚠️ font-size 14 / leading 19 — desvio do Dev Mode (12/16), pedido manual */
+                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[14px] font-medium leading-[19px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
                   style={{ '--reveal-delay': `${120 + i * 70}ms` }}
                 >
                   {t}
@@ -116,9 +120,9 @@ export default function Teacher() {
               ))}
             </div>
 
-            <a href="#lista" className="btn-brand reveal mt-8" style={{ '--reveal-delay': '420ms' }}>
+            <a href="#lista" className="btn-brand reveal mt-8 w-[300px]" style={{ '--reveal-delay': '420ms' }}>
               Lista de espera
-              <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
+              <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
             </a>
           </div>
         </div>
