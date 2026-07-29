@@ -9,6 +9,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" rel="stylesheet">
+    <script>
+      // Habilita o estado inicial do scroll-reveal antes do primeiro paint.
+      // Sem JS (ou sem IntersectionObserver) a classe nunca entra e o
+      // conteúdo permanece visível — o reveal é progressive enhancement.
+      if ('IntersectionObserver' in window) {
+        document.documentElement.classList.add('js-reveal')
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

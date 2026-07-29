@@ -44,14 +44,14 @@ export default function Timeline() {
                   )}
 
                   <span
-                    className={`relative z-10 grid h-12 w-12 place-items-center rounded-full transition-all duration-300 ease-out group-hover:-translate-y-1 group-hover:scale-110 group-hover:shadow-[0_14px_28px_-10px_rgba(247,88,131,0.55)] ${
+                    className={`relative z-10 grid h-12 w-12 place-items-center rounded-full [transition:transform_var(--motion-short)_var(--ease-out),box-shadow_var(--motion-short)_var(--ease-out),background-color_var(--motion-short)_var(--ease-out),color_var(--motion-short)_var(--ease-out)] group-hover:-translate-y-1 group-hover:scale-[1.08] group-hover:shadow-[0_14px_28px_-10px_rgba(247,88,131,0.55)] ${
                       active
                         ? 'bg-brand-grad text-white shadow-pill'
                         : 'bg-white text-brand ring-1 ring-rose-200 group-hover:bg-brand-grad group-hover:text-white group-hover:ring-transparent'
                     }`}
                   >
                     {/* halo pulsante no hover */}
-                    <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-brand/30 opacity-0 transition-all duration-500 ease-out group-hover:scale-[1.35] group-hover:opacity-100" />
+                    <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-brand/30 opacity-0 [transition:transform_var(--motion-medium)_var(--ease-out),opacity_var(--motion-medium)_var(--ease-out)] group-hover:scale-[1.35] group-hover:opacity-100" />
                     <Icon className="h-5 w-5 transition-transform duration-300 ease-out group-hover:scale-110" />
                   </span>
 

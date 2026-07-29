@@ -2,9 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   MOTION TOKENS
+   Durações, distâncias e curvas centralizadas. Qualquer
+   microinteração da página deve consumir estas variáveis —
+   nunca valores soltos.
+   ============================================================ */
+:root {
+  /* durações */
+  --motion-fast: 160ms;
+  --motion-short: 250ms;
+  --motion-medium: 500ms;
+  --motion-card: 600ms;
+  --motion-slow: 700ms;
+  --motion-hero: 760ms;
+  --motion-surface-opacity: 700ms;
+  --motion-surface-scale: 900ms;
+
+  /* distâncias */
+  --motion-rise: 12px;
+  --motion-rise-card: 18px;
+  --motion-rise-hero: 30px;
+  --motion-blur: 3px;
+  --motion-hero-blur: 6px;
+
+  /* stagger */
+  --stagger-delay: 70ms;
+
+  /* curvas */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-editorial: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-scale: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* foco */
+  --focus-color: #F75883;
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
+    /* navbar fixa: âncoras não podem parar embaixo do header */
+    scroll-padding-top: 96px;
   }
   body {
     @apply font-sans text-body antialiased;
@@ -12,6 +50,16 @@
   }
   h1, h2, h3, h4 {
     @apply font-display text-ink;
+  }
+
+  /* foco de teclado visível em todo controle interativo */
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--focus-color);
+    outline-offset: 4px;
+    border-radius: 4px;
   }
 }
 
@@ -32,10 +80,14 @@
   .btn-brand {
     @apply relative inline-flex h-[60px] items-center justify-center gap-2 overflow-hidden
            rounded-[80px] border-2 border-white/30 bg-brand-grad px-6
-           font-display text-[20px] font-semibold text-white transition-all duration-300
-           hover:-translate-y-0.5 hover:shadow-[0_18px_38px_-10px_rgba(247,88,131,0.45)]
+           font-display text-[20px] font-semibold text-white
            active:translate-y-0 active:scale-[.98];
+    transition:
+      transform var(--motion-short) var(--ease-out),
+      box-shadow var(--motion-short) var(--ease-out),
+      filter var(--motion-short) var(--ease-out);
   }
+
   /* brilho diagonal reutilizável — dispara no próprio hover ou no hover do .group pai */
   .shine { @apply relative overflow-hidden; }
   .btn-brand::after,
@@ -43,61 +95,163 @@
     content: '';
     @apply pointer-events-none absolute inset-0 -translate-x-[130%];
     background: linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.45) 50%, transparent 70%);
-    transition: transform 0.7s ease;
+    transition: transform var(--motion-slow) ease;
   }
-  .btn-brand:hover::after,
-  .shine:hover::after,
-  .group:hover .shine::after { transform: translateX(130%); }
 
   /* variante do header — Figma: 190x41, sem sombra */
   .btn-brand-sm {
-  @apply inline-flex h-[41px] w-[190px] shrink-0 items-center justify-center gap-2
-         whitespace-nowrap rounded-[80px] border-2 border-white/30 bg-brand-grad px-3
-         font-sans text-[18px] font-semibold leading-[19.2px] tracking-[-0.8px] text-[#FCFCFC]
-         transition-all duration-300
-         hover:-translate-y-0.5 active:translate-y-0 active:scale-[.98];
+    @apply inline-flex h-[41px] w-[190px] shrink-0 items-center justify-center gap-2
+           whitespace-nowrap rounded-[80px] border-2 border-white/30 bg-brand-grad px-3
+           font-sans text-[18px] font-semibold leading-[19.2px] tracking-[-0.8px] text-[#FCFCFC]
+           active:translate-y-0 active:scale-[.98];
+    transition:
+      transform var(--motion-short) var(--ease-out),
+      box-shadow var(--motion-short) var(--ease-out),
+      filter var(--motion-short) var(--ease-out);
   }
 
   .btn-outline {
     @apply inline-flex h-[60px] items-center justify-center rounded-[80px] border-2 border-brand/40
            bg-white px-[30px] font-display text-[20px] font-semibold text-brand
-           transition-all duration-300
-           hover:-translate-y-0.5 hover:border-brand hover:shadow-soft active:translate-y-0;
+           active:translate-y-0 active:scale-[.98];
+    transition:
+      transform var(--motion-short) var(--ease-out),
+      border-color var(--motion-short) var(--ease-out),
+      box-shadow var(--motion-short) var(--ease-out);
   }
 
   .arrow-badge {
-    @apply grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/25
-           transition-transform duration-300;
+    @apply grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/25;
+    transition:
+      transform var(--motion-short) var(--ease-out),
+      background-color var(--motion-short) var(--ease-out);
   }
   .btn-brand-sm .arrow-badge { @apply h-6 w-6; }
-  .btn-brand:hover .arrow-badge { transform: translate(2px, -2px); }
 
   .card-lift {
-    @apply transition-all duration-300 ease-out hover:-translate-y-1.5
-           hover:shadow-[0_28px_55px_-22px_rgba(2,45,87,0.28)];
+    transition:
+      transform var(--motion-short) var(--ease-out),
+      box-shadow var(--motion-short) var(--ease-out);
   }
 }
 
-/* ---------- reveal: entrada de página + scroll ---------- */
-.reveal,
-.reveal-scale {
+/* ------------------------------------------------------------
+   HOVER — só em ponteiro fino de verdade.
+   Em touch o hover "gruda" depois do toque; ali vale o :active.
+   ------------------------------------------------------------ */
+@media (hover: hover) and (pointer: fine) {
+  .btn-brand:hover,
+  .btn-brand:focus-visible {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 38px -10px rgba(247, 88, 131, 0.45);
+  }
+  .btn-brand-sm:hover,
+  .btn-brand-sm:focus-visible {
+    transform: translateY(-2px);
+  }
+  .btn-outline:hover,
+  .btn-outline:focus-visible {
+    transform: translateY(-2px);
+    border-color: #F75883;
+    box-shadow: 0 12px 30px -18px rgba(2, 45, 87, 0.15);
+  }
+
+  /* seta aponta pra frente/cima — reforça "avançar" */
+  .btn-brand:hover .arrow-badge,
+  .btn-brand:focus-visible .arrow-badge,
+  .btn-brand-sm:hover .arrow-badge,
+  .btn-brand-sm:focus-visible .arrow-badge {
+    transform: translate(3px, -3px);
+    background-color: rgb(255 255 255 / 0.4);
+  }
+
+  .btn-brand:hover::after,
+  .btn-brand:focus-visible::after,
+  .shine:hover::after,
+  .group:hover .shine::after { transform: translateX(130%); }
+
+  .card-lift:hover,
+  .card-lift:focus-within {
+    transform: translateY(-6px);
+    box-shadow: 0 28px 55px -22px rgba(2, 45, 87, 0.28);
+  }
+}
+
+/* ============================================================
+   SCROLL REVEAL
+   O estado inicial só é aplicado quando o JS confirma suporte
+   (html.js-reveal). Sem JS, nada fica invisível.
+   ============================================================ */
+.js-reveal .reveal,
+.js-reveal .reveal-card,
+.js-reveal .reveal-hero,
+.js-reveal .reveal-soft,
+.js-reveal .hero-surface {
   opacity: 0;
-  transition:
-    opacity 700ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
   transition-delay: var(--reveal-delay, 0ms);
   will-change: opacity, transform;
 }
-.reveal {
-  transform: translateY(28px);
+
+/* padrão — textos, títulos de seção, blocos editoriais */
+.js-reveal .reveal {
+  transform: translateY(var(--motion-rise));
+  filter: blur(var(--motion-blur));
+  transition-property: opacity, transform, filter;
+  transition-duration: var(--motion-medium);
+  transition-timing-function: var(--ease-out);
 }
-.reveal-scale {
-  transform: translateY(28px) scale(0.96);
+
+/* cards em grid — sobem um pouco mais, com escala mínima e sem blur */
+.js-reveal .reveal-card {
+  transform: translateY(var(--motion-rise-card)) scale(0.985);
+  transition-property: opacity, transform;
+  transition-duration: var(--motion-card);
+  transition-timing-function: var(--ease-out);
 }
-.reveal.in-view,
-.reveal-scale.in-view {
+
+/* primeira dobra — curso mais longo e blur mais presente */
+.js-reveal .reveal-hero {
+  transform: translateY(var(--motion-rise-hero));
+  filter: blur(var(--motion-hero-blur));
+  transition-property: opacity, transform, filter;
+  transition-duration: var(--motion-hero);
+  transition-timing-function: var(--ease-out);
+}
+
+/* blocos contemplativos — entra por escala, não por deslocamento */
+.js-reveal .reveal-soft {
+  transform: translateY(var(--motion-rise)) scale(0.98);
+  filter: blur(var(--motion-blur));
+  transition-property: opacity, transform, filter;
+  transition-duration: 650ms;
+  transition-timing-function: var(--ease-scale);
+}
+
+/* superfície visual do hero — profundidade na entrada, estável no fim */
+.js-reveal .hero-surface {
+  scale: 1.012;
+  transform-origin: center;
+  transition-property: opacity, scale;
+  transition-duration: var(--motion-surface-opacity), var(--motion-surface-scale);
+  transition-timing-function: var(--ease-out), var(--ease-scale);
+}
+
+.js-reveal .reveal.in-view,
+.js-reveal .reveal-card.in-view,
+.js-reveal .reveal-hero.in-view,
+.js-reveal .reveal-soft.in-view {
   opacity: 1;
   transform: none;
+  filter: none;
+}
+.js-reveal .hero-surface.in-view {
+  opacity: 1;
+  scale: 1;
+}
+
+/* liberar a camada de composição depois da entrada */
+.js-reveal .in-view {
+  will-change: auto;
 }
 
 /* entrada da navbar no load (fixed — não pode usar .reveal com o observer) */
@@ -106,7 +260,7 @@
   to   { opacity: 1; transform: none; }
 }
 .intro-nav {
-  animation: introDown 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: introDown var(--motion-slow) var(--ease-out) both;
 }
 
 /* ---------- ambient motion ---------- */
@@ -142,18 +296,78 @@
   transform-origin: 70% 30%;
 }
 
+/* ============================================================
+   FAQ / accordion
+   ============================================================ */
+.faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--motion-short) var(--ease-out),
+    opacity var(--motion-short) var(--ease-out),
+    margin-top var(--motion-short) var(--ease-out),
+    visibility 0s linear var(--motion-short);
+}
+.faq-panel > * {
+  overflow: hidden;
+  min-height: 0;
+}
+.faq-panel[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  margin-top: 12px;
+  transition-delay: 0s;
+}
+.faq-icon {
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.faq-trigger[aria-expanded='true'] .faq-icon {
+  transform: rotate(45deg);
+}
+
+/* ============================================================
+   ACESSIBILIDADE — movimento reduzido
+   ============================================================ */
 @media (prefers-reduced-motion: reduce) {
-  .reveal, .reveal-scale {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  .js-reveal .reveal,
+  .js-reveal .reveal-card,
+  .js-reveal .reveal-hero,
+  .js-reveal .reveal-soft,
+  .js-reveal .hero-surface {
     opacity: 1 !important;
     transform: none !important;
-    transition: none !important;
+    scale: 1 !important;
+    filter: none !important;
+    will-change: auto !important;
   }
-  .intro-nav, .animate-floaty, .animate-drift, .animate-ring, .animate-swim {
+
+  .intro-nav,
+  .animate-floaty,
+  .animate-drift,
+  .animate-ring,
+  .animate-swim {
     animation: none !important;
   }
-  /* microinterações da timeline */
-  .timeline-step * {
+
+  /* o accordion continua funcional, só sem animar */
+  .faq-panel {
     transition: none !important;
-    transform: none !important;
   }
 }

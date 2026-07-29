@@ -59,7 +59,7 @@ export default function Pricing() {
 
           {/* ═══════════ CARD DE PREÇO — left 659 / top 164 ═══════════ */}
           <div
-            className="reveal-scale absolute left-[659px] top-[164px] z-10 flex h-[492px]
+            className="reveal-soft absolute left-[659px] top-[164px] z-10 flex h-[492px]
                        w-[427px] flex-col items-center justify-center gap-8 overflow-hidden
                        rounded-2xl border border-transparent
                        [background-image:linear-gradient(173deg,rgba(255,255,255,0.66)_-1.6%,rgba(255,255,255,0.66)_34.77%,rgba(255,96,139,0.66)_97.92%),linear-gradient(180deg,#FFDDE6_0%,#FF7EA1_50%,#FF8FAE_100%)]
@@ -176,13 +176,14 @@ export default function Pricing() {
               {features.map((f, i) => (
                 <li
                   key={f}
-                  className="reveal flex items-center gap-3"
-                  style={{ '--reveal-delay': `${i * 70}ms` }}
+                  /* stagger curto e limitado — 7 itens em 280ms no total */
+                  className="reveal group flex items-center gap-3 [transition:transform_var(--motion-short)_var(--ease-out)] hover:translate-x-1"
+                  style={{ '--reveal-delay': `${Math.min(i, 4) * 70}ms` }}
                 >
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-brand ring-1 ring-rose-300 transition-transform duration-300 hover:scale-110">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-brand ring-1 ring-rose-300 [transition:transform_var(--motion-short)_var(--ease-out)] group-hover:scale-[1.08]">
                     <ChevronRight className="h-4 w-4" />
                   </span>
-                  <span className="flex-1 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-ink shadow-soft transition-shadow duration-300 hover:shadow-card">
+                  <span className="flex-1 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-ink shadow-soft [transition:box-shadow_var(--motion-short)_var(--ease-out)] group-hover:shadow-card">
                     {f}
                   </span>
                 </li>
