@@ -56,12 +56,12 @@ export default function Personas() {
           </div>
 
           <div className="relative z-10 grid w-full gap-6 text-left sm:grid-cols-2 lg:grid-cols-4">
-            {personas.map((p) => (
+            {personas.map((p, i) => (
               <article
                 key={p.title}
-                /* linha única no desktop — todos sobem juntos, sem varredura lateral */
-                className="reveal card-lift group overflow-hidden rounded-2xl bg-white p-3 shadow-card ring-1 ring-ink/5"
-                style={{ '--reveal-delay': '180ms' }}
+                /* stagger curto: 4 cards em 210ms no total */
+                className="reveal-card card-lift group overflow-hidden rounded-2xl bg-white p-3 shadow-card ring-1 ring-ink/5"
+                style={{ '--reveal-delay': `${i * 70}ms` }}
               >
                 <div className="overflow-hidden rounded-xl">
                   <img

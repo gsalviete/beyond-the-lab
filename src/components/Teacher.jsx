@@ -53,7 +53,7 @@ function PhoneVideo() {
         <button
           onClick={toggle}
           aria-label="Reproduzir vídeo"
-          className="absolute grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#2B2A35] text-white transition-all duration-300 hover:scale-110"
+          className="absolute grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#2B2A35] text-white [transition:transform_var(--motion-short)_var(--ease-out),background-color_var(--motion-short)_var(--ease-out)] hover:scale-[1.08] active:scale-100"
           style={{ left: SCREEN.left + SCREEN.width / 2, top: SCREEN.top + SCREEN.height / 2 }}
         >
           <Play className="h-3.5 w-3.5 translate-x-px" />
@@ -95,7 +95,7 @@ export default function Teacher() {
         </div>
 
         <div className="mt-12 grid items-center gap-12 lg:grid-cols-[0.8fr_1.2fr]">
-          <div className="reveal-scale" style={{ '--reveal-delay': '150ms' }}>
+          <div className="reveal-soft" style={{ '--reveal-delay': '150ms' }}>
             <PhoneVideo />
           </div>
 
@@ -112,7 +112,8 @@ export default function Teacher() {
                 <span
                   key={t}
                   /* ⚠️ font-size 16 / leading 22 — desvio do Dev Mode (12/16), pedido manual */
-                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[16px] font-medium leading-[22px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
+                  /* scale + cor: a tag nunca desloca o layout ao redor */
+                  className="reveal relative inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[16px] font-medium leading-[22px] text-[#345372] [transition:transform_var(--motion-short)_var(--ease-out),border-color_var(--motion-short)_var(--ease-out),color_var(--motion-short)_var(--ease-out)] hover:z-10 hover:scale-[1.06] hover:border-brand/30 hover:text-brand"
                   style={{ '--reveal-delay': `${120 + i * 70}ms` }}
                 >
                   {t}
