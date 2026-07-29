@@ -111,8 +111,8 @@ export default function Teacher() {
               {tags.map((t, i) => (
                 <span
                   key={t}
-                  /* ⚠️ font-size 14 / leading 19 — desvio do Dev Mode (12/16), pedido manual */
-                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[14px] font-medium leading-[19px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
+                  /* ⚠️ font-size 16 / leading 22 — desvio do Dev Mode (12/16), pedido manual */
+                  className="reveal inline-flex items-center gap-2 rounded-full border border-[#E8E3E3] bg-white px-[14px] py-[6px] font-display text-[16px] font-medium leading-[22px] text-[#345372] transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:text-brand"
                   style={{ '--reveal-delay': `${120 + i * 70}ms` }}
                 >
                   {t}
