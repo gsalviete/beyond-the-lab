@@ -37,8 +37,8 @@ export default function Pricing() {
             src={microscope}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute -left-54 -top-32 h-[700px] w-[700px]
-                       max-w-none select-none opacity-[0.4]"
+            className="pointer-events-none absolute -left-61 -top-24 h-[560px] w-[560px]
+           max-w-none select-none opacity-[0.4]"
           />
           <img
             src={dna}
@@ -61,7 +61,11 @@ export default function Pricing() {
           <div
             className="reveal-scale absolute left-[659px] top-[164px] z-10 flex h-[492px]
                        w-[427px] flex-col items-center justify-center gap-8 overflow-hidden
-                       rounded-2xl border border-[#FF8FAE] bg-price-grad px-9 py-6"
+                       rounded-2xl border border-transparent
+                       [background-image:linear-gradient(173deg,rgba(255,255,255,0.66)_-1.6%,rgba(255,255,255,0.66)_34.77%,rgba(255,96,139,0.66)_97.92%),linear-gradient(180deg,#FFDDE6_0%,#FF7EA1_50%,#FF8FAE_100%)]
+                       [background-origin:padding-box,border-box]
+                       [background-clip:padding-box,border-box]
+                       bg-price-grad px-9 py-6"
             style={{ '--reveal-delay': '150ms' }}
           >
             {/* PREÇO */}
@@ -74,7 +78,7 @@ export default function Pricing() {
               </span>
               {/* ⚠️ derivado: ancoragem absoluta — pai sem auto-layout confirmado */}
               <span
-                className="absolute -right-4 bottom-3 whitespace-nowrap text-center
+                className="absolute -right-8 bottom-5 whitespace-nowrap text-center
                            font-display text-[11.803px] font-medium leading-[18.619px]
                            text-[#26020B]"
               >
