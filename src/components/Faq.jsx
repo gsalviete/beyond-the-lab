@@ -58,7 +58,7 @@ export default function Faq() {
   return (
     <section id="faq" className="py-16">
       <div className="container-page">
-        <h2 className="text-center font-display text-[1.75rem] font-bold text-ink md:text-[2.2rem]">
+        <h2 className="text-center font-display text-[36px] md:text-[46px] font-semibold text-ink leading-normal">
           Perguntas frequentes
         </h2>
         <div className="mx-auto mt-12 grid max-w-4xl gap-5 md:grid-cols-2">

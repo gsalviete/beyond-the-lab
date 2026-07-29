@@ -11,11 +11,11 @@ export default {
           light: '#FF7EA1',
           DEFAULT: '#F75883',
           deep: '#FF487A',
-          line: '#FF5986',      // borda do card (Figma)
+          line: '#FF5986',
         },
         cobalt: '#114883',
-        'decor-blue': '#115CA4',   // line-art decorativo (microscópio) — SPEC §1
-        'border-soft': '#E8E3E3',  // selection colors de Personas — SPEC §1
+        'decor-blue': '#115CA4',
+        'border-soft': '#E8E3E3',
         rose: {
           50: '#FFF5F8',
           100: '#FFE8EF',
@@ -34,13 +34,13 @@ export default {
         badge: '0 18px 40px -18px rgba(2, 45, 87, 0.45)',
       },
       backgroundImage: {
-        // gradiente oficial do Figma
         'badge-grad': 'linear-gradient(87deg, #115CA4 0.82%, #102449 130.57%)',
         'brand-grad': 'linear-gradient(85deg, #F75883 1.14%, #FF7EA1 53.3%, #FF487A 102.41%)',
         'brand-card': 'linear-gradient(160deg, #FF9FBB 0%, #FB6C97 55%, #F0477C 100%)',
         'rose-grad': 'linear-gradient(160deg, #FFE3EC 0%, #FFCFDE 45%, #FFC0D4 100%)',
         'cta-grad': 'linear-gradient(135deg, #FFEBF1 0%, #FFD6E2 48%, #FFC3D6 100%)',
-        'price-grad': 'linear-gradient(172deg, #FFF7FA 0%, #FFD9E5 26%, #FC7BA4 58%, #F35684 100%)',
+        'price-grad':
+          'linear-gradient(173deg, rgba(255,255,255,0.66) -1.6%, rgba(255,255,255,0.66) 34.77%, rgba(255,96,139,0.82) 97.92%)',
       },
     },
   },
