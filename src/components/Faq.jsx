@@ -38,7 +38,7 @@ function Item({ q, a }) {
       >
         <span className="font-display text-base font-semibold text-ink">{q}</span>
         <span
-          className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-cobalt text-white transition ${
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white transition bg-[linear-gradient(87deg,#115CA4_0.82%,#102449_130.57%)] ${
             open ? 'rotate-45' : ''
           }`}
         >
