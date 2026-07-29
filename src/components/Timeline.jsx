@@ -13,22 +13,25 @@ export default function Timeline() {
     <section id="timeline" className="py-16">
       <div className="container-page text-center">
         {/* H2 — mesma tipografia de Skills: Geist 46/600/normal/ink */}
-        <h2 className="reveal w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink">
+        <h2 className="reveal h2-section w-full text-center font-display font-semibold leading-[normal] text-ink">
           Do cadastro a <span className="text-grad">primeira aula</span>
         </h2>
 
         {/* Subtítulo da seção — Geist 18/400/normal/body (igual Personas e PainPoints) */}
         <p
-          className="reveal mx-auto mt-4 max-w-[640px] font-display text-[18px] font-normal leading-[normal] text-body"
+          className="reveal p-section mx-auto mt-4 max-w-[640px] font-display font-normal leading-[normal] text-body"
           style={{ '--reveal-delay': '110ms' }}
         >
           Um processo simples e transparente, pensado para formar turmas coesas e no nível certo.
         </p>
 
-        <div className="timeline-track relative mt-16">
+        {/* ⚠️ derivado: 5 colunas só cabem a partir de lg. Abaixo disso a
+            timeline empilha, e a linha horizontal (que só faz sentido numa
+            fileira única) sai junto. */}
+        <div className="timeline-track relative mt-12 lg:mt-16">
           {/* linha de conexão + traço que "desenha" no hover da etapa */}
-          <div className="absolute left-0 right-0 top-6 hidden h-px bg-gradient-to-r from-transparent via-rose-300 to-transparent md:block" />
-          <div className="grid gap-10 md:grid-cols-5">
+          <div className="absolute left-0 right-0 top-6 hidden h-px bg-gradient-to-r from-transparent via-rose-300 to-transparent lg:block" />
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-5">
             {steps.map((s, i) => {
               const Icon = s.icon
               const active = i === 0
@@ -40,7 +43,7 @@ export default function Timeline() {
                 >
                   {/* segmento da linha que se preenche no hover */}
                   {i < steps.length - 1 && (
-                    <span className="pointer-events-none absolute left-1/2 right-[-50%] top-6 hidden h-px origin-left scale-x-0 bg-brand-grad transition-transform duration-500 ease-out group-hover:scale-x-100 md:block" />
+                    <span className="pointer-events-none absolute left-1/2 right-[-50%] top-6 hidden h-px origin-left scale-x-0 bg-brand-grad transition-transform duration-500 ease-out group-hover:scale-x-100 lg:block" />
                   )}
 
                   <span

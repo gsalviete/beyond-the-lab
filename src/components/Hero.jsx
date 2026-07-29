@@ -51,7 +51,7 @@ export default function Hero() {
           {/* Figma: flex column, gap 24, width 665 (H1 limitado a 608) */}
           <div className="mt-[26px] flex max-w-[665px] flex-col items-start gap-6">
             <h1
-              className="reveal-hero max-w-[608px] font-display text-[46px] font-semibold leading-[55px] text-ink"
+              className="reveal-hero h1-hero max-w-[608px] font-display font-semibold text-ink"
               style={{ '--reveal-delay': '130ms' }}
             >
               Desenvolva o <span className="text-grad">inglês</span> que te impulsiona no laboratório da{' '}
@@ -65,7 +65,7 @@ export default function Hero() {
 
             {/* CTA principal nunca passa de 500ms — a pessoa precisa poder agir logo */}
             <div className="reveal flex flex-wrap items-center gap-4" style={{ '--reveal-delay': '340ms' }}>
-              <a href="#lista" className="btn-brand w-[300px]">
+              <a href="#lista" className="btn-brand w-[300px] max-w-full">
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
               </a>
@@ -119,8 +119,11 @@ export default function Hero() {
           </div>
 
           {/* BADGE — Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
-          <div className="reveal absolute -top-[52px] -right-[42px] z-30 rounded-2xl bg-badge-grad
-                          py-[13px] pl-4 pr-[37px] text-white"
+          {/* ⚠️ derivado: no mobile o badge não pode sangrar pra fora do card
+              (a coluna ocupa a largura toda), então recolhe pra dentro do topo */}
+          <div className="reveal absolute right-3 top-3 z-30 rounded-2xl bg-badge-grad
+                          py-[13px] pl-4 pr-[37px] text-white
+                          lg:-top-[52px] lg:-right-[42px]"
                style={{ '--reveal-delay': '460ms' }}>
             <p className="text-[13px] leading-[17px] text-white/80">Primeira turma</p>
             <p className="font-display text-[30px] font-semibold leading-[37px]">Setembro</p>
@@ -131,7 +134,9 @@ export default function Hero() {
           <img
             src="/assets/flag.svg"
             alt="Inglês"
-            className="animate-floaty absolute -bottom-[38px] -left-[30px] z-30 w-[82px]"
+            /* ⚠️ derivado: no mobile encosta na borda de dentro em vez de sangrar */
+            className="animate-floaty absolute -bottom-4 left-2 z-30 w-[82px]
+                       lg:-bottom-[38px] lg:-left-[30px]"
           />
           
           {/* ESPERMATOZOIDE — SVG do Figma, 159 x 152 */}
@@ -139,7 +144,9 @@ export default function Hero() {
             width="159" height="152" viewBox="0 0 159 152" fill="none"
             xmlns="http://www.w3.org/2000/svg"
             aria-hidden="true"
-            className="animate-floaty pointer-events-none absolute -bottom-[63px] -right-[78px] z-20"
+            /* puramente decorativo e ancorado ao frame de 1440: no mobile só
+               sangraria pra fora do card, então sai de cena */
+            className="animate-floaty pointer-events-none absolute -bottom-[63px] -right-[78px] z-20 hidden lg:block"
           >
             <g clipPath="url(#spermClip)">
               <path
