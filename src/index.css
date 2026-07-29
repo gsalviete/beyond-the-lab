@@ -363,6 +363,38 @@
   transform: rotate(45deg);
 }
 
+/* Conteúdo programático — mesma mecânica do .faq-panel (grid-template-rows
+   0fr→1fr dispensa medir a altura do conteúdo), com o chevron virando 180°
+   em vez do "+" virando "×". */
+.syl-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--motion-short) var(--ease-out),
+    opacity var(--motion-short) var(--ease-out),
+    margin-top var(--motion-short) var(--ease-out),
+    visibility 0s linear var(--motion-short);
+}
+.syl-panel > * {
+  overflow: hidden;
+  min-height: 0;
+}
+.syl-panel[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  margin-top: 12px;
+  transition-delay: 0s;
+}
+.syl-icon {
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.syl-trigger[aria-expanded='true'] .syl-icon {
+  transform: rotate(180deg);
+}
+
 /* ============================================================
    ACESSIBILIDADE — movimento reduzido
    ============================================================ */
@@ -402,7 +434,8 @@
   }
 
   /* o accordion continua funcional, só sem animar */
-  .faq-panel {
+  .faq-panel,
+  .syl-panel {
     transition: none !important;
   }
 }

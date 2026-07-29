@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx}'],
+  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
   // Envolve todo `hover:` / `group-hover:` em @media (hover: hover) and (pointer: fine).
   // Sem isso, o hover "gruda" após o toque em mobile.
   future: {
