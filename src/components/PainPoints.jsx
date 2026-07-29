@@ -17,17 +17,17 @@ export default function PainPoints() {
       
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
         <div className="flex flex-col gap-6">
-          <h2 className="reveal max-w-[332px] font-display text-[46px] font-semibold leading-normal text-ink">
+          <h2 className="reveal h2-section max-w-[332px] font-display font-semibold leading-normal text-ink">
             Seu <span className="text-brand-line">inglês</span> acompanha sua carreira?
           </h2>
           <p
-            className="reveal font-sans text-[18px] font-normal leading-normal text-body"
+            className="reveal p-section font-sans font-normal leading-normal text-body"
             style={{ '--reveal-delay': '110ms' }}
           >
             Se você se identifica com alguma dessas situações, talvez seja hora de dar um novo passo na sua carreira.
           </p>
 
-          <a href="#lista" className="btn-brand reveal w-[300px]" style={{ '--reveal-delay': '220ms' }}>
+          <a href="#lista" className="btn-brand reveal w-[300px] max-w-full" style={{ '--reveal-delay': '220ms' }}>
             Lista de espera
             <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
           </a>

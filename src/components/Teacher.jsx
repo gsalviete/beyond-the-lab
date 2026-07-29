@@ -6,6 +6,18 @@ const tags = ['Experiência internacional', 'Especialista em Reprodução Humana
 // Geometria lida direto do SVG — nada estimado
 const SCREEN = { left: 13, top: 8, width: 317, height: 626, radius: 16 }
 
+// A moldura tem 343×642 e não pode ser cortada numa tela de 375. Em vez de
+// inventar uma segunda geometria, o conjunto vira proporcional: cada medida
+// do SVG passa a ser % do frame. Em 343px de largura os valores voltam a bater
+// exatamente (13, 8, 317, 626), então o desktop não se mexe.
+const pct = (v, base) => `${(v / base) * 100}%`
+const SCREEN_PCT = {
+  left: pct(SCREEN.left, 343),
+  top: pct(SCREEN.top, 642),
+  width: pct(SCREEN.width, 343),
+  height: pct(SCREEN.height, 642),
+}
+
 function PhoneVideo() {
   const ref = useRef(null)
   const [playing, setPlaying] = useState(false)
@@ -19,15 +31,17 @@ function PhoneVideo() {
 
   return (
     /* ⚠️ 343×642 é o tamanho natural do SVG — confirmar o tamanho do nó no Dev Mode */
-    <div className="relative mx-auto" style={{ width: 343, height: 642 }}>
+    <div
+      className="relative mx-auto w-full max-w-[343px]"
+      style={{ aspectRatio: '343 / 642' }}
+    >
       {/* moldura vetorial */}
       <img
         src="/assets/phone-frame.svg"
         alt=""
         aria-hidden="true"
         draggable="false"
-        className="pointer-events-none absolute inset-0 select-none"
-        style={{ width: 343, height: 642 }}
+        className="pointer-events-none absolute inset-0 h-full w-full select-none"
       />
 
       {/* vídeo por cima (o rect da tela no SVG é branco opaco) */}
@@ -40,13 +54,7 @@ function PhoneVideo() {
         preload="metadata"
         onClick={toggle}
         onEnded={() => setPlaying(false)}
-        style={{
-          left: SCREEN.left,
-          top: SCREEN.top,
-          width: SCREEN.width,
-          height: SCREEN.height,
-          borderRadius: SCREEN.radius,
-        }}
+        style={{ ...SCREEN_PCT, borderRadius: SCREEN.radius }}
       />
 
       {!playing && (
@@ -54,7 +62,9 @@ function PhoneVideo() {
           onClick={toggle}
           aria-label="Reproduzir vídeo"
           className="absolute grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#2B2A35] text-white [transition:transform_var(--motion-short)_var(--ease-out),background-color_var(--motion-short)_var(--ease-out)] hover:scale-[1.08] active:scale-100"
-          style={{ left: SCREEN.left + SCREEN.width / 2, top: SCREEN.top + SCREEN.height / 2 }}
+          /* 13 + 317/2 = 171.5 e 8 + 626/2 = 321 — o centro da tela é o
+             centro exato do frame (343/2, 642/2), então 50%/50% é o mesmo ponto */
+          style={{ left: '50%', top: '50%' }}
         >
           <Play className="h-3.5 w-3.5 translate-x-px" />
         </button>
@@ -73,7 +83,8 @@ export default function Teacher() {
         alt=""
         aria-hidden="true"
         draggable="false"
-        className="pointer-events-none absolute select-none"
+        /* decorativo puro, ancorado em coordenadas do frame de 1440 */
+        className="pointer-events-none absolute hidden select-none lg:block"
         style={{
           width: 439,
           height: 439,
@@ -87,7 +98,7 @@ export default function Teacher() {
           <p className="reveal text-sm font-semibold uppercase tracking-[0.25em] text-grad">Sobre a professora</p>
           {/* H2 — mesma tipografia de Skills: Geist 46/600/normal/ink */}
           <h2
-            className="reveal mt-3 w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink"
+            className="reveal h2-section mt-3 w-full text-center font-display font-semibold leading-[normal] text-ink"
             style={{ '--reveal-delay': '90ms' }}
           >
             Quem ensina <span className="text-grad">entende seu cenário</span>
@@ -101,7 +112,7 @@ export default function Teacher() {
 
           <div>
             {/* Texto — Geist 18/400/normal/body (mesmo padrão de Personas e PainPoints) */}
-            <p className="reveal font-display text-[18px] font-normal leading-[1.6] text-body">
+            <p className="reveal p-section font-display font-normal leading-[1.6] text-body">
               Idealizado por Giovanna, uma profissional que viveu a rotina do laboratório, participou de congressos
               internacionais e sentiu na pele a diferença que o inglês certo faz na carreira. O Beyond The Lab nasceu
               para encurtar esse caminho, com proximidade, profundidade técnica e um método pensado para gente como você.
@@ -121,7 +132,7 @@ export default function Teacher() {
               ))}
             </div>
 
-            <a href="#lista" className="btn-brand reveal mt-8 w-[300px]" style={{ '--reveal-delay': '420ms' }}>
+            <a href="#lista" className="btn-brand reveal mt-8 w-[300px] max-w-full" style={{ '--reveal-delay': '420ms' }}>
               Lista de espera
               <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
             </a>

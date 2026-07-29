@@ -28,7 +28,18 @@ const faqs = [
   },
 ]
 
-function Item({ q, a, delay = 0 }) {
+// Coordenada de cada card na grade de 1440 — escritas por extenso porque o
+// scanner do Tailwind não enxerga classe montada por template string.
+const CELL = [
+  'md:col-start-1 md:row-start-1',
+  'md:col-start-2 md:row-start-1',
+  'md:col-start-1 md:row-start-2',
+  'md:col-start-2 md:row-start-2',
+  'md:col-start-1 md:row-start-3',
+  'md:col-start-2 md:row-start-3',
+]
+
+function Item({ q, a, delay = 0, className = '' }) {
   const [open, setOpen] = useState(false)
   const id = useId()
   const panelId = `${id}-panel`
@@ -36,7 +47,7 @@ function Item({ q, a, delay = 0 }) {
 
   return (
     <div
-      className="reveal rounded-2xl bg-white p-5 shadow-card ring-1 ring-ink/5"
+      className={`reveal rounded-2xl bg-white p-5 shadow-card ring-1 ring-ink/5 ${className}`}
       style={{ '--reveal-delay': `${delay}ms` }}
     >
       <button
@@ -69,22 +80,28 @@ function Item({ q, a, delay = 0 }) {
 }
 
 export default function Faq() {
-  const left = faqs.filter((_, i) => i % 2 === 0)
-  const right = faqs.filter((_, i) => i % 2 === 1)
   return (
     <section id="faq" className="py-16">
       <div className="container-page">
-        <h2 className="reveal text-center font-display text-[36px] md:text-[46px] font-semibold text-ink leading-normal">
+        <h2 className="reveal h2-section text-center font-display font-semibold text-ink leading-normal">
           Perguntas frequentes
         </h2>
-        {/* stagger por linha: as duas colunas entram em par */}
-        <div className="mx-auto mt-12 grid max-w-4xl gap-5 md:grid-cols-2">
-          <div className="space-y-5">
-            {left.map((f, i) => <Item key={f.q} {...f} delay={i * 70} />)}
-          </div>
-          <div className="space-y-5">
-            {right.map((f, i) => <Item key={f.q} {...f} delay={i * 70} />)}
-          </div>
+        {/* Antes eram duas <div> empilhadas (pares à esquerda, ímpares à
+            direita). Numa coluna só isso lê 1,3,5,2,4,6 — ordem errada.
+            Agora a lista é plana (ordem natural no mobile) e o posicionamento
+            explícito em md: reconstrói exatamente a mesma grade de 1440.
+            `items-start` mantém cada card com a própria altura, como no
+            layout de duas pilhas. */}
+        <div className="mx-auto mt-12 grid max-w-4xl gap-5 md:grid-cols-2 md:items-start">
+          {faqs.map((f, i) => (
+            <Item
+              key={f.q}
+              {...f}
+              /* stagger por linha: as duas colunas entram em par */
+              delay={Math.floor(i / 2) * 70}
+              className={CELL[i]}
+            />
+          ))}
         </div>
       </div>
     </section>

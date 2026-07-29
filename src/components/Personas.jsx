@@ -25,18 +25,22 @@ const personas = [
 
 export default function Personas() {
   return (
-    <section id="curso" className="relative py-20">
-      <div className="relative mx-auto flex w-[1117px] flex-col items-center gap-6">
+    /* o padding lateral fica na section: o frame de 1117 continua centrado
+       e intacto em 1440, e no mobile a caixa vira fluida com gutter */
+    <section id="curso" className="relative px-6 py-20 md:px-10">
+      <div className="relative mx-auto flex w-full max-w-[1117px] flex-col items-center gap-6">
         {/* H2 — Geist 46/600, line-height normal, #022D57, caixa = 1117 (stretch) */}
-        <h2 className="reveal w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink">
+        <h2 className="reveal h2-section w-full text-center font-display font-semibold leading-[normal] text-ink">
           Feito para profissionais e{' '}
-          <br />
+          {/* ⚠️ derivado: a quebra manual é do texto de 1117px — no mobile
+              a linha tem que quebrar sozinha, senão sobra uma órfã */}
+          <br className="hidden lg:inline" />
           estudantes da reprodução humana
         </h2>
 
         {/* Subtítulo — Geist 18/400, line-height normal, body */}
         <p
-          className="reveal w-full text-center font-display text-[18px] font-normal leading-[normal] text-body"
+          className="reveal p-section w-full text-center font-display font-normal leading-[normal] text-body"
           style={{ '--reveal-delay': '120ms' }}
         >
           Se você se identifica com algum desses perfis, o{' '}
@@ -46,16 +50,18 @@ export default function Personas() {
         {/* wrapper de ancoragem: microscópio preso à fileira de cards */}
         <div className="relative w-full">
           {/* Microscópio — 536×759, decor-blue, opacity 0.15 embutida no path
-              ⚠️ left/top DERIVADOS por medição no print (escala 1.045×) */}
+              ⚠️ left/top DERIVADOS por medição no print (escala 1.045×)
+              left 823.5 + 536 = 1359.5 só faz sentido dentro do frame de 1117;
+              em qualquer largura menor ele só vaza. Decorativo → some. */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute select-none"
+            className="pointer-events-none absolute hidden select-none lg:block"
             style={{ left: '823.5px', top: '-182px', width: '536px', height: '759px' }}
           >
             <Microscope />
           </div>
 
-          <div className="relative z-10 grid w-full gap-6 text-left sm:grid-cols-2 lg:grid-cols-4">
+          <div className="relative z-10 grid w-full gap-6 text-left md:grid-cols-2 lg:grid-cols-4">
             {personas.map((p, i) => (
               <article
                 key={p.title}

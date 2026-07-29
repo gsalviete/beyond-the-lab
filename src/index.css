@@ -43,6 +43,10 @@
     scroll-behavior: smooth;
     /* navbar fixa: âncoras não podem parar embaixo do header */
     scroll-padding-top: 96px;
+    /* Decorativos absolutos podem passar da borda direita. `clip` corta sem
+       criar scroll horizontal; `hidden` faria o mesmo, mas geraria um
+       contexto de rolagem que quebra qualquer `position: sticky` interno. */
+    overflow-x: clip;
   }
   body {
     @apply font-sans text-body antialiased;
@@ -66,6 +70,37 @@
 @layer components {
   .container-page {
     @apply mx-auto w-full max-w-[1200px] px-6 md:px-10;
+  }
+
+  /* ============================================================
+     ESCALA TIPOGRÁFICA
+     Um único lugar define como cada papel de texto encolhe. O passo
+     `lg:` é sempre o valor que já estava escrito no componente para
+     1440 — mexer aqui não pode alterar o desktop, só mobile/tablet.
+     Os degraus base/md são ⚠️ derivados: não existe mock mobile.
+     ============================================================ */
+
+  /* H1 do hero — 46/55 no desktop */
+  .h1-hero {
+    @apply text-[30px] leading-[38px] md:text-[38px] md:leading-[46px] lg:text-[46px] lg:leading-[55px];
+  }
+
+  /* H2 de seção — 46px no desktop, line-height fica com o componente
+     (uns usam `leading-[normal]`, outros `leading-normal`/1.5) */
+  .h2-section {
+    @apply text-[28px] md:text-[36px] lg:text-[46px];
+  }
+
+  /* H2 do CTA final — 44/46.2/-1.1px no desktop */
+  .h2-cta {
+    @apply text-[28px] leading-[32px] tracking-[-0.6px]
+           md:text-[36px] md:leading-[40px] md:tracking-[-0.9px]
+           lg:text-[44px] lg:leading-[46.2px] lg:tracking-[-1.1px];
+  }
+
+  /* Parágrafo de apoio das seções — 18px no desktop */
+  .p-section {
+    @apply text-[16px] lg:text-[18px];
   }
 
   /* gradiente em texto — Figma: 85deg */

@@ -19,14 +19,15 @@ const skills = [
 export default function Skills() {
   return (
     <section id="como-funciona" className="relative pb-[69px] pt-[21px]">
-      <div className="container-page relative flex flex-col items-center gap-[62px]">
+      {/* ⚠️ derivado: 62px de respiro entre título e cards é medida de 1440 */}
+      <div className="container-page relative flex flex-col items-center gap-10 lg:gap-[62px]">
         {/* H2 — Geist 46/600/normal/ink — CONFIRMADO no Dev Mode */}
-        <h2 className="reveal w-full text-center font-display text-[46px] font-semibold leading-[normal] text-ink">
+        <h2 className="reveal h2-section w-full text-center font-display font-semibold leading-[normal] text-ink">
           Habilidades para a sua <span className="text-grad">rotina real</span>
         </h2>
 
         {/* ⚠️ gap entre cards DERIVADO do card de persona (24px) — não medido aqui */}
-        <div className="grid w-full gap-6 text-left md:grid-cols-3">
+        <div className="grid w-full gap-6 text-left md:grid-cols-2 lg:grid-cols-3">
           {skills.map((s, i) => (
             <article
               key={s.title}
