@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
+  content: ['./app/**/*.{js,jsx,ts,tsx}', './src/**/*.{js,jsx,ts,tsx}'],
   // Envolve todo `hover:` / `group-hover:` em @media (hover: hover) and (pointer: fine).
   // Sem isso, o hover "gruda" após o toque em mobile.
   future: {
@@ -29,8 +29,10 @@ export default {
         },
       },
       fontFamily: {
-        display: ['Geist', 'system-ui', 'sans-serif'],
-        sans: ['Geist', 'system-ui', 'sans-serif'],
+        // next/font gera um nome de família com hash e o expõe em --font-geist;
+        // a fonte e os fallbacks são exatamente os mesmos de antes.
+        display: ['var(--font-geist)', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-geist)', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
         card: '0 20px 45px -25px rgba(2, 45, 87, 0.18)',

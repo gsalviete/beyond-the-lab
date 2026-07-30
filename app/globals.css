@@ -420,9 +420,16 @@
   .js-reveal .hero-surface {
     opacity: 1 !important;
     transform: none !important;
-    scale: 1 !important;
     filter: none !important;
     will-change: auto !important;
+  }
+
+  /* `scale` é propriedade independente de `transform`. No mesmo bloco, o
+     minificador de CSS do Next funde as duas em `transform: scale3d(1,1,1)`
+     e o `scale: 1.012` da regra base do .hero-surface sobrevive. Em bloco
+     próprio não há o que fundir. */
+  .js-reveal .hero-surface {
+    scale: 1 !important;
   }
 
   .intro-nav,

@@ -1,7 +1,8 @@
 node_modules
-dist
+.next
 *.local
-vite.config.js.timestamp-*
+*.timestamp-*
+*.tsbuildinfo
 shot.mjs
 
 # design reference exports (source PNG + slices)

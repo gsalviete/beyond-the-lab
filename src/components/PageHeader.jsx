@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import Link from 'next/link'
 
 /**
  * Header das páginas internas.
@@ -14,14 +14,14 @@ export default function PageHeader() {
     <header className="intro-nav sticky top-0 z-50 border-b border-border-soft bg-white/85 backdrop-blur-md">
       <div className="container-page flex items-center justify-between py-4">
         <Link
-          to="/"
+          href="/"
           className="inline-block origin-left font-display text-xl font-bold tracking-tight text-brand [transition:transform_350ms_var(--ease-out)] hover:scale-[1.035]"
         >
           Beyond The Lab
         </Link>
 
         <Link
-          to="/"
+          href="/"
           className="inline-flex items-center gap-2 rounded-full px-3 py-2 font-sans text-[16px] font-medium text-ink/80 [transition:color_var(--motion-fast)_var(--ease-out)] hover:text-brand"
         >
           <svg
