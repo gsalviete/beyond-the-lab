@@ -3,7 +3,9 @@ node_modules
 *.local
 *.timestamp-*
 *.tsbuildinfo
-shot.mjs
+
+# vídeos: pesados demais para o git, servidos de storage externo
+*.mp4
 
 # design reference exports (source PNG + slices)
 design/
