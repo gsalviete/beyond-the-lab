@@ -1,6 +1,7 @@
-import bgCta from '/assets/background-cta.svg'
-import ovary from '/assets/ovary.svg'
 import { ArrowUpRight } from './Icons.jsx'
+
+const bgCta = '/assets/background-cta.svg'
+const ovary = '/assets/ovary.svg'
 
 export default function FinalCta() {
   return (

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import Link from 'next/link'
 import { ArrowUpRight, Check } from './Icons.jsx'
 
 const perks = [
@@ -70,7 +70,7 @@ export default function Hero() {
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
               </a>
-              <Link to="/conteudo-programatico" className="btn-outline">Conteúdo programático</Link>
+              <Link href="/conteudo-programatico" className="btn-outline">Conteúdo programático</Link>
             </div>
           </div>
 

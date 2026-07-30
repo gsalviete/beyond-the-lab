@@ -1,7 +1,7 @@
 import { ArrowUpRight, ChevronRight, Shield, Trophy, Lock } from './Icons.jsx'
-import ghostCard from '/assets/ghost-card.png'
-import microscope from '/assets/microscope-pink.svg'
-import dna from '/assets/dna.svg'
+const ghostCard = '/assets/ghost-card.png'
+const microscope = '/assets/microscope-pink.svg'
+const dna = '/assets/dna.svg'
 
 const features = [
   'Turmas reduzidas, com aulas ao vivo',

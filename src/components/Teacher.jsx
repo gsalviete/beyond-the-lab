@@ -1,3 +1,5 @@
+'use client'
+
 import { useRef, useState } from 'react'
 import { ArrowUpRight, Play } from './Icons.jsx'
 

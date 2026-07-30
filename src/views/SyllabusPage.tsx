@@ -1,10 +1,12 @@
-import { useId, useState } from 'react'
-import { Link } from 'react-router-dom'
-import PageHeader from '../components/PageHeader.jsx'
-import Footer from '../components/Footer.jsx'
-import { ArrowUpRight } from '../components/Icons.jsx'
-import useScrollReveal from '../hooks/useScrollReveal.js'
-import modules, { type Module } from '../data/modules'
+'use client'
+
+import { useId, useState, type CSSProperties } from 'react'
+import Link from 'next/link'
+import PageHeader from '@/components/PageHeader.jsx'
+import Footer from '@/components/Footer.jsx'
+import { ArrowUpRight } from '@/components/Icons.jsx'
+import useScrollReveal from '@/hooks/useScrollReveal.js'
+import modules, { type Module } from '@/data/modules'
 
 function Chevron() {
   return (
@@ -40,7 +42,7 @@ function AccordionItem({
   return (
     <div
       className="reveal-card rounded-2xl bg-white p-5 shadow-card ring-1 ring-ink/5"
-      style={{ '--reveal-delay': `${delay}ms` }}
+      style={{ '--reveal-delay': `${delay}ms` } as CSSProperties}
     >
       <h3>
         <button
@@ -103,19 +105,19 @@ export default function SyllabusPage() {
           <div className="mx-auto flex max-w-[820px] flex-col items-center gap-4 text-center">
             <p
               className="reveal font-sans text-[12px] font-semibold uppercase leading-[16px] tracking-[2.16px] text-[#F15D89]"
-              style={{ '--reveal-delay': '40ms' }}
+              style={{ '--reveal-delay': '40ms' } as CSSProperties}
             >
               6 meses · 12 módulos
             </p>
             <h1
               className="reveal-hero h2-section font-display font-semibold leading-[normal] text-ink"
-              style={{ '--reveal-delay': '130ms' }}
+              style={{ '--reveal-delay': '130ms' } as CSSProperties}
             >
               Conteúdo <span className="text-grad">programático</span>
             </h1>
             <p
               className="reveal p-section font-display font-normal leading-[normal] text-body"
-              style={{ '--reveal-delay': '240ms' }}
+              style={{ '--reveal-delay': '240ms' } as CSSProperties}
             >
               Do vocabulário da rotina de bancada até a discussão de artigos científicos com
               profissionais internacionais.
@@ -141,11 +143,11 @@ export default function SyllabusPage() {
             </p>
             {/* mesmo destino do CTA principal da landing (#lista / Pricing).
                 A seção não existe nesta rota, então o hash precisa vir junto
-                do path — o ScrollToTop resolve depois que a landing renderiza. */}
+                do path — o Next resolve depois que a landing renderiza. */}
             <Link
-              to="/#lista"
+              href="/#lista"
               className="btn-brand reveal w-[300px] max-w-full"
-              style={{ '--reveal-delay': '90ms' }}
+              style={{ '--reveal-delay': '90ms' } as CSSProperties}
             >
               Lista de espera
               <span className="arrow-badge">
