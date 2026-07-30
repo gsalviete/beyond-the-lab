@@ -1,7 +1,4 @@
-'use client'
-
-import { useRef, useState } from 'react'
-import { ArrowUpRight, Play } from './Icons.jsx'
+import { ArrowUpRight } from './Icons.jsx'
 
 const tags = ['Experiência internacional', 'Especialista em Reprodução Humana', 'Vivência prática', 'Mercado internacional']
 
@@ -21,16 +18,6 @@ const SCREEN_PCT = {
 }
 
 function PhoneVideo() {
-  const ref = useRef(null)
-  const [playing, setPlaying] = useState(false)
-
-  const toggle = () => {
-    const v = ref.current
-    if (!v) return
-    if (v.paused) { v.muted = false; v.play(); setPlaying(true) }
-    else { v.pause(); setPlaying(false) }
-  }
-
   return (
     /* ⚠️ 343×642 é o tamanho natural do SVG — confirmar o tamanho do nó no Dev Mode */
     <div
@@ -46,31 +33,14 @@ function PhoneVideo() {
         className="pointer-events-none absolute inset-0 h-full w-full select-none"
       />
 
-      {/* vídeo por cima (o rect da tela no SVG é branco opaco) */}
-      <video
-        ref={ref}
-        className="absolute cursor-pointer object-cover"
-        src="/assets/teacher.mp4"
-        playsInline
-        loop
-        preload="metadata"
-        onClick={toggle}
-        onEnded={() => setPlaying(false)}
+      {/* imagem por cima (o rect da tela no SVG é branco opaco) */}
+      {/* TODO: restaurar <video> quando o storage externo estiver configurado (arquivo: teacher.mp4) */}
+      <img
+        className="absolute object-cover"
+        src="/assets/teacher-poster.jpg"
+        alt="Giovanna, professora do Beyond The Lab, falando para a câmera"
         style={{ ...SCREEN_PCT, borderRadius: SCREEN.radius }}
       />
-
-      {!playing && (
-        <button
-          onClick={toggle}
-          aria-label="Reproduzir vídeo"
-          className="absolute grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-[#2B2A35] text-white [transition:transform_var(--motion-short)_var(--ease-out),background-color_var(--motion-short)_var(--ease-out)] hover:scale-[1.08] active:scale-100"
-          /* 13 + 317/2 = 171.5 e 8 + 626/2 = 321 — o centro da tela é o
-             centro exato do frame (343/2, 642/2), então 50%/50% é o mesmo ponto */
-          style={{ left: '50%', top: '50%' }}
-        >
-          <Play className="h-3.5 w-3.5 translate-x-px" />
-        </button>
-      )}
     </div>
   )
 }
