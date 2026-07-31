@@ -26,7 +26,7 @@ for (const p of [
 console.log('exe', exe)
 
 // nomes por slice, na ordem em que App.jsx renderiza dentro de <main>
-const nomes = ['hero','s01_painpoints','s02_personas','s03_skills','s04_timeline','s05_teacher','s06_pricing','s07_faq','s08_finalcta']
+const nomes = ['hero','s01_painpoints','s02_personas','s03_skills','s04_timeline','s05_teacher','s06_pricing','s06b_waitlist','s07_faq','s08_finalcta']
 
 // Dois alvos por execução, mesmas flags nos dois: deviceScaleFactor 1 e
 // reducedMotion reduce — o scroll-reveal precisa estar assentado no print.

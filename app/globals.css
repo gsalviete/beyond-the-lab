@@ -60,6 +60,8 @@
   a:focus-visible,
   button:focus-visible,
   summary:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
   [tabindex]:focus-visible {
     outline: 3px solid var(--focus-color);
     outline-offset: 4px;

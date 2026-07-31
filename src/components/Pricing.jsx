@@ -21,7 +21,10 @@ const guarantees = [
 
 export default function Pricing() {
   return (
-    <section id="lista" className="px-6 py-16 md:px-10 lg:px-0">
+    // `#lista` migrou para o Waitlist, que é onde o formulário vive. Esta
+    // seção passou a ser `#preco` — nenhum CTA aponta para ela hoje, mas o
+    // id fica disponível para link direto ao preço.
+    <section id="preco" className="px-6 py-16 md:px-10 lg:px-0">
       <div className="mx-auto w-[1212px] max-w-full">
         {/* ═══════════ FRAME DA SEÇÃO — 1212×835 ═══════════ */}
         {/* Em 1440 isso é um frame de altura fixa com os filhos posicionados
