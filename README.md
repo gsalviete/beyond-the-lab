@@ -92,9 +92,32 @@ de novo — o script sobrescreve no lugar. `design/` é gitignored.
 
 ## Variáveis de ambiente
 
-| Variável               | Obrigatória | Uso |
-|------------------------|-------------|-----|
-| `NEXT_PUBLIC_SITE_URL` | não         | base absoluta de OG/Twitter (`metadataBase`). Sem ela, cai em `VERCEL_PROJECT_PRODUCTION_URL` (injetada pela Vercel) e, fora da Vercel, em `http://localhost:3000` |
+Copie o `.env.example` para `.env.local` e preencha. `.env*` é gitignored (menos o
+próprio `.env.example`). Na Vercel, as duas do Supabase vão em **Settings → Environment
+Variables**, marcadas para Production, Preview e Development.
+
+| Variável                    | Obrigatória | Uso |
+|-----------------------------|-------------|-----|
+| `SUPABASE_URL`              | sim         | Project URL do Supabase. Usada só no servidor, por `src/lib/supabase.ts` |
+| `SUPABASE_SERVICE_ROLE_KEY` | sim         | chave `service_role`. **Segredo.** Ignora RLS — é o que permite a tabela `waitlist` não ter nenhuma policy. Sem `NEXT_PUBLIC_`, jamais no cliente |
+| `NEXT_PUBLIC_SITE_URL`      | não         | base absoluta de OG/Twitter (`metadataBase`). Sem ela, cai em `VERCEL_PROJECT_PRODUCTION_URL` (injetada pela Vercel) e, fora da Vercel, em `http://localhost:3000` |
+
+Sem as duas do Supabase o site sobe normalmente; só o POST em `/api/waitlist` responde
+500 e registra o motivo no log do servidor.
+
+## Lista de espera
+
+O formulário fica em `src/components/Waitlist.jsx` (seção `#lista`, para onde todos os
+CTAs apontam) e escreve em `app/api/waitlist/route.ts`, que valida com Zod e insere na
+tabela `waitlist` do Supabase via PostgREST.
+
+- A tabela tem **RLS ligada e nenhuma policy**, de propósito: todo o acesso é
+  server-side com a `service_role`, que ignora RLS. Não crie policy — isso abriria a
+  tabela para a chave `anon`.
+- E-mail duplicado responde **sucesso**, não erro: a pessoa está na lista, e o
+  formulário não pode virar um oráculo de "este e-mail já é cadastrado?".
+- Há um honeypot (campo `website`, escondido por CSS) e um rate limit por IP em memória
+  — aproximado em serverless, por instância.
 
 ## Tema
 

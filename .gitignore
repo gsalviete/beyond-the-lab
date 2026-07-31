@@ -1,6 +1,11 @@
 node_modules
 .next
 *.local
+
+# segredos: nenhum .env entra no git. A exceção é o .env.example, que só
+# tem os nomes das variáveis, com os valores vazios.
+.env*
+!.env.example
 *.timestamp-*
 *.tsbuildinfo
 
