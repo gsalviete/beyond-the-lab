@@ -43,6 +43,14 @@ export type InsertResult =
 export async function insertWaitlistEntry(entry: {
   name: string
   email: string
+  /** E.164, já normalizado pela rota — ver `src/lib/telefone.ts`. */
+  phone: string
+  payment_choice: 'agora' | 'depois'
+  /**
+   * Único valor escrito hoje. Os outros estados do CHECK existem para o
+   * Stripe do Prompt B não precisar de nova migração.
+   */
+  status?: 'pendente'
 }): Promise<InsertResult> {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new SupabaseNotConfiguredError()

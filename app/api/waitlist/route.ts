@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
+import { E164_BR_REGEX, e164EhValido } from '@/lib/telefone'
 
 // Nunca pré-renderizar nem cachear: é um POST que escreve no banco.
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,15 @@ export const dynamic = 'force-dynamic'
 const schema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.string().trim().toLowerCase().max(255).pipe(z.email()),
+  // O cliente já manda em E.164; aqui conferimos a forma e, além dela, o
+  // DDD e o nono dígito — a mesma função que a máscara usa, para os dois
+  // lados não discordarem sobre o que é um celular válido.
+  phone: z.string().trim().regex(E164_BR_REGEX).refine(e164EhValido),
+  payment_choice: z.enum(['agora', 'depois']),
+  // Consentimento: `z.literal(true)` e não `z.boolean()` — `false` tem que
+  // reprovar. É a base legal da coleta (LGPD art. 7º, I); sem ela não há
+  // por que gravar dado nenhum.
+  consent: z.literal(true),
   // Honeypot: campo escondido por CSS que só bot preenche. Opcional de
   // propósito — humano nunca manda, e a ausência não pode ser erro.
   website: z.string().optional(),
@@ -62,7 +72,7 @@ function json(body: { ok: boolean; message: string }, status: number) {
   return Response.json(body, { status })
 }
 
-const SUCCESS_MESSAGE = 'Pronto! Você está na lista de espera.'
+const SUCCESS_MESSAGE = 'Pronto! Sua inscrição está confirmada.'
 const GENERIC_ERROR = 'Não conseguimos salvar seu cadastro agora. Tente novamente em instantes.'
 
 export async function POST(req: Request) {
@@ -84,10 +94,23 @@ export async function POST(req: Request) {
 
   const parsed = schema.safeParse(payload)
   if (!parsed.success) {
-    return json({ ok: false, message: 'Confira o nome e o e-mail informados.' }, 400)
+    // O consentimento merece mensagem própria: é o único erro que a pessoa
+    // corrige com um clique, e "confira seus dados" mandaria ela revisar
+    // campos que estão certos. O resto continua genérico de propósito —
+    // nada do payload recebido é ecoado de volta.
+    const soConsentimento = parsed.error.issues.every((i) => i.path[0] === 'consent')
+    return json(
+      {
+        ok: false,
+        message: soConsentimento
+          ? 'É preciso concordar em receber as comunicações para concluir a inscrição.'
+          : 'Confira o nome, o e-mail e o WhatsApp informados.',
+      },
+      400,
+    )
   }
 
-  const { name, email, website } = parsed.data
+  const { name, email, phone, payment_choice, website } = parsed.data
 
   // Honeypot preenchido: responde sucesso e não grava nada. Devolver erro
   // ensinaria o bot que o campo é a armadilha.
@@ -97,7 +120,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await insertWaitlistEntry({ name, email })
+    // `status` sempre 'pendente' aqui: nada é cobrado neste fluxo, nem no
+    // caminho 'agora'. Quem move o status é o Stripe, no Prompt B.
+    const result = await insertWaitlistEntry({
+      name,
+      email,
+      phone,
+      payment_choice,
+      status: 'pendente',
+    })
 
     // Duplicata é sucesso do ponto de vista de quem preencheu: a pessoa está
     // na lista. Responder diferente aqui transformaria o formulário num
