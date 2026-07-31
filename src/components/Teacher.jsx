@@ -1,4 +1,5 @@
 import { ArrowUpRight } from './Icons.jsx'
+import CtaInscricao from './CtaInscricao.jsx'
 
 const tags = ['Experiência internacional', 'Especialista em Reprodução Humana', 'Vivência prática', 'Mercado internacional']
 
@@ -104,10 +105,10 @@ export default function Teacher() {
               ))}
             </div>
 
-            <a href="#lista" className="btn-brand reveal mt-8 w-[300px] max-w-full" style={{ '--reveal-delay': '420ms' }}>
+            <CtaInscricao className="btn-brand reveal mt-8 w-[300px] max-w-full" style={{ '--reveal-delay': '420ms' }}>
               Lista de espera
               <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-            </a>
+            </CtaInscricao>
           </div>
         </div>
       </div>

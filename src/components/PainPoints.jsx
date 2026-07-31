@@ -1,4 +1,5 @@
 import { ArrowUpRight, FileText } from './Icons.jsx'
+import CtaInscricao from './CtaInscricao.jsx'
 
 const cards = [
   { n: '01', text: 'Dificuldade para compreender artigos científicos.' },
@@ -27,10 +28,10 @@ export default function PainPoints() {
             Se você se identifica com alguma dessas situações, talvez seja hora de dar um novo passo na sua carreira.
           </p>
 
-          <a href="#lista" className="btn-brand reveal w-[300px] max-w-full" style={{ '--reveal-delay': '220ms' }}>
+          <CtaInscricao className="btn-brand reveal w-[300px] max-w-full" style={{ '--reveal-delay': '220ms' }}>
             Lista de espera
             <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-          </a>
+          </CtaInscricao>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">

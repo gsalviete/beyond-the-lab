@@ -1,5 +1,6 @@
 import { Geist } from 'next/font/google'
 import './globals.css'
+import InscricaoProvider from '@/components/InscricaoProvider.jsx'
 
 // Antes vinha de um <link> do Google Fonts no index.html. Via next/font a
 // fonte é auto-hospedada e o @font-face entra no HTML inicial — sem FOUT.
@@ -59,7 +60,13 @@ export default function RootLayout({ children }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: REVEAL_BOOTSTRAP }} />
       </head>
-      <body>{children}</body>
+      {/* O provider fica no layout, e não na landing, porque a modal é
+          aberta também pelo CTA da rota /conteudo-programatico. `children`
+          continua sendo renderizado no servidor — passar árvore de server
+          component como filho de um client component não a converte. */}
+      <body>
+        <InscricaoProvider>{children}</InscricaoProvider>
+      </body>
     </html>
   )
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ArrowUpRight } from './Icons.jsx'
+import CtaInscricao from './CtaInscricao.jsx'
 
 const links = [
   { label: 'O curso', href: '#curso' },
@@ -38,7 +39,10 @@ export default function Navbar() {
 
   return (
     <header
-      className={`intro-nav fixed inset-x-0 top-0 z-50 [transition:background-color_var(--motion-short)_var(--ease-out),box-shadow_var(--motion-short)_var(--ease-out)] ${
+      /* `scroll-lock-shift`: sendo `fixed`, este header não herda o padding
+         que a trava de scroll da modal aplica no body. Sem a classe, ele
+         seria o único elemento a saltar quando a barra de rolagem some. */
+      className={`intro-nav scroll-lock-shift fixed inset-x-0 top-0 z-50 [transition:background-color_var(--motion-short)_var(--ease-out),box-shadow_var(--motion-short)_var(--ease-out)] ${
         scrolled || open ? 'bg-white/85 shadow-soft backdrop-blur-md' : 'bg-transparent'
       }`}
     >
@@ -77,10 +81,10 @@ export default function Navbar() {
         </ul>
 
         {/* Figma: 190 x 41, padding 8/24, gap 8, sem effects */}
-        <a href="#lista" className="btn-brand-sm hidden w-[190px] lg:inline-flex">
+        <CtaInscricao className="btn-brand-sm hidden w-[190px] lg:inline-flex">
           Lista de espera
           <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
-        </a>
+        </CtaInscricao>
 
         {/* ⚠️ derivado: não há botão de menu no design de 1440 — 44x44 é o
             alvo de toque mínimo, e as duas barras viram "X" quando abre */}
@@ -130,14 +134,13 @@ export default function Navbar() {
               </li>
             ))}
             <li className="mt-3">
-              <a
-                href="#lista"
+              <CtaInscricao
                 onClick={() => setOpen(false)}
                 className="btn-brand-sm w-full"
               >
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
-              </a>
+              </CtaInscricao>
             </li>
           </ul>
         </div>

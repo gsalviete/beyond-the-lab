@@ -291,6 +291,29 @@
   will-change: auto;
 }
 
+/* ============================================================
+   TRAVA DE SCROLL DA MODAL
+   `overflow: hidden` no body remove a barra de rolagem, e a página
+   inteira salta para a direita pela largura dela. A modal mede essa
+   largura e publica em --scrollbar-compensation; aqui devolvemos o
+   espaço como padding.
+
+   A navbar precisa da regra própria porque é `position: fixed`: está
+   fora do fluxo e não herda o padding do body. `.scroll-lock-shift`
+   marca quem está nessa situação — o PageHeader é `sticky`, continua
+   no fluxo e por isso NÃO leva a classe.
+
+   Em mobile a barra é overlay e a medida dá 0px, então o padding é
+   inócuo — nenhum caso especial necessário.
+   ============================================================ */
+body[data-modal-aberta] {
+  overflow: hidden;
+  padding-right: var(--scrollbar-compensation, 0px);
+}
+body[data-modal-aberta] .scroll-lock-shift {
+  padding-right: var(--scrollbar-compensation, 0px);
+}
+
 /* entrada da navbar no load (fixed — não pode usar .reveal com o observer) */
 @keyframes introDown {
   from { opacity: 0; transform: translateY(-18px); }

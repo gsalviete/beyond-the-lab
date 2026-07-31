@@ -1,8 +1,8 @@
 'use client'
 
 import { useId, useState, type CSSProperties } from 'react'
-import Link from 'next/link'
 import PageHeader from '@/components/PageHeader.jsx'
+import CtaInscricao from '@/components/CtaInscricao.jsx'
 import Footer from '@/components/Footer.jsx'
 import { ArrowUpRight } from '@/components/Icons.jsx'
 import useScrollReveal from '@/hooks/useScrollReveal.js'
@@ -141,11 +141,11 @@ export default function SyllabusPage() {
             <p className="reveal p-section font-display text-body">
               As turmas são reduzidas e separadas por nível de inglês.
             </p>
-            {/* mesmo destino do CTA principal da landing (#lista / Pricing).
-                A seção não existe nesta rota, então o hash precisa vir junto
-                do path — o Next resolve depois que a landing renderiza. */}
-            <Link
-              href="/#lista"
+            {/* Antes navegava de volta para a âncora da lista na landing. A
+                modal está no layout raiz, que cobre esta rota também, então
+                abre aqui mesmo — sem mandar a pessoa sair da página só para
+                ver um formulário. */}
+            <CtaInscricao
               className="btn-brand reveal w-[300px] max-w-full"
               style={{ '--reveal-delay': '90ms' } as CSSProperties}
             >
@@ -153,7 +153,7 @@ export default function SyllabusPage() {
               <span className="arrow-badge">
                 <ArrowUpRight className="h-4 w-4" />
               </span>
-            </Link>
+            </CtaInscricao>
           </div>
         </div>
       </main>

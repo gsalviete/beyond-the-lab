@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ArrowUpRight, Check } from './Icons.jsx'
+import CtaInscricao from './CtaInscricao.jsx'
 
 const perks = [
   { label: 'Conteúdo especializado',       w: 'w-[96px]'  },
@@ -66,10 +67,10 @@ export default function Hero() {
 
             {/* CTA principal nunca passa de 500ms — a pessoa precisa poder agir logo */}
             <div className="reveal flex flex-wrap items-center gap-4" style={{ '--reveal-delay': '340ms' }}>
-              <a href="#lista" className="btn-brand w-[300px] max-w-full">
+              <CtaInscricao className="btn-brand w-[300px] max-w-full">
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-              </a>
+              </CtaInscricao>
               <Link href="/conteudo-programatico" className="btn-outline">Conteúdo programático</Link>
             </div>
           </div>

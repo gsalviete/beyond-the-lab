@@ -1,4 +1,5 @@
 import { ArrowUpRight, ChevronRight, Shield, Trophy, Lock } from './Icons.jsx'
+import CtaInscricao from './CtaInscricao.jsx'
 const ghostCard = '/assets/ghost-card.png'
 const microscope = '/assets/microscope-pink.svg'
 const dna = '/assets/dna.svg'
@@ -21,9 +22,10 @@ const guarantees = [
 
 export default function Pricing() {
   return (
-    // `#lista` migrou para o Waitlist, que é onde o formulário vive. Esta
-    // seção passou a ser `#preco` — nenhum CTA aponta para ela hoje, mas o
-    // id fica disponível para link direto ao preço.
+    // O formulário deixou de ser seção e virou modal, então a antiga âncora
+    // da lista de espera não existe mais em lugar nenhum. Esta seção segue
+    // como `#preco`: nenhum CTA aponta para ela, mas o id fica disponível
+    // para link direto ao preço.
     <section id="preco" className="px-6 py-16 md:px-10 lg:px-0">
       <div className="mx-auto w-[1212px] max-w-full">
         {/* ═══════════ FRAME DA SEÇÃO — 1212×835 ═══════════ */}
@@ -111,8 +113,7 @@ export default function Pricing() {
             {/* CTA — 373×60 (confirmado) */}
             {/* ⚠️ background / box-shadow vêm de .btn-brand, nunca confirmados */}
             {/* ⚠️ ring-4 ring-white/40 não veio do Dev Mode — provável invenção */}
-            <a
-              href="#lista"
+            <CtaInscricao
               /* ⚠️ derivado: 373px fixos e 22px não cabem em 375 — o botão
                  vira fluido e o corpo cai o suficiente pra caber numa linha */
               className="btn-brand flex h-[60px] w-full shrink-0 items-center justify-center
@@ -124,7 +125,7 @@ export default function Pricing() {
               <span className="arrow-badge">
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </span>
-            </a>
+            </CtaInscricao>
 
             {/* CHIPS — row 248.69 / gap 12 (confirmado) */}
             {/* ⚠️ derivado: a fileira de 248.69 é mais larga que o card no

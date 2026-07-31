@@ -7,7 +7,6 @@ import Skills from '@/components/Skills.jsx'
 import Timeline from '@/components/Timeline.jsx'
 import Teacher from '@/components/Teacher.jsx'
 import Pricing from '@/components/Pricing.jsx'
-import Waitlist from '@/components/Waitlist.jsx'
 import Faq from '@/components/Faq.jsx'
 import FinalCta from '@/components/FinalCta.jsx'
 import Footer from '@/components/Footer.jsx'
@@ -25,7 +24,6 @@ export default function Page() {
         <Timeline />
         <Teacher />
         <Pricing />
-        <Waitlist />
         <Faq />
         <FinalCta />
       </main>
