@@ -26,7 +26,8 @@ for (const p of [
 console.log('exe', exe)
 
 // nomes por slice, na ordem em que App.jsx renderiza dentro de <main>
-const nomes = ['hero','s01_painpoints','s02_personas','s03_skills','s04_timeline','s05_teacher','s06_pricing','s06b_waitlist','s07_faq','s08_finalcta']
+// (a antiga 's06b_waitlist' saiu: o formulário virou modal e não é mais seção)
+const nomes = ['hero','s01_painpoints','s02_personas','s03_skills','s04_timeline','s05_teacher','s06_pricing','s07_faq','s08_finalcta']
 
 // Dois alvos por execução, mesmas flags nos dois: deviceScaleFactor 1 e
 // reducedMotion reduce — o scroll-reveal precisa estar assentado no print.
@@ -62,6 +63,21 @@ for (const { prefixo, width, height } of alvos) {
     await secoes[i].screenshot({ path:`design/render_${prefixo}_${nome}.png` })
     console.log('  →', nome)
   }
+
+  // MODAL DE INSCRIÇÃO
+  // Vive num portal no <body>, fora de <main>, então o loop de seções
+  // acima não a alcança — precisa de captura própria. `clip` na viewport
+  // e não `fullPage`: o overlay é `position: fixed` e num print de página
+  // inteira sairia esticado ou repetido.
+  const ctaModal = pg.locator('main button:has-text("Lista de espera")').first()
+  await ctaModal.scrollIntoViewIfNeeded()
+  await ctaModal.click()
+  await pg.waitForSelector('[role="dialog"]', { state: 'visible' })
+  await pg.waitForTimeout(600)
+  await pg.screenshot({ path:`design/render_${prefixo}_s09_modal.png`, clip:{ x:0, y:0, width, height } })
+  console.log('  →', 's09_modal')
+  await pg.keyboard.press('Escape')
+  await pg.waitForTimeout(400)
 
   // rota dedicada — o loop acima só cobre a landing ("/")
   await pg.goto(`${BASE}/conteudo-programatico`, { waitUntil:'networkidle' })

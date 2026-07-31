@@ -105,19 +105,39 @@ Variables**, marcadas para Production, Preview e Development.
 Sem as duas do Supabase o site sobe normalmente; só o POST em `/api/waitlist` responde
 500 e registra o motivo no log do servidor.
 
-## Lista de espera
+## Inscrição
 
-O formulário fica em `src/components/Waitlist.jsx` (seção `#lista`, para onde todos os
-CTAs apontam) e escreve em `app/api/waitlist/route.ts`, que valida com Zod e insere na
-tabela `waitlist` do Supabase via PostgREST.
+O formulário é uma **modal**, não uma seção. Antes vivia em `#lista`; essa âncora não
+existe mais.
+
+| Arquivo | Papel |
+|---|---|
+| `src/components/InscricaoProvider.jsx` | estado único da modal + integração com o histórico. Fica no `app/layout.jsx`, então vale para todas as rotas |
+| `src/components/InscricaoModal.jsx` | a modal: formulário, tela de sucesso, foco preso, trava de scroll |
+| `src/components/CtaInscricao.jsx` | o `<button>` que abre a modal. **Todo CTA usa este componente** — nenhum é `<a href>` |
+| `src/config/curso.ts` | datas, preço e links. Fonte única: nada disso pode ser reescrito à mão em outro arquivo |
+| `src/lib/telefone.ts` | máscara, DDDs válidos e E.164. Usado pelo formulário **e** pela API, para os dois não discordarem |
+| `app/api/waitlist/route.ts` | validação com Zod e insert na tabela `waitlist` via PostgREST |
 
 - A tabela tem **RLS ligada e nenhuma policy**, de propósito: todo o acesso é
   server-side com a `service_role`, que ignora RLS. Não crie policy — isso abriria a
   tabela para a chave `anon`.
 - E-mail duplicado responde **sucesso**, não erro: a pessoa está na lista, e o
   formulário não pode virar um oráculo de "este e-mail já é cadastrado?".
+- **Consentimento** é `z.literal(true)` no servidor: sem ele, 400. É a base legal da
+  coleta (LGPD art. 7º, I), então não pode ser opcional nem vir pré-marcado.
+- O telefone é gravado em **E.164** (`+5521999999999`); a máscara `(XX) XXXXX-XXXX`
+  existe só na interface.
+- `payment_choice` registra qual botão foi clicado (`agora` / `depois`). **Hoje os dois
+  caminhos gravam igual** — o Stripe entra depois, e o ponto de ramificação está
+  marcado com `TODO: Prompt B` em `InscricaoModal.jsx`.
+- `status` só recebe `pendente`. Os outros valores do CHECK existem para a integração
+  do Stripe não precisar de nova migração.
 - Há um honeypot (campo `website`, escondido por CSS) e um rate limit por IP em memória
   — aproximado em serverless, por instância.
+
+O SQL da migração está em `supabase/migrations/001_inscricao_modal.sql` e é rodado à
+mão no SQL Editor do Supabase.
 
 ## Tema
 
