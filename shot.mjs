@@ -73,7 +73,13 @@ for (const { prefixo, width, height } of alvos) {
   await ctaModal.scrollIntoViewIfNeeded()
   await ctaModal.click()
   await pg.waitForSelector('[role="dialog"]', { state: 'visible' })
-  await pg.waitForTimeout(600)
+  // A modal abre em estado de carregamento e só decide o que mostrar depois
+  // de perguntar a `/api/turma-ativa` se há turma aberta. Esperar no relógio
+  // fotografava o spinner — em dev a primeira chamada ainda paga a compilação
+  // da rota. `aria-busy="false"` é a condição de verdade, e é o mesmo atributo
+  // que o leitor de tela usa.
+  await pg.waitForSelector('[role="dialog"][aria-busy="false"]', { state: 'visible' })
+  await pg.waitForTimeout(400)
   await pg.screenshot({ path:`design/render_${prefixo}_s09_modal.png`, clip:{ x:0, y:0, width, height } })
   console.log('  →', 's09_modal')
   await pg.keyboard.press('Escape')
