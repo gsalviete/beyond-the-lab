@@ -17,7 +17,22 @@ Ordem sugerida: bloco 0 primeiro (sem ele o resto falha), depois o que quiser.
       Rode o arquivo no SQL Editor e confira as duas queries do fim: as três colunas
       (`consent`, `consent_at`, `consent_text`) devem aparecer como `YES` em `is_nullable`
       e sem `column_default`.
-- [ ] O deploy em produção é o commit que contém essa migração ou posterior.
+- [ ] **A migração `004_integridade_da_inscricao.sql` já rodou no Supabase.**
+      É ela que faz o banco recusar inscrição sem perfil e sem consentimento, em vez de
+      confiar só na validação da aplicação. Confira a primeira query do fim: as três
+      constraints devem aparecer, com `ja_validou_o_passado` = `false` (é o esperado —
+      significa "vale para toda linha nova, não mexe nas antigas").
+- [ ] **O deploy em produção é o commit que contém essas migrações ou posterior.**
+      Confira na Vercel qual commit está em `Production` — não basta ter dado `git push`,
+      e não basta a migração ter rodado no banco.
+
+      > Já aconteceu de a migração chegar ao banco e o deploy não: o build antigo continuou
+      > no ar gravando só `name`, `email`, `phone` e `payment_choice`, respondendo
+      > **"Inscrição confirmada!"** com 200, e deixando `curso`, `periodo`, `nivel_ingles`,
+      > `disponibilidade` e os três campos de consentimento **nulos**. Do lado de fora nada
+      > parecia errado. Com a `004` no lugar, esse insert passa a falhar e a pessoa vê erro
+      > — que é ruim, mas é infinitamente melhor do que um cadastro sem base legal que
+      > ninguém percebeu.
 - [ ] `NEXT_PUBLIC_SITE_URL` está setada na Vercel com o domínio final.
       É ela que monta as URLs absolutas do OG — errada, a prévia do link não carrega imagem.
 
