@@ -25,6 +25,10 @@ npm start        # serve o build de produção
 |---------------------------|--------------------------------------|
 | `/`                       | `app/page.jsx`                       |
 | `/conteudo-programatico`  | `app/conteudo-programatico/page.jsx` |
+| `/termos`                 | `app/termos/page.jsx`                |
+| `/privacidade`            | `app/privacidade/page.jsx`           |
+
+As quatro são estáticas (`○ prerendered` no `next build`) e têm `metadata` própria.
 
 ## Estrutura
 
@@ -278,6 +282,58 @@ Cores centrais (em `tailwind.config.js`):
 | `cobalt`     | `#114883`  | badge azul / ícone do FAQ    |
 | `rose-100`   | `#FFE8EF`  | fundos rosa claros           |
 
+## Documentos legais (`/termos` e `/privacidade`)
+
+O conteúdo mora em `src/content/termos.jsx` e `src/content/privacidade.jsx` — texto e
+estrutura, sem nenhuma classe de CSS. A apresentação inteira está em
+`src/components/DocumentoLegal.jsx`.
+
+> **Os dois são rascunhos não revisados por advogado.** Precisam de revisão profissional
+> antes de o site operar com cobrança recorrente. O aviso está no topo de cada arquivo e
+> também visível na própria página.
+
+**Antes do push:** os dois documentos têm marcadores `[[PREENCHER: ...]]` que renderizam
+destacados na tela. Liste todos com:
+
+```bash
+grep -rn "PREENCHER" src
+```
+
+São quatro dados, repetidos entre os arquivos: nome civil completo, CPF, endereço completo
+e e-mail de contato. Nenhum deles pode ir para produção em branco.
+
+Ao alterar a frase do consentimento, mexa em `src/config/consentimento.ts` e em mais lugar
+nenhum: modal e API leem de lá, e o texto exato é gravado em `waitlist.consent_text` a cada
+inscrição.
+
+## Imagem de compartilhamento (`public/og.png`)
+
+É a prévia que aparece quando o link é colado no WhatsApp, Instagram ou LinkedIn — na
+prática, a primeira coisa que a maioria vê do site. **O arquivo atual é placeholder cinza e
+precisa ser substituído pela arte da cliente.**
+
+Especificação do arquivo definitivo:
+
+| Item        | Valor                                                              |
+|-------------|--------------------------------------------------------------------|
+| Dimensões   | **1200 × 630 px** (proporção 1,91:1)                               |
+| Formato     | PNG ou JPG — não use WebP nem SVG, o WhatsApp não renderiza        |
+| Peso        | abaixo de 300 KB; acima disso o WhatsApp costuma desistir da prévia |
+| Caminho     | `public/og.png` (substituir o arquivo, sem renomear)               |
+
+O requisito de conteúdo é um só, e é o que mais se erra: **o nome do curso tem que ser
+legível em miniatura.** A prévia do WhatsApp aparece com poucos centímetros de largura, e
+uma arte bonita em tamanho real vira borrão ali. Na prática: título ocupando boa parte da
+altura, alto contraste com o fundo, e nada de texto secundário fino. Confira reduzindo a
+imagem a ~300px de largura na tela — se o nome não se lê, o público também não vai ler.
+
+A dimensão atual do placeholder já está correta (1200×630); o que falta é a arte. Nenhuma
+mudança de código é necessária ao substituí-lo — as quatro rotas já apontam para
+`/og.png` no `openGraph` e no `twitter`.
+
+> O cache de prévia do WhatsApp é agressivo. Depois de trocar a imagem, teste com um link
+> que ainda não circulou (por exemplo `?v=2` no fim da URL) para não ver a versão antiga.
+
 ## Observações
 
 - **Vídeo da professora:** `*.mp4` é gitignored (o arquivo tinha 71 MB). O `Teacher.jsx`
@@ -285,6 +341,7 @@ Cores centrais (em `tailwind.config.js`):
   externo estiver configurado, restaurar o `<video>` — o `TODO` está no componente.
 - As imagens em `public/assets/` foram extraídas do export do Figma. Para produção, vale
   substituir por exports otimizados (WebP) direto do Figma.
-- `public/og.png` ainda é placeholder.
+- `public/og.png` ainda é placeholder — especificação do arquivo definitivo na seção
+  *Imagem de compartilhamento*, acima.
 - Os textos dos accordions do FAQ foram redigidos como placeholder plausível — ajuste
   conforme o conteúdo oficial.
