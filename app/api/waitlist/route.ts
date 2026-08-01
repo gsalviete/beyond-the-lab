@@ -1,6 +1,10 @@
 import { z } from 'zod'
 import { buscarTurmaAtiva, insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
 import { E164_BR_REGEX, e164EhValido } from '@/lib/telefone'
+// O MESMO módulo que a modal importa para exibir a frase. É essa
+// identidade que dá valor ao que gravamos: o texto registrado no banco
+// não é uma cópia parecida do que estava na tela, é o mesmo objeto.
+import { CONSENT_TEXT } from '@/config/consentimento'
 
 // Nunca pré-renderizar nem cachear: é um POST que escreve no banco.
 export const dynamic = 'force-dynamic'
@@ -144,6 +148,7 @@ export async function POST(req: Request) {
     curso,
     periodo,
     disponibilidade,
+    consent,
   } = parsed.data
 
   // Honeypot preenchido: responde sucesso e não grava nada. Devolver erro
@@ -152,6 +157,14 @@ export async function POST(req: Request) {
     console.warn('[waitlist] honeypot acionado')
     return json({ ok: true, message: SUCCESS_MESSAGE }, 200)
   }
+
+  // Carimba o consentimento AGORA, e não lá embaixo no insert. A
+  // diferença é de significado, não de milissegundos: o instante que
+  // interessa é aquele em que a manifestação chegou e foi aceita como
+  // válida — logo depois do `safeParse` que exigiu `consent: true` e do
+  // honeypot que descartou o que não é gente. Gerar isto dentro da
+  // chamada ao banco faria a coluna medir a latência do PostgREST.
+  const consentAt = new Date().toISOString()
 
   try {
     // ------------------------------------------------------------
@@ -186,6 +199,21 @@ export async function POST(req: Request) {
       curso,
       periodo,
       disponibilidade,
+      // ------------------------------------------------------------
+      // CONSENTIMENTO — o que a pessoa afirmou, quando, e a quê.
+      //
+      // `consent` vem do payload validado, onde o Zod já o obrigou a ser
+      // exatamente `true`. `consent_at` e `consent_text` NÃO vêm de lá,
+      // e essa assimetria é o ponto: o cliente é a única fonte possível
+      // para o ato de marcar a caixa, mas é a pior fonte imaginável para
+      // a hora do relógio e para a redação exibida. Um POST forjado
+      // poderia declarar que aceitou um texto que nunca existiu, com
+      // data conveniente. O servidor sabe as duas coisas por conta
+      // própria e é isso que grava.
+      // ------------------------------------------------------------
+      consent,
+      consent_at: consentAt,
+      consent_text: CONSENT_TEXT,
     })
 
     // Duplicata é sucesso do ponto de vista de quem preencheu: a pessoa está

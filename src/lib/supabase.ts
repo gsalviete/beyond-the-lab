@@ -143,6 +143,19 @@ export async function insertWaitlistEntry(entry: {
   curso: string
   periodo: string
   disponibilidade: DiaDaSemana[]
+  /**
+   * Registro probatório do consentimento — os três andam juntos e não
+   * fazem sentido separados. Ver `supabase/migrations/003_consentimento.sql`.
+   *
+   * `consent_text` é a constante do servidor, não o que o cliente
+   * enviou: quem monta este objeto é `/api/waitlist`, que importa
+   * `CONSENT_TEXT` de `src/config/consentimento.ts`. O corpo do POST
+   * não tem voz sobre este campo.
+   */
+  consent: boolean
+  /** ISO 8601 gerado no servidor no momento em que o consentimento foi validado. */
+  consent_at: string
+  consent_text: string
 }): Promise<InsertResult> {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new SupabaseNotConfiguredError()
