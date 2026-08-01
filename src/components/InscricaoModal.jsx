@@ -2,13 +2,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowUpRight, Check, Plus } from './Icons.jsx'
-import {
-  DATA_PRIMEIRA_COBRANCA,
-  INICIO_DAS_AULAS,
-  INSTAGRAM_URL,
-  formatarDataPorExtenso,
-} from '@/config/curso'
+import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
+import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
 import { mascararTelefone, paraE164, telefoneEhValido } from '@/lib/telefone'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
@@ -23,11 +18,48 @@ const FIELD =
   'disabled:cursor-not-allowed disabled:opacity-60 ' +
   '[transition:border-color_var(--motion-short)_var(--ease-out),box-shadow_var(--motion-short)_var(--ease-out)]'
 
+// ⚠️ derivado: o projeto não tinha nenhum <select>. É o FIELD inteiro com
+// duas mudanças obrigatórias — `appearance-none` para a seta nativa (que
+// varia entre navegadores e ignora nosso tema) sair, e `pr-12` para abrir
+// espaço para a nossa. O 12 é o mesmo passo de espaçamento do px-5 do
+// FIELD dobrado, não é número novo. `text-muted` quando vazio faz a opção
+// "Selecione" ler como placeholder, igual aos outros campos.
+const SELECT = `${FIELD} appearance-none cursor-pointer pr-12`
+
 const LABEL = 'pl-5 font-display text-[14px] font-semibold leading-[19.2px] text-ink'
+
+// ⚠️ derivado: nenhum <fieldset> existia no projeto. O <legend> herda o
+// token do LABEL sem alteração — é o mesmo papel visual. O reset
+// `m-0 border-0 p-0` é obrigatório: o preflight do Tailwind não zera a
+// borda e o padding que o navegador dá a fieldset por conta própria.
+const FIELDSET = 'm-0 flex flex-col gap-2 border-0 p-0 text-left'
+
+// ⚠️ derivado: herdado do checkbox de consentimento, que era o único do
+// projeto. Idêntico, menos o `mt-[3px]` — aquele alinha com um texto de
+// duas linhas, e aqui o rótulo é uma palavra só, centrada no eixo.
+const CHECKBOX =
+  'h-5 w-5 shrink-0 cursor-pointer rounded-md border border-border-soft accent-brand ' +
+  'disabled:cursor-not-allowed disabled:opacity-60'
 
 const CONSENT_TEXT =
   'Concordo em receber e-mails e mensagens sobre as turmas do Beyond The Lab. ' +
   'Posso sair a qualquer momento.'
+
+const NIVEIS = [
+  { valor: 'basico', rotulo: 'Básico' },
+  { valor: 'intermediario', rotulo: 'Intermediário' },
+  { valor: 'avancado', rotulo: 'Avançado' },
+]
+
+// O `valor` é exatamente o que o CHECK da coluna `disponibilidade` aceita
+// no banco — não traduza aqui sem mexer lá.
+const DIAS = [
+  { valor: 'seg', rotulo: 'Segunda' },
+  { valor: 'ter', rotulo: 'Terça' },
+  { valor: 'qua', rotulo: 'Quarta' },
+  { valor: 'qui', rotulo: 'Quinta' },
+  { valor: 'sex', rotulo: 'Sexta' },
+]
 
 // Tudo que pode receber foco pelo teclado. `:not([disabled])` importa: os
 // campos ficam disabled durante o envio, e um ciclo de Tab que pousa em
@@ -42,6 +74,9 @@ export default function InscricaoModal({ onFechar }) {
   const nomeId = `${id}-nome`
   const emailId = `${id}-email`
   const telefoneId = `${id}-telefone`
+  const nivelId = `${id}-nivel`
+  const cursoId = `${id}-curso`
+  const periodoId = `${id}-periodo`
   const consentId = `${id}-consentimento`
   const honeypotId = `${id}-website`
   const erroId = `${id}-erro`
@@ -50,18 +85,32 @@ export default function InscricaoModal({ onFechar }) {
   const primeiroCampoRef = useRef(null)
   const tituloSucessoRef = useRef(null)
 
-  // idle | submitting | success
-  const [status, setStatus] = useState('idle')
+  // carregando | idle | submitting | success
+  //
+  // 'carregando' é o estado INICIAL: a modal não sabe o que mostrar antes
+  // de perguntar ao servidor se há turma aberta. Só depois da resposta ela
+  // vira 'idle' e o formulário aparece.
+  const [status, setStatus] = useState('carregando')
   const [erro, setErro] = useState('')
+
+  // A turma aberta, ou null para lista de espera. É o que decide o MODO da
+  // modal, e é ortogonal ao `status` acima — continua valendo durante o
+  // envio e na tela de sucesso, que precisa da data de início das aulas.
+  const [turma, setTurma] = useState(null)
+
   const [telefone, setTelefone] = useState('')
+  const [nivel, setNivel] = useState('')
+  const [dias, setDias] = useState([])
   const [consentimento, setConsentimento] = useState(false)
 
   // Qual botão disparou o submit. Ref e não state: é lido uma vez dentro do
   // handler, e um re-render entre o clique e o submit não ajudaria em nada.
   const escolhaRef = useRef('agora')
 
+  const carregando = status === 'carregando'
   const submitting = status === 'submitting'
   const sucesso = status === 'success'
+  const inscricaoAberta = turma !== null
 
   // `onFechar` numa ref para o efeito de teclado poder rodar uma única vez
   // (array de dependências vazio) sem capturar uma versão velha da função.
@@ -71,6 +120,42 @@ export default function InscricaoModal({ onFechar }) {
   onFecharRef.current = onFechar
 
   const pedirFechamento = useCallback(() => onFecharRef.current(), [])
+
+  // ------------------------------------------------------------
+  // QUAL TURMA ESTÁ ABERTA
+  //
+  // A modal só é montada quando abre (ver InscricaoProvider), então este
+  // efeito de montagem É o "ao abrir" — não precisa de gatilho próprio.
+  //
+  // Qualquer falha cai em lista de espera, silenciosamente. Um erro na
+  // tela aqui só teria o efeito de impedir alguém interessada de deixar o
+  // contato, que é a única coisa que não podemos perder. O problema fica
+  // no log do servidor, que é onde ele se conserta.
+  //
+  // O `cancelado` protege do desmonte durante o fetch: a pessoa pode
+  // fechar a modal antes da resposta chegar, e um setState depois disso
+  // seria trabalho jogado fora (e, no StrictMode do dev, ruído).
+  // ------------------------------------------------------------
+  useEffect(() => {
+    let cancelado = false
+
+    fetch('/api/turma-ativa', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelado) return
+        setTurma(body?.turma ?? null)
+        setStatus('idle')
+      })
+      .catch(() => {
+        if (cancelado) return
+        setTurma(null)
+        setStatus('idle')
+      })
+
+    return () => {
+      cancelado = true
+    }
+  }, [])
 
   // ------------------------------------------------------------
   // TRAVA DE SCROLL
@@ -133,12 +218,21 @@ export default function InscricaoModal({ onFechar }) {
     return () => document.removeEventListener('keydown', onKey, true)
   }, [pedirFechamento])
 
-  // Foco inicial no primeiro campo; ao concluir, no título da confirmação —
-  // que é a informação nova da tela e o começo natural da leitura.
+  // Foco conforme a tela. Durante o carregamento o primeiro campo ainda
+  // não existe, e sem este ramo a modal abriria sem foco em lugar nenhum —
+  // o leitor de tela não anunciaria nada e o primeiro Tab sairia do
+  // contexto. O painel tem tabIndex -1 justamente para poder recebê-lo.
   useEffect(() => {
-    if (sucesso) tituloSucessoRef.current?.focus()
+    if (carregando) painelRef.current?.focus()
+    else if (sucesso) tituloSucessoRef.current?.focus()
     else primeiroCampoRef.current?.focus()
-  }, [sucesso])
+  }, [carregando, sucesso])
+
+  function alternarDia(valor) {
+    setDias((atuais) =>
+      atuais.includes(valor) ? atuais.filter((d) => d !== valor) : [...atuais, valor],
+    )
+  }
 
   // ------------------------------------------------------------
   // ENVIO
@@ -150,8 +244,14 @@ export default function InscricaoModal({ onFechar }) {
     const dados = new FormData(event.currentTarget)
     const name = String(dados.get('name') ?? '').trim()
     const email = String(dados.get('email') ?? '').trim()
+    const curso = String(dados.get('curso') ?? '').trim()
+    const periodo = String(dados.get('periodo') ?? '').trim()
     const website = String(dados.get('website') ?? '')
-    const escolha = escolhaRef.current
+
+    // Sem turma aberta não há escolha de pagamento para fazer — não existe
+    // cobrança a adiantar. O servidor descarta este campo nesse caso de
+    // qualquer jeito; mandamos 'depois' para o corpo dizer a verdade.
+    const escolha = inscricaoAberta ? escolhaRef.current : 'depois'
 
     // Validação client-side: só para retorno imediato. A que vale é a do
     // servidor, que roda mesmo com o JS desligado ou adulterado.
@@ -165,6 +265,25 @@ export default function InscricaoModal({ onFechar }) {
     }
     if (!telefoneEhValido(telefone)) {
       setErro('Digite um celular válido com DDD, no formato (21) 99999-9999.')
+      return
+    }
+    if (!nivel) {
+      setErro('Selecione o seu nível de inglês.')
+      return
+    }
+    if (curso.length < 2 || curso.length > 100) {
+      setErro('Digite o nome do seu curso.')
+      return
+    }
+    if (periodo.length < 1 || periodo.length > 40) {
+      setErro('Digite o seu período — por exemplo, 3º semestre.')
+      return
+    }
+    // Mesmo espírito da mensagem de consentimento: é erro que se corrige
+    // com um clique, e um "confira seus dados" genérico mandaria a pessoa
+    // revisar campos que estão certos.
+    if (dias.length === 0) {
+      setErro('Marque pelo menos um dia da semana em que você pode assistir às aulas.')
       return
     }
     if (!consentimento) {
@@ -184,6 +303,10 @@ export default function InscricaoModal({ onFechar }) {
           email,
           phone: paraE164(telefone),
           payment_choice: escolha,
+          nivel_ingles: nivel,
+          curso,
+          periodo,
+          disponibilidade: dias,
           consent: consentimento,
           website,
         }),
@@ -191,17 +314,18 @@ export default function InscricaoModal({ onFechar }) {
       const body = await res.json().catch(() => null)
 
       if (res.ok && body?.ok) {
-        // TODO: Prompt B — 'agora' redireciona para o Stripe Checkout.
-        // A ramificação é exatamente aqui: com `escolha === 'agora'`, em vez
-        // de mostrar a tela de sucesso, o servidor devolve a URL da sessão
-        // de Checkout e este ponto faz `window.location.assign(body.url)`.
-        // 'depois' continua caindo na tela de sucesso como agora.
+        // TODO: Prompt B2 — 'agora' redireciona para o Stripe Checkout.
+        // A ramificação é exatamente aqui: com `escolha === 'agora'` E
+        // turma aberta, em vez de mostrar a tela de sucesso, o servidor
+        // devolve a URL da sessão de Checkout e este ponto faz
+        // `window.location.assign(body.url)`. 'depois' e lista de espera
+        // continuam caindo na tela de sucesso como agora.
         setStatus('success')
         return
       }
 
       setStatus('idle')
-      setErro(body?.message ?? 'Não conseguimos salvar sua inscrição agora. Tente novamente.')
+      setErro(body?.message ?? 'Não conseguimos salvar seu cadastro agora. Tente novamente.')
     } catch {
       setStatus('idle')
       setErro('Falha de conexão. Verifique sua internet e tente de novo.')
@@ -230,17 +354,29 @@ export default function InscricaoModal({ onFechar }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={tituloId}
+        aria-busy={carregando}
+        /* tabIndex -1: alvo do foco enquanto o formulário não existe, sem
+           entrar na ordem de tabulação. */
+        tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
         /* Mobile: ocupa a tela quase inteira e rola por dentro. `100dvh` e
            não `100vh` — no Safari do iOS o `vh` conta a barra de endereço
            recolhida, então os botões do fim do formulário ficariam embaixo
-           dela. Acima de sm vira card centrado com teto de altura. */
+           dela. Acima de sm vira card centrado com teto de altura.
+
+           ⚠️ derivado: o `sm:min-h-[...]` é novo e existe por um motivo
+           só — sem ele o painel nasceria do tamanho do "Carregando…" e
+           daria um salto quando os oito campos chegassem. O valor não é
+           inventado: é o mesmo `calc(100dvh-3rem)` do teto logo abaixo,
+           limitado a 640px, então o painel abre já na altura em que vai
+           ficar. No mobile não faz falta — lá a altura é fixa em 100dvh. */
         className="relative flex h-[100dvh] w-full flex-col overflow-y-auto overscroll-contain
                    border border-[rgba(17,17,17,0.09)]
                    bg-[linear-gradient(153deg,#FDEEF2_0%,#FCFCFC_58%)]
                    px-6 py-8
                    shadow-[0_40px_80px_-36px_rgba(247,88,131,0.28)]
-                   sm:h-auto sm:max-h-[calc(100dvh-3rem)] sm:w-[560px] sm:max-w-full
+                   sm:h-auto sm:min-h-[min(640px,calc(100dvh-3rem))]
+                   sm:max-h-[calc(100dvh-3rem)] sm:w-[560px] sm:max-w-full
                    sm:rounded-[36px] sm:px-10 sm:py-10"
       >
         {/* FECHAR — sem ícone de X no Icons.jsx, o Plus a 45° É um X, e é
@@ -257,10 +393,13 @@ export default function InscricaoModal({ onFechar }) {
           <Plus className="h-5 w-5 rotate-45" />
         </button>
 
-        {sucesso ? (
+        {carregando ? (
+          <TelaDeCarregamento tituloId={tituloId} />
+        ) : sucesso ? (
           <TelaDeSucesso
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
+            turma={turma}
             onFechar={pedirFechamento}
           />
         ) : (
@@ -273,7 +412,7 @@ export default function InscricaoModal({ onFechar }) {
               >
                 <span className="h-[6px] w-[6px] shrink-0 rounded-full bg-[#F75883]" />
                 <span className="text-grad font-display text-[18px] font-semibold leading-none">
-                  Inscrição
+                  {inscricaoAberta ? 'Inscrição' : 'Lista de espera'}
                 </span>
               </span>
 
@@ -282,11 +421,21 @@ export default function InscricaoModal({ onFechar }) {
                 className="mt-5 font-display text-[26px] font-semibold leading-[1.2]
                            text-[#022D57] sm:text-[32px]"
               >
-                Garanta sua vaga na <span className="text-grad">próxima turma.</span>
+                {inscricaoAberta ? (
+                  <>
+                    Garanta sua vaga na <span className="text-grad">próxima turma.</span>
+                  </>
+                ) : (
+                  <>
+                    As inscrições estão <span className="text-grad">fechadas no momento.</span>
+                  </>
+                )}
               </h2>
 
               <p className="mt-3 font-display text-[16px] font-normal leading-[25.6px] text-[#345372]">
-                As turmas são reduzidas. Preencha seus dados para reservar seu lugar.
+                {inscricaoAberta
+                  ? 'As turmas são reduzidas. Preencha seus dados para reservar seu lugar.'
+                  : 'Deixe seus dados e avisamos você em primeira mão assim que a próxima turma abrir.'}
               </p>
             </div>
 
@@ -353,6 +502,115 @@ export default function InscricaoModal({ onFechar }) {
                 </span>
               </div>
 
+              {/* NÍVEL DE INGLÊS — autodeclarado, não é avaliação. */}
+              <div className="flex flex-col gap-2 text-left">
+                <label htmlFor={nivelId} className={LABEL}>
+                  Nível de inglês
+                </label>
+                <div className="relative">
+                  <select
+                    id={nivelId}
+                    name="nivel_ingles"
+                    required
+                    disabled={submitting}
+                    value={nivel}
+                    onChange={(e) => setNivel(e.target.value)}
+                    className={`${SELECT} ${nivel ? 'text-ink' : 'text-muted'}`}
+                  >
+                    <option value="" disabled>
+                      Selecione
+                    </option>
+                    {NIVEIS.map((n) => (
+                      <option key={n.valor} value={n.valor} className="text-ink">
+                        {n.rotulo}
+                      </option>
+                    ))}
+                  </select>
+                  {/* ChevronRight a 90° é a seta para baixo — mesmo
+                      princípio do Plus a 45° virando X ali em cima:
+                      asset existente, rotacionado, em vez de SVG novo.
+                      `pointer-events-none` para o clique atravessar e
+                      abrir o select, e aria-hidden porque é decoração. */}
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 text-ink"
+                  >
+                    <ChevronRight className="h-4 w-4 rotate-90" />
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 text-left">
+                <label htmlFor={cursoId} className={LABEL}>
+                  Curso
+                </label>
+                <input
+                  id={cursoId}
+                  name="curso"
+                  type="text"
+                  required
+                  minLength={2}
+                  maxLength={100}
+                  placeholder="Biomedicina"
+                  disabled={submitting}
+                  className={FIELD}
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 text-left">
+                <label htmlFor={periodoId} className={LABEL}>
+                  Período
+                </label>
+                <input
+                  id={periodoId}
+                  name="periodo"
+                  type="text"
+                  required
+                  maxLength={40}
+                  /* Texto livre de propósito — "formada" e "trancado" são
+                     respostas reais, e um campo numérico as perderia. */
+                  placeholder="3º semestre"
+                  disabled={submitting}
+                  className={FIELD}
+                />
+              </div>
+
+              {/* DISPONIBILIDADE — fieldset e não uma <div> com label:
+                  cinco checkboxes soltos são anunciados um a um pelo
+                  leitor de tela, sem nada que diga a que pergunta eles
+                  respondem. A legend é essa pergunta. */}
+              <fieldset className={FIELDSET} disabled={submitting}>
+                <legend className={LABEL}>Disponibilidade</legend>
+                <span className="pl-5 font-sans text-[13px] leading-[20px] text-[#345372]">
+                  Marque todos os dias em que você poderia assistir às aulas.
+                </span>
+                <div className="mt-1 flex flex-wrap gap-x-5 gap-y-3 pl-5">
+                  {DIAS.map((dia) => {
+                    const diaId = `${id}-dia-${dia.valor}`
+                    return (
+                      <label
+                        key={dia.valor}
+                        htmlFor={diaId}
+                        className="flex cursor-pointer items-center gap-2"
+                      >
+                        <input
+                          id={diaId}
+                          type="checkbox"
+                          name="disponibilidade"
+                          value={dia.valor}
+                          checked={dias.includes(dia.valor)}
+                          onChange={() => alternarDia(dia.valor)}
+                          className={CHECKBOX}
+                        />
+                        <span className="font-sans text-[14px] leading-[22px] text-[#345372]">
+                          {dia.rotulo}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </fieldset>
+
               {/* CONSENTIMENTO — desmarcado por padrão, e é assim que fica.
                   Consentimento pré-marcado não é consentimento (LGPD). */}
               <label
@@ -367,9 +625,7 @@ export default function InscricaoModal({ onFechar }) {
                   disabled={submitting}
                   checked={consentimento}
                   onChange={(e) => setConsentimento(e.target.checked)}
-                  className="mt-[3px] h-5 w-5 shrink-0 cursor-pointer rounded-md
-                             border border-border-soft accent-brand
-                             disabled:cursor-not-allowed disabled:opacity-60"
+                  className={`${CHECKBOX} mt-[3px]`}
                 />
                 <span className="font-sans text-[13px] leading-[20px] text-[#345372]">
                   {CONSENT_TEXT}
@@ -395,46 +651,69 @@ export default function InscricaoModal({ onFechar }) {
                 />
               </div>
 
-              {/* Hierarquia: o primário é o .btn-brand cheio; o secundário é
-                  o .btn-outline, mesma altura e mesmo raio, peso visual
-                  menor. Os dois gravam igual neste prompt. */}
-              <button
-                type="submit"
-                disabled={submitting}
-                onClick={() => {
-                  escolhaRef.current = 'agora'
-                }}
-                className="btn-brand mt-2 w-full text-[17px] disabled:cursor-not-allowed
-                           disabled:opacity-60 disabled:hover:translate-y-0
-                           disabled:hover:shadow-none"
-              >
-                {submitting ? 'Enviando…' : 'Garantir minha vaga'}
-                {!submitting && (
-                  <span className="arrow-badge">
-                    <ArrowUpRight className="h-3.5 w-3.5" />
-                  </span>
-                )}
-              </button>
+              {inscricaoAberta ? (
+                <>
+                  {/* Hierarquia: o primário é o .btn-brand cheio; o
+                      secundário é o .btn-outline, mesma altura e mesmo
+                      raio, peso visual menor. Os dois gravam igual neste
+                      prompt — o Stripe ramifica no B2. */}
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    onClick={() => {
+                      escolhaRef.current = 'agora'
+                    }}
+                    className="btn-brand mt-2 w-full text-[17px] disabled:cursor-not-allowed
+                               disabled:opacity-60 disabled:hover:translate-y-0
+                               disabled:hover:shadow-none"
+                  >
+                    {submitting ? 'Enviando…' : 'Garantir minha vaga'}
+                    {!submitting && (
+                      <span className="arrow-badge">
+                        <ArrowUpRight className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                  </button>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                onClick={() => {
-                  escolhaRef.current = 'depois'
-                }}
-                className="btn-outline w-full text-[16px] disabled:cursor-not-allowed
-                           disabled:opacity-60 disabled:hover:translate-y-0"
-              >
-                Prefiro pagar depois
-              </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    onClick={() => {
+                      escolhaRef.current = 'depois'
+                    }}
+                    className="btn-outline w-full text-[16px] disabled:cursor-not-allowed
+                               disabled:opacity-60 disabled:hover:translate-y-0"
+                  >
+                    Prefiro pagar depois
+                  </button>
 
-              <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                Sua vaga fica garantida agora. A primeira cobrança acontece em{' '}
-                <strong className="font-semibold text-ink">
-                  {formatarDataPorExtenso(DATA_PRIMEIRA_COBRANCA)}
-                </strong>
-                , antes do início das aulas.
-              </p>
+                  <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
+                    Sua vaga fica garantida agora. A primeira cobrança acontece em{' '}
+                    <strong className="font-semibold text-ink">
+                      {formatarDataPorExtenso(paraDataUTC(turma.data_primeira_cobranca))}
+                    </strong>
+                    , antes do início das aulas.
+                  </p>
+                </>
+              ) : (
+                /* Um botão só. Não há escolha de pagamento a oferecer quando
+                   não há cobrança — e nenhuma menção a valor ou data, que
+                   seriam promessa sobre uma turma que ainda não existe. */
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn-brand mt-2 w-full text-[17px] disabled:cursor-not-allowed
+                             disabled:opacity-60 disabled:hover:translate-y-0
+                             disabled:hover:shadow-none"
+                >
+                  {submitting ? 'Enviando…' : 'Quero ser avisada'}
+                  {!submitting && (
+                    <span className="arrow-badge">
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    </span>
+                  )}
+                </button>
+              )}
 
               {/* Container sempre no DOM: um aria-live que só nasce junto com
                   a mensagem costuma não ser anunciado. */}
@@ -456,9 +735,42 @@ export default function InscricaoModal({ onFechar }) {
 }
 
 // ============================================================
-// TELA DE SUCESSO — substitui o conteúdo, sem fechar a modal
+// CARREGAMENTO — entre abrir e saber se há turma
+//
+// Mantém o <h2 id={tituloId}> porque o `aria-labelledby` do dialog aponta
+// para ele: sem um elemento com esse id, a modal abriria sem nome
+// acessível. O texto neutro ("Um instante…") é proposital — qualquer
+// promessa aqui poderia ser desmentida pela resposta que está a caminho.
 // ============================================================
-function TelaDeSucesso({ tituloId, tituloRef, onFechar }) {
+function TelaDeCarregamento({ tituloId }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 py-12 text-center">
+      {/* `motion-reduce:animate-none` porque o site inteiro respeita
+          prefers-reduced-motion — ver o bloco no globals.css. */}
+      <span
+        aria-hidden="true"
+        className="h-8 w-8 animate-spin rounded-full border-[3px] border-rose-200
+                   border-t-brand motion-reduce:animate-none"
+      />
+      <h2
+        id={tituloId}
+        className="font-display text-[18px] font-semibold leading-[1.2] text-[#022D57]"
+      >
+        Um instante…
+      </h2>
+    </div>
+  )
+}
+
+// ============================================================
+// TELA DE SUCESSO — substitui o conteúdo, sem fechar a modal
+//
+// `turma` é null quando o cadastro foi para a lista de espera. Não é
+// detalhe de estilo: com turma há vaga reservada e data de início para
+// prometer; sem turma há só o compromisso de avisar. Prometer errado
+// aqui é a pior coisa que esta tela pode fazer.
+// ============================================================
+function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -473,16 +785,25 @@ function TelaDeSucesso({ tituloId, tituloRef, onFechar }) {
         tabIndex={-1}
         className="mt-5 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]"
       >
-        Inscrição confirmada!
+        {turma ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
       </h2>
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
-        Sua vaga está reservada. Enviamos os próximos passos para o seu e-mail e, mais perto
-        das aulas, o convite do grupo no WhatsApp. As aulas começam em{' '}
-        <strong className="font-semibold text-ink">
-          {formatarDataPorExtenso(INICIO_DAS_AULAS)}
-        </strong>
-        .
+        {turma ? (
+          <>
+            Sua vaga está reservada. Enviamos os próximos passos para o seu e-mail e, mais
+            perto das aulas, o convite do grupo no WhatsApp. As aulas começam em{' '}
+            <strong className="font-semibold text-ink">
+              {formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))}
+            </strong>
+            .
+          </>
+        ) : (
+          <>
+            Você está na lista de espera. Assim que a próxima turma abrir, avisamos você em
+            primeira mão por e-mail e WhatsApp — antes de qualquer divulgação.
+          </>
+        )}
       </p>
 
       <a
