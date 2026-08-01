@@ -7,16 +7,17 @@
 // mensal tem exigências que um rascunho técnico não cobre — e o erro
 // aqui não aparece em teste, aparece em reclamação.
 //
-// ⚠️ Todo `<PREENCHER>` é dado que o código não tem como saber. Eles
-// renderizam VISÍVEIS na página, de propósito. Rode
-// `grep -rn "PREENCHER" src` para listar todos.
+// Os marcadores `<PREENCHER>` foram preenchidos com os dados reais da
+// prestadora. O componente segue existindo em `DocumentoLegal.jsx` para
+// uma revisão futura que introduza dado novo — se voltar a usá-lo,
+// `grep -rn "<PREENCHER>" src` lista o que ficou pendente.
 //
 // Por que JSX e não Markdown: ver o comentário no topo de
 // `src/content/privacidade.jsx`.
 // ============================================================
 
 import Link from 'next/link'
-import { DocSecao, DocP, DocLista, DocItem, DocForte, PREENCHER } from '@/components/DocumentoLegal.jsx'
+import { DocSecao, DocP, DocLista, DocItem, DocForte, DocEmail } from '@/components/DocumentoLegal.jsx'
 
 export const TERMOS_ATUALIZADO_EM = '1º de agosto de 2026'
 
@@ -26,13 +27,13 @@ export default function ConteudoTermos() {
       <DocSecao numero={1} titulo="Quem presta o serviço">
         <DocP>
           O curso Beyond The Lab é oferecido por{' '}
-          <PREENCHER>nome civil completo da prestadora</PREENCHER>, inscrita no CPF sob o
-          nº <PREENCHER>CPF</PREENCHER>, com endereço em{' '}
-          <PREENCHER>endereço completo, com CEP</PREENCHER>.
+          <DocForte>Giovanna Melo Freire de Castro</DocForte>, inscrita no CPF sob o nº
+          167.207.067-80, com endereço na Rua Venâncio Veloso, 380, Recreio dos
+          Bandeirantes, Rio de Janeiro/RJ, CEP 22790-420.
         </DocP>
         <DocP>
           Contato oficial para qualquer assunto relativo a estes Termos:{' '}
-          <PREENCHER>e-mail de contato</PREENCHER>.
+          <DocEmail>beyondthelab.rha@gmail.com</DocEmail>.
         </DocP>
       </DocSecao>
 
@@ -119,7 +120,7 @@ export default function ConteudoTermos() {
         </DocP>
         <DocP>
           Para exercer, basta enviar uma mensagem para{' '}
-          <PREENCHER>e-mail de contato</PREENCHER> dizendo que deseja desistir. Não há
+          <DocEmail>beyondthelab.rha@gmail.com</DocEmail> dizendo que deseja desistir. Não há
           formulário nem procedimento especial. O estorno é solicitado em até 5 dias úteis a
           partir do pedido, e o prazo até o dinheiro aparecer na fatura depende do
           processamento do cartão e da operadora.
@@ -130,7 +131,7 @@ export default function ConteudoTermos() {
         <DocP>
           Passado o prazo de arrependimento, você pode cancelar a assinatura{' '}
           <DocForte>a qualquer momento</DocForte>, sem multa, enviando uma mensagem para{' '}
-          <PREENCHER>e-mail de contato</PREENCHER>.
+          <DocEmail>beyondthelab.rha@gmail.com</DocEmail>.
         </DocP>
         <DocP>Ao cancelar:</DocP>
         <DocLista>
@@ -181,7 +182,7 @@ export default function ConteudoTermos() {
         <DocP>
           Todo o material do curso — apostilas, slides, exercícios, gravações, o nome
           &ldquo;Beyond The Lab&rdquo; e a identidade visual — pertence a{' '}
-          <PREENCHER>nome civil completo da prestadora</PREENCHER> e é protegido pela Lei de
+          <DocForte>Giovanna Melo Freire de Castro</DocForte> e é protegido pela Lei de
           Direitos Autorais (Lei nº 9.610/98).
         </DocP>
         <DocP>
@@ -227,7 +228,7 @@ export default function ConteudoTermos() {
           Defesa do Consumidor.
         </DocP>
         <DocP>
-          Antes disso, porém, escreva para <PREENCHER>e-mail de contato</PREENCHER>. A maior
+          Antes disso, porém, escreva para <DocEmail>beyondthelab.rha@gmail.com</DocEmail>. A maior
           parte dos problemas se resolve numa conversa.
         </DocP>
       </DocSecao>

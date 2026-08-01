@@ -77,6 +77,27 @@ export function DocForte({ children }) {
 }
 
 /**
+ * E-mail de contato, como link `mailto:`.
+ *
+ * Componente e não um <a> solto no conteúdo porque este endereço é o
+ * canal do direito de arrependimento e dos pedidos da LGPD: ele aparece
+ * seis vezes entre os dois documentos, e um dia vai mudar. Centralizar a
+ * marcação garante que mude em todas — e mantém `src/content/` sem
+ * nenhuma classe de CSS, que é a regra da pasta.
+ */
+export function DocEmail({ children }) {
+  return (
+    <a
+      href={`mailto:${children}`}
+      className="rounded font-semibold text-brand underline underline-offset-2
+                 [transition:color_var(--motion-fast)_var(--ease-out)] hover:text-brand-deep"
+    >
+      {children}
+    </a>
+  )
+}
+
+/**
  * Marcador de dado que ainda não temos.
  *
  * Renderiza VISÍVEL e destacado, de propósito. A alternativa seria um

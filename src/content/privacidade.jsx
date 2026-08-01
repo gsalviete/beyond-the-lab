@@ -7,9 +7,10 @@
 // operador que trata dado financeiro, e isso muda o que esta política
 // precisa declarar.
 //
-// ⚠️ Todo `<PREENCHER>` é dado que o código não tem como saber. Eles
-// renderizam VISÍVEIS na página, de propósito. Rode
-// `grep -rn "PREENCHER" src` para listar todos.
+// Os marcadores `<PREENCHER>` foram preenchidos com os dados reais da
+// controladora. O componente segue existindo em `DocumentoLegal.jsx`
+// para uma revisão futura que introduza dado novo — se voltar a usá-lo,
+// `grep -rn "<PREENCHER>" src` lista o que ficou pendente.
 //
 // ------------------------------------------------------------
 // POR QUE JSX E NÃO MARKDOWN
@@ -37,7 +38,7 @@
 // ============================================================
 
 import Link from 'next/link'
-import { DocSecao, DocP, DocLista, DocItem, DocForte, PREENCHER } from '@/components/DocumentoLegal.jsx'
+import { DocSecao, DocP, DocLista, DocItem, DocForte, DocEmail } from '@/components/DocumentoLegal.jsx'
 
 export const PRIVACIDADE_ATUALIZADO_EM = '1º de agosto de 2026'
 
@@ -47,14 +48,14 @@ export default function ConteudoPrivacidade() {
       <DocSecao numero={1} titulo="Quem trata seus dados">
         <DocP>
           O controlador dos dados coletados neste site é{' '}
-          <PREENCHER>nome civil completo da controladora</PREENCHER>, inscrita no CPF sob o
-          nº <PREENCHER>CPF</PREENCHER>, com endereço em{' '}
-          <PREENCHER>endereço completo, com CEP</PREENCHER>.
+          <DocForte>Giovanna Melo Freire de Castro</DocForte>, inscrita no CPF sob o nº
+          167.207.067-80, com endereço na Rua Venâncio Veloso, 380, Recreio dos
+          Bandeirantes, Rio de Janeiro/RJ, CEP 22790-420.
         </DocP>
         <DocP>
           Para qualquer assunto sobre seus dados — dúvida, pedido de acesso, correção ou
-          exclusão — o canal é <PREENCHER>e-mail de contato</PREENCHER>. É o mesmo endereço
-          para exercer os direitos descritos no item 6.
+          exclusão — o canal é <DocEmail>beyondthelab.rha@gmail.com</DocEmail>. É o mesmo
+          endereço para exercer os direitos descritos no item 6.
         </DocP>
       </DocSecao>
 
@@ -236,7 +237,7 @@ export default function ConteudoPrivacidade() {
         </DocLista>
         <DocP>
           Para exercer qualquer um deles, escreva para{' '}
-          <PREENCHER>e-mail de contato</PREENCHER>. Respondemos em até{' '}
+          <DocEmail>beyondthelab.rha@gmail.com</DocEmail>. Respondemos em até{' '}
           <DocForte>15 dias</DocForte>. Podemos pedir uma confirmação de identidade antes de
           entregar ou apagar dados — é uma proteção sua, para que ninguém peça isso no seu
           lugar.
