@@ -115,9 +115,10 @@ existe mais.
 | `src/components/InscricaoProvider.jsx` | estado único da modal + integração com o histórico. Fica no `app/layout.jsx`, então vale para todas as rotas |
 | `src/components/InscricaoModal.jsx` | a modal: formulário, tela de sucesso, foco preso, trava de scroll |
 | `src/components/CtaInscricao.jsx` | o `<button>` que abre a modal. **Todo CTA usa este componente** — nenhum é `<a href>` |
-| `src/config/curso.ts` | datas, preço e links. Fonte única: nada disso pode ser reescrito à mão em outro arquivo |
+| `src/config/curso.ts` | só links e formatação. **As datas e o valor vêm do banco** — ver a seção "Turmas" |
 | `src/lib/telefone.ts` | máscara, DDDs válidos e E.164. Usado pelo formulário **e** pela API, para os dois não discordarem |
 | `app/api/waitlist/route.ts` | validação com Zod e insert na tabela `waitlist` via PostgREST |
+| `app/api/turma-ativa/route.ts` | diz à modal se há turma aberta, e com quais datas e valor |
 
 - A tabela tem **RLS ligada e nenhuma policy**, de propósito: todo o acesso é
   server-side com a `service_role`, que ignora RLS. Não crie policy — isso abriria a
@@ -130,14 +131,140 @@ existe mais.
   existe só na interface.
 - `payment_choice` registra qual botão foi clicado (`agora` / `depois`). **Hoje os dois
   caminhos gravam igual** — o Stripe entra depois, e o ponto de ramificação está
-  marcado com `TODO: Prompt B` em `InscricaoModal.jsx`.
-- `status` só recebe `pendente`. Os outros valores do CHECK existem para a integração
-  do Stripe não precisar de nova migração.
+  marcado com `TODO: Prompt B2` em `InscricaoModal.jsx`. Sem turma aberta o campo é
+  **descartado** e gravado como `depois`: não há cobrança a adiantar.
+- `status` recebe `pendente` (turma aberta) ou `lista_espera` (nenhuma turma aberta).
+  Os outros valores do CHECK existem para a integração do Stripe não precisar de nova
+  migração.
+- **Quem decide o modo é o servidor, não a modal.** A rota consulta a turma aberta no
+  banco antes de gravar; o que o cliente afirmar no corpo do POST é ignorado. A modal
+  também consulta, mas só para saber o que desenhar.
+- Os campos de perfil (`nivel_ingles`, `curso`, `periodo`, `disponibilidade`) são
+  **obrigatórios no Zod e nullable no banco**: as linhas anteriores à migração não os
+  têm, e um `not null` na coluna faria o `ALTER` falhar. O banco valida o *domínio* dos
+  valores; a API valida a *obrigatoriedade*.
 - Há um honeypot (campo `website`, escondido por CSS) e um rate limit por IP em memória
   — aproximado em serverless, por instância.
 
-O SQL da migração está em `supabase/migrations/001_inscricao_modal.sql` e é rodado à
-mão no SQL Editor do Supabase.
+O SQL das migrações está em `supabase/migrations/` e é rodado à mão no SQL Editor do
+Supabase, na ordem numérica.
+
+## Turmas
+
+> Esta seção é para quem administra o curso, não para quem programa. Tudo aqui se faz
+> pelo **Supabase Studio**, sem mexer em código e sem publicar nada.
+
+### O que é uma turma
+
+Uma **turma** é uma safra de alunas, com identidade própria: data de início das aulas,
+data da primeira cobrança, valor da mensalidade, duração e a janela de inscrição. Hoje
+existe uma, a "Turma Setembro 2026". Quando chegar a hora da próxima, ela é uma **linha
+nova** na tabela — nunca se edita a turma atual para transformá-la na seguinte, senão
+o registro de quem entrou em qual turma se perde.
+
+**Turma não é a mesma coisa que grupo.** O **grupo** ("Grupo A", "Grupo B") é a divisão
+de horário *dentro* de uma turma. Ele é só um rótulo: não tem data, não tem cobrança e
+não muda nada no sistema. Quem preenche o grupo é você, à mão, depois que as inscrições
+chegam — ver "Montando os grupos" mais abaixo.
+
+### Abrir e fechar as inscrições
+
+No Studio, abra **Table Editor → `turmas`**. A coluna que controla tudo é
+**`inscricoes_abertas`**:
+
+- **marcada (`true`)** → o site mostra o formulário de inscrição normal, com a data da
+  primeira cobrança que estiver nessa linha;
+- **desmarcada (`false`)** → o site passa a mostrar **lista de espera**: a pessoa
+  continua deixando todos os dados, mas sem menção a valor nem a data, e o botão vira
+  "Quero ser avisada".
+
+A mudança vale **na hora**. Não precisa publicar nada, não precisa avisar ninguém — a
+próxima pessoa que abrir a modal já vê o outro modo.
+
+### Só uma turma aberta por vez
+
+O banco **recusa** deixar duas turmas com `inscricoes_abertas` marcado ao mesmo tempo.
+Se você tentar, o Studio devolve um erro de índice duplicado (`turmas_uma_aberta_idx`)
+e não salva.
+
+Isso é proteção, não limitação. Com duas turmas abertas o site não teria como saber em
+qual inscrever as pessoas, e a cobrança automática (que entra no Prompt B2) poderia
+cobrar alguém na data da turma errada.
+
+**Para trocar de turma: desmarque a atual primeiro, salve, depois marque a nova.**
+
+### Criar uma turma nova
+
+**Table Editor → `turmas` → Insert row**. Preencha:
+
+| Campo | O que é | Exemplo |
+|---|---|---|
+| `nome` | como você chama a turma | `Turma Março 2027` |
+| `slug` | o mesmo nome em minúsculas, sem acento, com hífen | `marco-2027` |
+| `data_inicio_aulas` | primeiro dia de aula | `2027-03-01` |
+| `data_primeira_cobranca` | quando a primeira mensalidade é cobrada | `2027-02-25` |
+| `valor_mensal` | mensalidade em reais | `299.99` |
+| `duracao_meses` | quantos meses o programa dura | `6` |
+| `inscricoes_abertas` | deixe **desmarcado** por ora | — |
+
+As datas vão no formato **ano-mês-dia**. O valor usa **ponto**, não vírgula.
+
+Duas coisas que o banco recusa, de propósito:
+
+- **cobrança depois do início das aulas** — quase sempre é engano de digitação;
+- **`slug` repetido** — dois `marco-2027` tornariam impossível saber qual é qual.
+
+Depois de criada e conferida, desmarque `inscricoes_abertas` da turma antiga e marque a
+nova. A partir daí, toda inscrição nova entra na turma nova.
+
+> ⚠️ A data de início da Turma Setembro 2026 está como **1 de setembro**, que era
+> provisório. Quando o dia exato for definido, é só editar essa célula.
+
+### Montando os grupos
+
+Cada inscrição na tabela `waitlist` traz o que você precisa para dividir os horários:
+
+- **`nivel_ingles`** — `basico`, `intermediario` ou `avancado` (autodeclarado pela
+  aluna, não é resultado de prova)
+- **`disponibilidade`** — os dias em que ela pode assistir, ex.: `{seg,qua,sex}`
+- **`curso`** e **`periodo`** — o que ela estuda e em que fase está
+
+Para **filtrar por dia** no Studio, vá em **SQL Editor** e rode:
+
+```sql
+select name, email, nivel_ingles, disponibilidade, grupo
+from public.waitlist
+where disponibilidade @> array['ter']
+order by nivel_ingles, name;
+```
+
+Trocando `'ter'` pelo dia que interessar (`seg`, `ter`, `qua`, `qui`, `sex`). Para quem
+pode **dois dias específicos**, some os dois no array:
+
+```sql
+where disponibilidade @> array['ter','qui']
+```
+
+Decidido o horário, escreva o rótulo na coluna **`grupo`** de cada pessoa — direto no
+Table Editor. Pode ser o que fizer sentido: `Grupo A`, `Terça 19h`, o que for. **O campo
+`grupo` não afeta cobrança nem nada automático**; ele existe só para você se organizar.
+
+### Quem está na lista de espera
+
+São as linhas com **`status = 'lista_espera'`** — elas têm `turma_id` vazio, porque
+entraram quando não havia turma aberta. Quando você abrir a próxima turma, é essa lista
+que vale a pena avisar primeiro:
+
+```sql
+select name, email, phone, nivel_ingles, disponibilidade, created_at
+from public.waitlist
+where status = 'lista_espera'
+order by created_at;
+```
+
+### E o painel?
+
+Tudo isto vai virar tela no **Prompt C**. Até lá, é pelo Studio mesmo.
 
 ## Tema
 
