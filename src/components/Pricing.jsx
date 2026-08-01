@@ -111,6 +111,11 @@ export default function Pricing() {
             </div>
 
             {/* CTA — 373×60 (confirmado) */}
+            {/* O rótulo anterior falava em aquisição: aparecia colado ao
+                preço, no gesto onde se espera um checkout, e abria um
+                formulário que não cobra nada — a promessa mais quebrada
+                da página. Agora diz o mesmo que o primário da modal que
+                ele abre, e os dois deixam de se contradizer. */}
             {/* ⚠️ background / box-shadow vêm de .btn-brand, nunca confirmados */}
             {/* ⚠️ ring-4 ring-white/40 não veio do Dev Mode — provável invenção */}
             <CtaInscricao
@@ -121,7 +126,7 @@ export default function Pricing() {
                          leading-[19.2px] tracking-[-0.8px] text-white ring-4 ring-white/40
                          lg:w-[373px] lg:px-6 lg:text-[22px]"
             >
-              Adquirir Beyond the Lab
+              Garantir minha vaga
               <span className="arrow-badge">
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </span>

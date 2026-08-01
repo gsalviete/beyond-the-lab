@@ -4,6 +4,12 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
 import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
+// A frase do consentimento saiu daqui para um módulo próprio. Não foi
+// arrumação: `/api/waitlist` grava esta mesma constante em
+// `waitlist.consent_text`, e duas cópias divergiriam sem ninguém notar —
+// a partir dali o banco guardaria a prova de um texto que a tela não
+// mostra mais. Ver o cabeçalho de `src/config/consentimento.ts`.
+import { CONSENT_SEGMENTS } from '@/config/consentimento'
 import { mascararTelefone, paraE164, telefoneEhValido } from '@/lib/telefone'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
@@ -41,10 +47,6 @@ const CHECKBOX =
   'h-5 w-5 shrink-0 cursor-pointer rounded-md border border-border-soft accent-brand ' +
   'disabled:cursor-not-allowed disabled:opacity-60'
 
-const CONSENT_TEXT =
-  'Concordo em receber e-mails e mensagens sobre as turmas do Beyond The Lab. ' +
-  'Posso sair a qualquer momento.'
-
 const NIVEIS = [
   { valor: 'basico', rotulo: 'Básico' },
   { valor: 'intermediario', rotulo: 'Intermediário' },
@@ -78,6 +80,10 @@ export default function InscricaoModal({ onFechar }) {
   const cursoId = `${id}-curso`
   const periodoId = `${id}-periodo`
   const consentId = `${id}-consentimento`
+  // Alvo do `aria-labelledby` da caixa de consentimento — ver o bloco do
+  // consentimento no formulário para o porquê de o nome acessível não
+  // vir mais de um <label> que envolve tudo.
+  const consentTextoId = `${id}-consentimento-texto`
   const honeypotId = `${id}-website`
   const erroId = `${id}-erro`
 
@@ -612,11 +618,31 @@ export default function InscricaoModal({ onFechar }) {
               </fieldset>
 
               {/* CONSENTIMENTO — desmarcado por padrão, e é assim que fica.
-                  Consentimento pré-marcado não é consentimento (LGPD). */}
-              <label
-                htmlFor={consentId}
-                className="mt-1 flex cursor-pointer items-start gap-3 text-left"
-              >
+                  Consentimento pré-marcado não é consentimento (LGPD).
+
+                  A frase deixou de ser um <label> único envolvendo tudo, e
+                  a razão é o par de links que ela agora contém: dentro de
+                  um <label>, clicar em qualquer lugar aciona o controle
+                  associado — quem tocasse em "Termos de Uso" marcaria a
+                  caixa junto, consentindo no mesmo gesto em que pediu para
+                  ler o que está consentindo. É o oposto de manifestação
+                  inequívoca.
+
+                  A montagem abaixo resolve por estrutura, e não por
+                  interceptação de evento: os trechos SEM href viram
+                  <label htmlFor>, e continuam alternando a caixa ao serem
+                  clicados; os trechos COM href viram <a>, fora de qualquer
+                  label, e só navegam.
+
+                  (`stopPropagation` no link seria teatro: o React delega
+                  eventos na raiz, e o comportamento de ativação do <label>
+                  é ação padrão do navegador decidida pelo alvo do clique,
+                  não algo que borbulha e possa ser barrado a tempo.)
+
+                  O nome acessível vem do `aria-labelledby` apontando para
+                  o container: assim o leitor de tela anuncia a sentença
+                  inteira, links inclusive, e não só os pedaços rotuláveis. */}
+              <div className="mt-1 flex items-start gap-3 text-left">
                 <input
                   id={consentId}
                   name="consent"
@@ -625,12 +651,37 @@ export default function InscricaoModal({ onFechar }) {
                   disabled={submitting}
                   checked={consentimento}
                   onChange={(e) => setConsentimento(e.target.checked)}
+                  aria-labelledby={consentTextoId}
                   className={`${CHECKBOX} mt-[3px]`}
                 />
-                <span className="font-sans text-[13px] leading-[20px] text-[#345372]">
-                  {CONSENT_TEXT}
+                <span
+                  id={consentTextoId}
+                  className="font-sans text-[13px] leading-[20px] text-[#345372]"
+                >
+                  {CONSENT_SEGMENTS.map((seg, i) =>
+                    seg.href ? (
+                      <a
+                        key={i}
+                        href={seg.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded font-semibold text-brand underline underline-offset-2
+                                   [transition:color_var(--motion-fast)_var(--ease-out)]
+                                   hover:text-brand-deep"
+                      >
+                        {seg.texto}
+                      </a>
+                    ) : (
+                      /* <label> e não <span>: preserva o alvo de clique
+                         generoso do texto, que em mobile é o que de fato
+                         se acerta — a caixa tem 20px de lado. */
+                      <label key={i} htmlFor={consentId} className="cursor-pointer">
+                        {seg.texto}
+                      </label>
+                    ),
+                  )}
                 </span>
-              </label>
+              </div>
 
               {/* HONEYPOT — escondido por CSS, não por type="hidden": bot que
                   varre o DOM ignora hidden, mas preenche um input de texto
@@ -675,6 +726,20 @@ export default function InscricaoModal({ onFechar }) {
                     )}
                   </button>
 
+                  {/* "Prefiro pagar depois" descrevia uma escolha que não
+                      existe: nenhum dos dois botões cobra nada, os dois
+                      gravam a mesma linha, e a única diferença real entre
+                      eles é a intenção declarada. O rótulo antigo prometia
+                      ao clicante do primário que ELE estaria pagando agora
+                      — e não está.
+
+                      O VALOR gravado continua 'depois', de propósito. O
+                      rótulo mudou porque descrevia mal a interface; o dado
+                      não mudou porque descreve bem a fila: o B2 lê
+                      `payment_choice` para saber a quem mandar o link de
+                      cobrança primeiro, e quem clicou aqui segue sendo
+                      quem não pediu pressa. Rótulo e valor respondem a
+                      perguntas diferentes. */}
                   <button
                     type="submit"
                     disabled={submitting}
@@ -684,15 +749,21 @@ export default function InscricaoModal({ onFechar }) {
                     className="btn-outline w-full text-[16px] disabled:cursor-not-allowed
                                disabled:opacity-60 disabled:hover:translate-y-0"
                   >
-                    Prefiro pagar depois
+                    Quero saber mais antes
                   </button>
 
+                  {/* A frase que sustenta o "Garantir minha vaga" logo
+                      acima. Sem ela o botão promete uma transação que a
+                      página não faz — dizer o que de fato acontece (nada
+                      é cobrado, o link chega por e-mail, e até quando) é
+                      o que torna o rótulo forte defensável. */}
                   <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                    Sua vaga fica garantida agora. A primeira cobrança acontece em{' '}
+                    Nada é cobrado agora. Sua vaga fica reservada e o link de pagamento chega
+                    no seu e-mail antes de{' '}
                     <strong className="font-semibold text-ink">
                       {formatarDataPorExtenso(paraDataUTC(turma.data_primeira_cobranca))}
                     </strong>
-                    , antes do início das aulas.
+                    , data da primeira cobrança.
                   </p>
                 </>
               ) : (
@@ -790,13 +861,23 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
         {turma ? (
+          /* Três frases, três acontecimentos, nesta ordem: o que já é
+             verdade, o que chega por e-mail e quando, e o que chega
+             depois. O texto anterior dizia "enviamos os próximos passos"
+             — vago o bastante para a pessoa imaginar qualquer coisa,
+             inclusive uma cobrança que não vem hoje. Cada promessa aqui
+             tem alguém do outro lado obrigado a cumpri-la, e nenhuma
+             delas foi acrescentada por soar bem. */
           <>
-            Sua vaga está reservada. Enviamos os próximos passos para o seu e-mail e, mais
-            perto das aulas, o convite do grupo no WhatsApp. As aulas começam em{' '}
+            Sua vaga está reservada. O link de pagamento chega no seu e-mail antes de{' '}
+            <strong className="font-semibold text-ink">
+              {formatarDataPorExtenso(paraDataUTC(turma.data_primeira_cobranca))}
+            </strong>
+            , data da primeira cobrança. Mais perto do início das aulas, em{' '}
             <strong className="font-semibold text-ink">
               {formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))}
             </strong>
-            .
+            , você recebe o convite do grupo da turma no WhatsApp.
           </>
         ) : (
           <>
