@@ -34,12 +34,19 @@ function PhoneVideo() {
         className="pointer-events-none absolute inset-0 h-full w-full select-none"
       />
 
-      {/* imagem por cima (o rect da tela no SVG é branco opaco) */}
-      {/* TODO: restaurar <video> quando o storage externo estiver configurado (arquivo: teacher.mp4) */}
-      <img
+      {/* vídeo por cima (o rect da tela no SVG é branco opaco) */}
+      {/* As legendas são queimadas na imagem pela edição — não existe faixa de
+         texto para expor num <track>. Não procure o .vtt, ele não existe. */}
+      {/* controls nativo de propósito: dá teclado, foco e anúncio de play/pause
+         sem estado próprio, e é o que mantém este componente como server. */}
+      <video
         className="absolute object-cover"
-        src="/assets/teacher-poster.jpg"
-        alt="Giovanna, professora do Beyond The Lab, falando para a câmera"
+        src="/assets/teacher.mp4"
+        poster="/assets/teacher-poster.jpg"
+        aria-label="Giovanna, professora do Beyond The Lab, falando para a câmera"
+        controls
+        playsInline
+        preload="metadata"
         style={{ ...SCREEN_PCT, borderRadius: SCREEN.radius }}
       />
     </div>

@@ -9,8 +9,13 @@ node_modules
 *.timestamp-*
 *.tsbuildinfo
 
-# vídeos: pesados demais para o git, servidos de storage externo
+# vídeos: pesados demais para o git. A exceção é o teacher.mp4, que é um único
+# arquivo de ~11 MB comprimido para web e PRECISA estar versionado — é ele que a
+# Vercel publica em /assets/teacher.mp4. Sem esta linha o vídeo não entra no
+# commit e a seção "Sobre a professora" quebra em produção. Não remova.
+# O master sem compressão (71 MB) fica fora do repo, em ~/beyondthelab-assets/.
 *.mp4
+!public/assets/teacher.mp4
 
 # design reference exports (source PNG + slices)
 design/

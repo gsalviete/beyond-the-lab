@@ -334,11 +334,56 @@ mudança de código é necessária ao substituí-lo — as quatro rotas já apon
 > O cache de prévia do WhatsApp é agressivo. Depois de trocar a imagem, teste com um link
 > que ainda não circulou (por exemplo `?v=2` no fim da URL) para não ver a versão antiga.
 
-## Observações
+## Vídeo da professora (`public/assets/teacher.mp4`)
 
-- **Vídeo da professora:** `*.mp4` é gitignored (o arquivo tinha 71 MB). O `Teacher.jsx`
-  exibe hoje um frame estático, `public/assets/teacher-poster.jpg`. Quando o storage
-  externo estiver configurado, restaurar o `<video>` — o `TODO` está no componente.
+O vídeo é **versionado no repositório de propósito**. São ~11 MB, um arquivo só, servido
+pela Vercel junto com o resto do `public/`. Storage externo (S3, Mux, Cloudinary) resolveria
+o mesmo problema cobrando uma conta, uma chave e um ponto de falha a mais — desproporcional
+para um único asset desse tamanho, que muda uma vez por ano. Se um dia forem vários vídeos,
+ou vídeos bem maiores, aí sim vale reconsiderar.
+
+O `.gitignore` ignora `*.mp4` de forma geral e abre **uma exceção nomeada** para este
+arquivo:
+
+```
+*.mp4
+!public/assets/teacher.mp4
+```
+
+Sem essa linha o vídeo não entra no commit e a seção "Sobre a professora" sobe quebrada em
+produção. O comentário no `.gitignore` explica isso — não "limpe" a exceção.
+
+**O master sem compressão está fora do repo**, em `~/beyondthelab-assets/teacher.mp4`
+(71 MB, 1080×1920, ~9,5 Mbps — export direto da edição, sem tratamento para web). Ele não é
+versionado e não deve ser: quem precisar regerar o arquivo publicado parte dele.
+
+Comando que gerou a versão em produção:
+
+```bash
+ffmpeg -i ~/beyondthelab-assets/teacher.mp4 \
+  -vf "scale=720:1280:flags=lanczos" \
+  -c:v libx264 -crf 28 -preset slow -pix_fmt yuv420p \
+  -c:a aac -b:a 128k -ac 2 \
+  -movflags +faststart \
+  public/assets/teacher.mp4
+```
+
+Duas escolhas do comando que não são opcionais:
+
+- **`-movflags +faststart`** move o índice (`moov`) para o começo do arquivo. Sem ele o
+  navegador precisa baixar o vídeo inteiro antes de tocar o primeiro frame.
+- **720×1280** porque o elemento exibe em 317×626 CSS px — 1080 de largura era desperdício
+  puro, e o mesmo orçamento de bits distribuído em menos pixels deixa as legendas queimadas
+  mais nítidas, não menos.
+
+O `-crf` controla o tamanho: mais alto = arquivo menor e mais artefato. 28 foi o valor que
+coube abaixo de 12 MB mantendo as legendas indistinguíveis do original no tamanho real de
+exibição. Mexeu no vídeo? Confira o peso e olhe uma legenda antes de commitar.
+
+O áudio é preservado (AAC 128k estéreo) — o play é com som, o vídeo não é decorativo. As
+legendas são **queimadas na imagem** pela edição, então não há `<track>`/`.vtt` para expor.
+
+## Observações
 - As imagens em `public/assets/` foram extraídas do export do Figma. Para produção, vale
   substituir por exports otimizados (WebP) direto do Figma.
 - `public/og.png` ainda é placeholder — especificação do arquivo definitivo na seção
