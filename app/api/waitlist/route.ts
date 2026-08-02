@@ -1,5 +1,7 @@
+import { after } from 'next/server'
 import { z } from 'zod'
 import { buscarTurmaAtiva, insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
+import { confirmarInscricao, notificarAdmin } from '@/lib/email'
 import { E164_BR_REGEX, e164EhValido } from '@/lib/telefone'
 // O MESMO módulo que a modal importa para exibir a frase. É essa
 // identidade que dá valor ao que gravamos: o texto registrado no banco
@@ -215,6 +217,47 @@ export async function POST(req: Request) {
       consent_at: consentAt,
       consent_text: CONSENT_TEXT,
     })
+
+    // ------------------------------------------------------------
+    // E-MAILS — só para inserção NOVA, e nunca bloqueando a resposta.
+    //
+    // `result.ok` sozinho, sem o ramo da duplicata logo abaixo: mandar
+    // confirmação de novo para quem já estava na lista revelaria que o
+    // e-mail existe no banco. É exatamente o oráculo que a resposta
+    // genérica de duplicata existe para evitar — e o envio silencioso
+    // seria um canal lateral contornando a resposta HTTP idêntica.
+    //
+    // `after` do next/server, e não uma promessa solta: em serverless a
+    // função pode ser congelada assim que devolve a resposta, e uma
+    // promessa não aguardada morre no meio do fetch para o Resend. O
+    // `after` é o contrato que a Vercel respeita — a execução continua
+    // depois da resposta ir embora, com a plataforma mantendo a lambda
+    // viva até estas tasks terminarem. A pessoa vê a tela de sucesso sem
+    // esperar o Resend.
+    //
+    // Os dois envios em paralelo, com `allSettled` e try/catch próprio
+    // dentro de cada função: nenhum dos dois pode impedir o outro, e o
+    // conjunto não pode virar rejeição não tratada aqui dentro.
+    // ------------------------------------------------------------
+    if (result.ok) {
+      const paraEmail = {
+        name,
+        email,
+        phone,
+        nivel_ingles,
+        curso,
+        periodo,
+        disponibilidade,
+        payment_choice: turma ? payment_choice : ('depois' as const),
+      }
+
+      after(async () => {
+        await Promise.allSettled([
+          notificarAdmin(paraEmail, turma),
+          confirmarInscricao(paraEmail, turma),
+        ])
+      })
+    }
 
     // Duplicata é sucesso do ponto de vista de quem preencheu: a pessoa está
     // na lista. Responder diferente aqui transformaria o formulário num
