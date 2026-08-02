@@ -104,10 +104,18 @@ Variables**, marcadas para Production, Preview e Development.
 |-----------------------------|-------------|-----|
 | `SUPABASE_URL`              | sim         | Project URL do Supabase. Usada só no servidor, por `src/lib/supabase.ts` |
 | `SUPABASE_SERVICE_ROLE_KEY` | sim         | chave `service_role`. **Segredo.** Ignora RLS — é o que permite a tabela `waitlist` não ter nenhuma policy. Sem `NEXT_PUBLIC_`, jamais no cliente |
+| `RESEND_API_KEY`            | não         | chave da API do Resend. **Segredo.** Usada só por `src/lib/email.ts`. Sem ela a inscrição grava normalmente e o e-mail não sai — ver *E-mails transacionais* |
+| `EMAIL_REMETENTE`           | não         | remetente dos dois e-mails. O domínio precisa estar verificado no Resend |
+| `EMAIL_ADMIN`               | não         | caixa da Giovanna. Destinatário da notificação **e** `reply_to` da confirmação |
 | `NEXT_PUBLIC_SITE_URL`      | não         | base absoluta de OG/Twitter (`metadataBase`). Sem ela, cai em `VERCEL_PROJECT_PRODUCTION_URL` (injetada pela Vercel) e, fora da Vercel, em `http://localhost:3000` |
 
 Sem as duas do Supabase o site sobe normalmente; só o POST em `/api/waitlist` responde
 500 e registra o motivo no log do servidor.
+
+As três do e-mail são opcionais no sentido estrito de que a aplicação sobe e **grava
+inscrições** sem elas — o que se perde é a notificação. Faltando qualquer uma, o log
+registra qual, e ninguém fica sabendo da inscrição além do banco. Na prática, em
+produção, configure as três.
 
 ## Inscrição
 
@@ -152,6 +160,42 @@ existe mais.
 
 O SQL das migrações está em `supabase/migrations/` e é rodado à mão no SQL Editor do
 Supabase, na ordem numérica.
+
+## E-mails transacionais
+
+Cada inscrição nova dispara **dois** e-mails, pelo **Resend** (`src/lib/email.ts`, chamado
+por `app/api/waitlist/route.ts`):
+
+| Para | Assunto | Conteúdo |
+|------|---------|----------|
+| `EMAIL_ADMIN` — a Giovanna | `Nova inscrição: [nome]` | todos os dados da inscrição, WhatsApp clicável, turma e horário de chegada |
+| quem se inscreveu | `Inscrição recebida` ou `Você está na lista de espera` | confirmação, recapitulação do que informou, próximos passos, data de início e Instagram |
+
+Ambos saem de `EMAIL_REMETENTE`, com `reply_to` apontando para `EMAIL_ADMIN` — responder
+qualquer um dos dois cai no Gmail dela.
+
+**Falha de envio não bloqueia inscrição, em nenhuma hipótese.** Nenhuma função de
+`email.ts` lança: erro de rede, chave inválida ou domínio não verificado viram log no
+servidor e param ali. A inscrição já foi gravada quando o envio começa, e o dado da
+pessoa é o que importa — perder o aviso é ruim, perder a inscrição é inaceitável.
+
+Três detalhes de comportamento que não são óbvios:
+
+- **Duplicata não dispara e-mail.** A rota responde sucesso genérico para quem já está na
+  lista, justamente para o formulário não virar um oráculo de "este e-mail já existe?".
+  Mandar a confirmação de novo entregaria a mesma informação por outro canal.
+- **Honeypot não dispara nada** — ele nem chega ao banco.
+- **O disparo usa `after` do `next/server`**, não uma promessa solta. Em serverless a
+  função pode ser congelada assim que devolve a resposta, e uma promessa não aguardada
+  morreria no meio do envio. O `after` roda depois da resposta, com a Vercel mantendo a
+  execução viva até terminar — a pessoa vê a tela de sucesso sem esperar o Resend.
+
+O HTML é montado à mão, com tabela e estilo inline, **sem biblioteca de template e sem
+nenhuma imagem**. Cliente de e-mail não roda flexbox, grid nem variável CSS, e bloqueia
+imagem por padrão — logo remoto viraria retângulo vazio. As cores vêm dos tokens de
+`tailwind.config.js`, copiadas como literais porque não há como referenciar classe
+utilitária dentro de um e-mail. Vai junto uma versão em texto puro, que ajuda na
+entregabilidade e cobre quem lê sem HTML.
 
 ## Turmas
 

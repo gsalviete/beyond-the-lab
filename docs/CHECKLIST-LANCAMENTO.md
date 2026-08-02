@@ -35,6 +35,11 @@ Ordem sugerida: bloco 0 primeiro (sem ele o resto falha), depois o que quiser.
       > ninguém percebeu.
 - [ ] `NEXT_PUBLIC_SITE_URL` está setada na Vercel com o domínio final.
       É ela que monta as URLs absolutas do OG — errada, a prévia do link não carrega imagem.
+- [ ] `RESEND_API_KEY`, `EMAIL_REMETENTE` e `EMAIL_ADMIN` estão setadas na Vercel.
+      Sem elas a inscrição grava normalmente e **ninguém é avisado** — o silêncio é o
+      sintoma, e ele é fácil de confundir com "não teve inscrição".
+- [ ] O domínio de `EMAIL_REMETENTE` aparece como **Verified** no painel do Resend.
+      Domínio não verificado faz a API responder 403 e os dois e-mails somem no log.
 
 ---
 
@@ -63,11 +68,33 @@ Faça você mesma, com dados seus, na URL de produção. Não vale localhost.
       igual, com `payment_choice` = `depois`
 - [ ] **Apague as duas linhas de teste** antes de divulgar
 
+### Os dois e-mails
+
+Chegam alguns segundos depois do envio, não instantaneamente — eles saem **depois** da
+resposta ao navegador, de propósito, para a tela de sucesso não esperar o Resend.
+
+- [ ] **Na sua caixa (`EMAIL_ADMIN`)**: chegou o `Nova inscrição: [seu nome]`
+  - [ ] Todos os campos conferem: nome, e-mail, WhatsApp, nível, curso, período,
+        disponibilidade, escolha de pagamento, turma e horário
+  - [ ] **Clicar no WhatsApp abre a conversa** com o número certo
+  - [ ] **Responder o e-mail** endereça para `EMAIL_ADMIN`, não para o remetente
+- [ ] **Na caixa do e-mail que você usou na inscrição**: chegou a confirmação
+  - [ ] A recapitulação dos dados está correta
+  - [ ] A **data de início das aulas** é a da turma, e é a mesma da tela de sucesso
+  - [ ] O link do Instagram abre o perfil certo
+  - [ ] **Responder cai na caixa da Giovanna**
+- [ ] **Abra os dois com as imagens bloqueadas** (Gmail: "Perguntar antes de exibir
+      imagens externas"). Os dois têm que continuar legíveis e fazer sentido — eles não
+      usam imagem nenhuma, então nada pode sumir
+- [ ] Nenhum dos dois caiu no **spam**. Se caiu, o problema é DKIM/SPF/DMARC no Resend,
+      não o código
+
 ## 2. E-mail duplicado
 
 - [ ] Envie de novo com um e-mail **já cadastrado**
 - [ ] A pessoa vê a **tela de sucesso normal**, não uma mensagem de erro
 - [ ] Nenhuma linha nova apareceu no Studio
+- [ ] **Nenhum e-mail chegou** — nem para você, nem para o endereço duplicado
 
 > É de propósito. Responder "este e-mail já está cadastrado" transformaria o formulário
 > num verificador de quem se inscreveu no curso.
