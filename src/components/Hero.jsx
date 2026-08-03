@@ -18,7 +18,13 @@ export default function Hero() {
       <div className="container-page grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_480px] lg:gap-0">
 
         {/* ---------- COLUNA ESQUERDA ---------- */}
-        <div>
+        {/* ⚠️ min-w-0: filho de grid tem `min-width: auto`, ou seja piso no
+            min-content. Os botões de 300px viravam esse piso e esticavam a
+            coluna para 300 num viewport de 320 (área útil 272), estourando 4px
+            para fora da tela — e o `max-w-full` deles não corrigia porque
+            passava a medir 100% de uma coluna já esticada. Em lg é inócuo:
+            a primeira faixa já é `minmax(0,1fr)` e a segunda é fixa em 480. */}
+        <div className="min-w-0">
           {/* Figma: 244 x 28 */}
           <span className="reveal-hero inline-flex h-7 items-center gap-2 rounded-full bg-white pl-[1px] pr-4
                            text-[13.722px] font-normal leading-none tracking-[-0.352px] text-ink
@@ -103,7 +109,7 @@ export default function Hero() {
 
         {/* ---------- COLUNA DIREITA ---------- */}
         {/* card 41px mais baixo que o texto (Figma: badge y=190, card y=231) */}
-        <div className="relative lg:mt-[41px]">
+        <div className="relative min-w-0 lg:mt-[41px]">
 
           {/* CARD — Figma: 480 x 656, radius 24, border 0.873px #FF5986 */}
           {/* superfície visual do hero: fade + escala mínima, terminando estável */}

@@ -28,7 +28,18 @@ export default function Personas() {
   return (
     /* o padding lateral fica na section: o frame de 1117 continua centrado
        e intacto em 1440, e no mobile a caixa vira fluida com gutter */
-    <section id="curso" className="relative px-6 py-20 md:px-10">
+    /* `overflow-x-clip`: o microscópio abaixo termina em x=1521 num viewport
+       de 1440 e era a ÚNICA fonte real de rolagem horizontal da página — 81px
+       em 1440, 161 em 1280, 376 em 1024. Todos os outros decorativos que
+       passam da borda já são cortados por um ancestral com overflow-hidden.
+       O `overflow-x: clip` do html não segura porque, na raiz, o overflow
+       propaga para a viewport e o eixo y reabre contexto de rolagem; aqui,
+       numa section comum, `clip` no eixo x mantém `overflow-y: visible` e o
+       microscópio continua sangrando para cima (top: -182px), que é o que o
+       desenho pede. Recorte no border-box da section = borda da viewport,
+       então o render em 1440 não muda: só some a barra de rolagem.
+       Não usar `overflow: clip` nos dois eixos — corta o topo do microscópio. */
+    <section id="curso" className="relative overflow-x-clip px-6 py-20 md:px-10">
       <div className="relative mx-auto flex w-full max-w-[1117px] flex-col items-center gap-6">
         {/* H2 — Geist 46/600, line-height normal, #022D57, caixa = 1117 (stretch) */}
         <h2 className="reveal h2-section w-full text-center font-display font-semibold leading-[normal] text-ink">

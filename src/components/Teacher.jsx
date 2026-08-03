@@ -1,6 +1,7 @@
 import { ArrowUpRight } from './Icons.jsx'
 import LinkListaEspera from './LinkListaEspera.jsx'
 import PhoneVideo from './PhoneVideo.jsx'
+import CredencialCrbm from './CredencialCrbm.jsx'
 
 const tags = ['Experiência internacional', 'Especialista em Reprodução Humana', 'Vivência prática', 'Mercado internacional']
 
@@ -79,12 +80,17 @@ export default function Teacher() {
           </h2>
         </div>
 
+        {/* ⚠️ min-w-0 nos dois filhos: mesma armadilha das outras seções — o
+            `min-width: auto` de item de grid dava piso de 300px (a moldura do
+            telefone de um lado, o botão de 300 do outro) e estourava os 272 de
+            área útil em 320px. Em lg as faixas 0.8fr/1.2fr ficam bem acima do
+            min-content e o desktop não muda. */}
         <div className="mt-12 grid items-center gap-12 lg:grid-cols-[0.8fr_1.2fr]">
-          <div className="reveal-soft" style={{ '--reveal-delay': '150ms' }}>
+          <div className="reveal-soft min-w-0" style={{ '--reveal-delay': '150ms' }}>
             <PhoneFrame />
           </div>
 
-          <div>
+          <div className="min-w-0">
             {/* Texto — Geist 18/400/normal/body (mesmo padrão de Personas e PainPoints) */}
             <p className="reveal p-section font-display font-normal leading-[1.6] text-body">
               Idealizado por Giovanna, uma profissional que viveu a rotina do laboratório, participou de congressos
@@ -94,14 +100,14 @@ export default function Teacher() {
 
             {/* Registro profissional. Não existe elemento de nome isolado nesta
                 seção — "Giovanna" aparece dentro do parágrafo acima —, então a
-                linha de credencial ancora no parágrafo que a nomeia.
-                `text-muted` é o token de texto secundário que o projeto usa em
-                legenda (o copyright do Footer e a "Última atualização" dos
-                documentos legais são os dois usos existentes).
-                `mt-3` é o mesmo passo que separa o kicker do H2 nesta seção. */}
-            <p className="reveal mt-3 font-sans text-sm text-muted" style={{ '--reveal-delay': '110ms' }}>
-              CRBM-7 11567
-            </p>
+                credencial ancora no parágrafo que a nomeia.
+                `mt-3` é o mesmo passo que separa o kicker do H2 nesta seção.
+                Era uma linha em `text-muted`, do mesmo peso do copyright do
+                rodapé; virou selo porque é aqui que a autoridade da professora
+                se estabelece, logo abaixo do texto que conta a trajetória. */}
+            <div className="reveal mt-3" style={{ '--reveal-delay': '110ms' }}>
+              <CredencialCrbm />
+            </div>
 
             <div className="mt-7 flex flex-wrap" style={{ rowGap: 10, columnGap: 24 /* ⚠️ derivado */ }}>
               {tags.map((t, i) => (

@@ -30,7 +30,11 @@ export default function PainPoints() {
       />
 
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
-        <div className="flex flex-col gap-6">
+        {/* ⚠️ min-w-0 nos dois filhos: `min-width: auto` de item de grid punha
+            piso no min-content, e o botão de 300px esticava a coluna além dos
+            272 de área útil em 320px. Em lg as duas colunas medem 536 e o
+            min-content nunca chega perto — o desktop não se mexe. */}
+        <div className="flex min-w-0 flex-col gap-6">
           <h2 className="reveal h2-section max-w-[332px] font-display font-semibold leading-normal text-ink">
             Seu <span className="text-brand-line">inglês</span> acompanha sua carreira?
           </h2>
@@ -47,7 +51,7 @@ export default function PainPoints() {
           </LinkListaEspera>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-5 sm:grid-cols-2">
           {cards.map((c, i) => (
             <div
               key={c.n}
