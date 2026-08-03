@@ -50,11 +50,27 @@ for (const { prefixo, width, height } of alvos) {
 
   // Scroll horizontal é bug de layout, não detalhe visual: medir sempre,
   // em vez de depender de alguém reparar na barra do print.
-  const { doc, win } = await pg.evaluate(() => ({
-    doc: document.documentElement.scrollWidth,
-    win: window.innerWidth,
-  }))
-  console.log(`[${prefixo}] ${width}x${height} — scrollWidth ${doc} / innerWidth ${win}${doc > win ? '  ⚠️ OVERFLOW-X' : '  ok'}`)
+  //
+  // Antes isto comparava `scrollWidth` com `innerWidth`, e essa medida mente
+  // nas duas direções. `getBoundingClientRect` ignora recorte, então qualquer
+  // decorativo já cortado por um ancestral com overflow-hidden aparecia como
+  // vazamento (falso positivo); e um `overflow-x: clip` que não segura de fato
+  // pode zerar a diferença sem impedir a rolagem (falso negativo). O que
+  // interessa é a única coisa que o usuário sente: dá para arrastar a página
+  // para o lado? Empurrar o scroll para o extremo e ler onde ele parou
+  // responde isso direto.
+  const rolagem = await pg.evaluate(() => {
+    const antes = window.scrollX
+    window.scrollTo(99999, window.scrollY)
+    const max = window.scrollX
+    window.scrollTo(antes, window.scrollY)
+    return { max, doc: document.documentElement.scrollWidth, win: document.documentElement.clientWidth }
+  })
+  console.log(
+    `[${prefixo}] ${width}x${height} — rolagem-x ${rolagem.max}px ` +
+      `(scrollWidth ${rolagem.doc} / clientWidth ${rolagem.win})` +
+      `${rolagem.max > 0 ? '  ⚠️ OVERFLOW-X' : '  ok'}`,
+  )
 
   const secoes = await pg.$$('main > *')
   for (let i = 0; i < secoes.length; i++) {
@@ -94,11 +110,17 @@ for (const { prefixo, width, height } of alvos) {
   await pg.waitForTimeout(800)
   await pg.screenshot({ path:`design/render_${prefixo}_conteudo_full.png`, fullPage:true })
   await pg.screenshot({ path:`design/render_${prefixo}_conteudo_fold.png`, clip:{ x:0, y:0, width, height } })
-  const syl = await pg.evaluate(() => ({
-    doc: document.documentElement.scrollWidth,
-    win: window.innerWidth,
-  }))
-  console.log(`[${prefixo}] conteudo-programatico — scrollWidth ${syl.doc} / innerWidth ${syl.win}${syl.doc > syl.win ? '  ⚠️ OVERFLOW-X' : '  ok'}`)
+  const syl = await pg.evaluate(() => {
+    const antes = window.scrollX
+    window.scrollTo(99999, window.scrollY)
+    const max = window.scrollX
+    window.scrollTo(antes, window.scrollY)
+    return { max, doc: document.documentElement.scrollWidth, win: document.documentElement.clientWidth }
+  })
+  console.log(
+    `[${prefixo}] conteudo-programatico — rolagem-x ${syl.max}px ` +
+      `(scrollWidth ${syl.doc} / clientWidth ${syl.win})${syl.max > 0 ? '  ⚠️ OVERFLOW-X' : '  ok'}`,
+  )
 
   await pg.close()
 }
