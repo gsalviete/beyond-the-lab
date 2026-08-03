@@ -14,13 +14,13 @@ export const metadata = {
     description: DESCRIPTION,
     type: 'website',
     locale: 'pt_BR',
-    images: ['public/og.png'],
+    images: ['/og.png'],
   },
   twitter: {
     card: 'summary_large_image',
     title: TITLE,
     description: DESCRIPTION,
-    images: ['public/og.png'],
+    images: ['/og.png'],
   },
 }
 

@@ -33,13 +33,13 @@ export const metadata = {
     description: SITE_DESCRIPTION,
     type: 'website',
     locale: 'pt_BR',
-    images: ['public/og.png'],
+    images: ['/og.png'],
   },
   twitter: {
     card: 'summary_large_image',
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
-    images: ['public/og.png'],
+    images: ['/og.png'],
   },
 }
 
