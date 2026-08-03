@@ -34,12 +34,20 @@ export default function Pricing() {
             por left/top. Abaixo de lg nada disso sobrevive: o card de preço
             fica em left 659 e seria inteiramente cortado pelo overflow-hidden.
             Base vira stack vertical fluido; lg: reconstrói o frame original. */}
+        {/* Em 1440 este é o painel de 1212×835 do Figma, e raio, borda e p-6
+            fazem parte dele. Abaixo de lg os três só produziam uma moldura
+            dentro da moldura: a section já dá o gutter de 24px com `px-6`, e o
+            `p-6` daqui somava outros 24, encolhendo o card de preço para 292px
+            num viewport de 390. Nenhuma outra seção da página tem raio ou
+            borda no wrapper em base — o padrão do projeto é seção sem moldura,
+            e é esse padrão que a base passa a seguir. Tudo volta em `lg:`. */}
         <div
-          className="relative flex flex-col gap-10 overflow-hidden rounded-[36px]
-                     border border-[rgba(17,17,17,0.09)]
+          className="relative flex flex-col gap-10 overflow-hidden rounded-none
+                     border-0 border-[rgba(17,17,17,0.09)]
                      bg-[linear-gradient(153deg,#FDEEF2_0%,#FCFCFC_58%)]
                      shadow-[0_40px_80px_-36px_rgba(247,88,131,0.28)]
-                     p-6 md:p-14 lg:block lg:h-[835px]"
+                     p-0 md:p-14 lg:block lg:h-[835px]
+                     lg:rounded-[36px] lg:border"
         >
           {/* ───── DECORATIVOS ───── */}
           {/* ⚠️ derivado: posições estimadas no render, sem X/Y do Inspect */}
@@ -114,10 +122,19 @@ export default function Pricing() {
             {/* PREÇO */}
             {/* ⚠️ derivado: -mb-3 encurta só a transição preço → CTA (32 − 12 = 20px).
                 O gap-8 do card segue intacto para as outras três. */}
-            <div className="relative -mb-3 w-[339px] max-w-full lg:mb-0">
-              {/* ⚠️ derivado: 64.776px é `whitespace-nowrap` e não cabe em 375.
-                  44px é o corpo que devolve peso ao preço no mobile sem estourar
-                  os 250px do wrapper — o texto mede 212,6px ali. */}
+            {/* ⚠️ derivado: abaixo de lg o `por mês` deixa de ser absoluto e
+                passa a ser irmão do preço na mesma linha de base. A ancoragem
+                absoluta foi calibrada para o wrapper de 339px do Figma; num
+                wrapper de 230–324px ela sobrepunha 40,7px do preço e ainda
+                saía 4px pela direita. O `gap-0` não é número novo: é a medida
+                do próprio desktop, onde a borda do preço cai em ~326,0 e o
+                `por mês` começa em ~326,3 — os dois já são encostados lá.
+                Em `lg:` tudo volta (`lg:block` + `lg:absolute`), então o
+                render de 1440 não se mexe. O corpo do preço segue 44px: medido,
+                cabe em 320/360/390/414 com folga de 7,3 / 27,3 / 42,3 / 54,3px
+                até a borda do card. */}
+            <div className="relative -mb-3 flex w-[339px] max-w-full items-baseline
+                            justify-center gap-0 lg:mb-0 lg:block">
               <span
                 className="text-grad block whitespace-nowrap text-center font-display
                            text-[44px] font-medium leading-[58px]
@@ -127,11 +144,10 @@ export default function Pricing() {
                 R$ 299,99
               </span>
               {/* ⚠️ derivado: ancoragem absoluta — pai sem auto-layout confirmado */}
-              {/* ⚠️ derivado: o offset acompanha o corpo menor do preço */}
               <span
-                className="absolute -right-1 bottom-1 whitespace-nowrap text-center
-                           font-display text-[11.803px] font-medium leading-[18.619px]
-                           text-[#26020B] lg:-right-8 lg:bottom-5"
+                className="whitespace-nowrap text-center font-display
+                           text-[11.803px] font-medium leading-[18.619px]
+                           text-[#26020B] lg:absolute lg:-right-8 lg:bottom-5"
               >
                 por mês
               </span>
@@ -183,12 +199,31 @@ export default function Pricing() {
             {/* TRUST ROW — item: inline-flex, gap 12 (confirmado) */}
             {/* ⚠️ derivado: os 3 selos em linha pedem 382px — no mobile
                 empilham, que é a única forma de manter os 16px do rótulo */}
-            <div className="flex w-full shrink-0 flex-col items-center justify-center gap-2
-                            lg:inline-flex lg:h-[44px] lg:w-[382px] lg:flex-row lg:gap-3">
+            {/* Empilhados, `items-center` centrava cada linha pela própria
+                largura e os três ícones começavam em x diferentes (120 / 98,7
+                / 94,7 medidos em 390). Agora o bloco encolhe para o conteúdo
+                (`w-fit`), é centralizado como um todo (`mx-auto`) e as linhas
+                se alinham à esquerda dentro dele — um único eixo de ícones.
+                Em lg nada disso vale: `lg:mx-0` devolve a centralização ao
+                `items-center` do card, que é o que produz o transbordo
+                simétrico dos 382px dentro dos 355px de área útil. Trocar por
+                margem automática ancoraria o bloco na borda e o moveria
+                13,5px — por isso `mx-0` e não `mx-auto` no desktop. */}
+            <div className="mx-auto flex w-fit shrink-0 flex-col items-start justify-center gap-2
+                            lg:mx-0 lg:inline-flex lg:h-[44px] lg:w-[382px] lg:flex-row
+                            lg:items-center lg:gap-3">
               {guarantees.map((g) => {
                 const Icon = g.icon
                 return (
                   <div key={g.label} className="inline-flex items-center justify-center gap-3">
+                    {/* ⚠️ Branco por decisão de design. Medido sobre o
+                        gradiente do card: 1,90–2,26:1 no mobile e 1,95–2,16:1
+                        em 1440 — abaixo dos 4,5:1 que AA pede para texto
+                        normal. Nenhum ponto do gradiente atual sustenta branco
+                        em AA (o mais escuro dá 2,38:1), então isto só passa a
+                        conformar se o gradiente escurecer ou o texto mudar de
+                        cor. Registrado aqui para não ser "corrigido" por
+                        engano numa próxima passagem. */}
                     <Icon className="h-6 w-6 shrink-0 text-white" />
                     <span className="font-display text-[16px] font-medium leading-[21.6px] text-white">
                       {g.label}
