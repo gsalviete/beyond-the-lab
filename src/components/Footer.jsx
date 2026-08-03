@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import CredencialCrbm from './CredencialCrbm.jsx'
 
 // Não havia link nenhum neste footer, então não existia "padrão dos
 // links existentes" para copiar. O estilo abaixo é derivado do link
@@ -29,8 +30,13 @@ export default function Footer() {
             que separa as duas linhas sem as colar. */}
         <div className="flex flex-col items-center md:items-start">
           <span className="reveal font-display text-lg font-bold text-grad">Beyond The Lab</span>
-          <span className="reveal mt-1 font-sans text-sm text-muted" style={{ '--reveal-delay': '30ms' }}>
-            CRBM-7 11567
+          {/* Mesma credencial da seção "Sobre a professora", na variante
+              compacta: aqui o contexto é de conformidade, não de autoridade,
+              e a legenda em duas linhas competiria com o wordmark acima.
+              O valor vem da mesma constante — as duas superfícies não podem
+              divergir. */}
+          <span className="reveal mt-2 inline-block" style={{ '--reveal-delay': '30ms' }}>
+            <CredencialCrbm compacto />
           </span>
         </div>
 

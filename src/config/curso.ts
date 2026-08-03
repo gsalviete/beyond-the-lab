@@ -16,6 +16,19 @@
 export const INSTAGRAM_URL = 'https://www.instagram.com/giovanna.embrio/'
 
 /**
+ * Registro profissional da professora.
+ *
+ * Estava escrito à mão em dois lugares (`Footer.jsx` e `Teacher.jsx`), com
+ * o risco óbvio de os dois divergirem numa edição futura. O valor abaixo foi
+ * copiado VERBATIM de lá: hífen entre `CRBM` e `7`, espaço simples antes do
+ * número, sem `nº`, sem barra, sem região por extenso.
+ *
+ * ⚠️ Não reformatar, não normalizar, não completar. É dado de credencial —
+ * se precisar mudar, confirme na fonte antes.
+ */
+export const CRBM = 'CRBM-7 11567'
+
+/**
  * Converte a `date` do Postgres ('YYYY-MM-DD') num `Date` em UTC.
  *
  * É a ponte entre o banco e `formatarDataPorExtenso`, e ela precisa
