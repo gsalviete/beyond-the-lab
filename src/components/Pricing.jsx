@@ -112,13 +112,15 @@ export default function Pricing() {
             style={{ '--reveal-delay': '150ms' }}
           >
             {/* PREÇO */}
-            <div className="relative w-[339px] max-w-full">
+            {/* ⚠️ derivado: -mb-3 encurta só a transição preço → CTA (32 − 12 = 20px).
+                O gap-8 do card segue intacto para as outras três. */}
+            <div className="relative -mb-3 w-[339px] max-w-full lg:mb-0">
               {/* ⚠️ derivado: 64.776px é `whitespace-nowrap` e não cabe em 375.
-                  34px é o maior corpo que ainda deixa o "por mês" encostar no
-                  último dígito sem cobrir, como acontece em 1440. */}
+                  44px é o corpo que devolve peso ao preço no mobile sem estourar
+                  os 250px do wrapper — o texto mede 212,6px ali. */}
               <span
                 className="text-grad block whitespace-nowrap text-center font-display
-                           text-[34px] font-medium leading-[46px]
+                           text-[44px] font-medium leading-[58px]
                            md:text-[52px] md:leading-[70px]
                            lg:text-[64.776px] lg:leading-[87.448px]"
               >
