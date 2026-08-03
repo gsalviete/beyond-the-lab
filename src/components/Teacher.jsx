@@ -1,5 +1,6 @@
 import { ArrowUpRight } from './Icons.jsx'
-import CtaInscricao from './CtaInscricao.jsx'
+import LinkListaEspera from './LinkListaEspera.jsx'
+import PhoneVideo from './PhoneVideo.jsx'
 
 const tags = ['Experiência internacional', 'Especialista em Reprodução Humana', 'Vivência prática', 'Mercado internacional']
 
@@ -18,7 +19,7 @@ const SCREEN_PCT = {
   height: pct(SCREEN.height, 642),
 }
 
-function PhoneVideo() {
+function PhoneFrame() {
   return (
     /* ⚠️ 343×642 é o tamanho natural do SVG — confirmar o tamanho do nó no Dev Mode */
     <div
@@ -31,24 +32,13 @@ function PhoneVideo() {
         alt=""
         aria-hidden="true"
         draggable="false"
+        width={343}
+        height={642}
         className="pointer-events-none absolute inset-0 h-full w-full select-none"
       />
 
-      {/* vídeo por cima (o rect da tela no SVG é branco opaco) */}
-      {/* As legendas são queimadas na imagem pela edição — não existe faixa de
-         texto para expor num <track>. Não procure o .vtt, ele não existe. */}
-      {/* controls nativo de propósito: dá teclado, foco e anúncio de play/pause
-         sem estado próprio, e é o que mantém este componente como server. */}
-      <video
-        className="absolute object-cover"
-        src="/assets/teacher.mp4"
-        poster="/assets/teacher-poster.jpg"
-        aria-label="Giovanna, professora do Beyond The Lab, falando para a câmera"
-        controls
-        playsInline
-        preload="metadata"
-        style={{ ...SCREEN_PCT, borderRadius: SCREEN.radius }}
-      />
+      {/* player por cima (o rect da tela no SVG é branco opaco) */}
+      <PhoneVideo screenStyle={{ ...SCREEN_PCT, borderRadius: SCREEN.radius }} />
     </div>
   )
 }
@@ -63,6 +53,10 @@ export default function Teacher() {
         alt=""
         aria-hidden="true"
         draggable="false"
+        width={439}
+        height={439}
+        loading="lazy"
+        decoding="async"
         /* decorativo puro, ancorado em coordenadas do frame de 1440 */
         className="pointer-events-none absolute hidden select-none lg:block"
         style={{
@@ -87,7 +81,7 @@ export default function Teacher() {
 
         <div className="mt-12 grid items-center gap-12 lg:grid-cols-[0.8fr_1.2fr]">
           <div className="reveal-soft" style={{ '--reveal-delay': '150ms' }}>
-            <PhoneVideo />
+            <PhoneFrame />
           </div>
 
           <div>
@@ -96,6 +90,17 @@ export default function Teacher() {
               Idealizado por Giovanna, uma profissional que viveu a rotina do laboratório, participou de congressos
               internacionais e sentiu na pele a diferença que o inglês certo faz na carreira. O Beyond The Lab nasceu
               para encurtar esse caminho, com proximidade, profundidade técnica e um método pensado para gente como você.
+            </p>
+
+            {/* Registro profissional. Não existe elemento de nome isolado nesta
+                seção — "Giovanna" aparece dentro do parágrafo acima —, então a
+                linha de credencial ancora no parágrafo que a nomeia.
+                `text-muted` é o token de texto secundário que o projeto usa em
+                legenda (o copyright do Footer e a "Última atualização" dos
+                documentos legais são os dois usos existentes).
+                `mt-3` é o mesmo passo que separa o kicker do H2 nesta seção. */}
+            <p className="reveal mt-3 font-sans text-sm text-muted" style={{ '--reveal-delay': '110ms' }}>
+              CRBM-7 11567
             </p>
 
             <div className="mt-7 flex flex-wrap" style={{ rowGap: 10, columnGap: 24 /* ⚠️ derivado */ }}>
@@ -112,10 +117,10 @@ export default function Teacher() {
               ))}
             </div>
 
-            <CtaInscricao className="btn-brand reveal mt-8 w-[300px] max-w-full" style={{ '--reveal-delay': '420ms' }}>
+            <LinkListaEspera className="btn-brand reveal mt-8 w-[300px] max-w-full" style={{ '--reveal-delay': '420ms' }}>
               Lista de espera
               <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-            </CtaInscricao>
+            </LinkListaEspera>
           </div>
         </div>
       </div>

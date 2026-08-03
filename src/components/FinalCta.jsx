@@ -1,5 +1,5 @@
 import { ArrowUpRight } from './Icons.jsx'
-import CtaInscricao from './CtaInscricao.jsx'
+import LinkListaEspera from './LinkListaEspera.jsx'
 
 const bgCta = '/assets/background-cta.svg'
 const ovary = '/assets/ovary.svg'
@@ -20,6 +20,10 @@ export default function FinalCta() {
             src={bgCta}
             alt=""
             aria-hidden="true"
+            width={1212}
+            height={632}
+            loading="lazy"
+            decoding="async"
             className="pointer-events-none absolute inset-0 h-full w-full object-cover lg:object-fill"
           />
 
@@ -29,6 +33,10 @@ export default function FinalCta() {
             src={ovary}
             alt=""
             aria-hidden="true"
+            width={541}
+            height={540}
+            loading="lazy"
+            decoding="async"
             className="pointer-events-none absolute left-[790px] top-[48px] hidden h-[540.107px] w-[540.794px] max-w-none lg:block"
           />
 
@@ -55,10 +63,10 @@ export default function FinalCta() {
               Entre para a lista de espera do Beyond The Lab e seja avisada em primeira mão sobre a abertura das próximas turmas.
             </p>
 
-            <CtaInscricao className="btn-brand reveal mt-4" style={{ '--reveal-delay': '280ms' }}>
+            <LinkListaEspera className="btn-brand reveal mt-4" style={{ '--reveal-delay': '280ms' }}>
               Lista de espera
               <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
-            </CtaInscricao>
+            </LinkListaEspera>
           </div>
         </div>
       </div>

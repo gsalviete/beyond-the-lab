@@ -20,7 +20,19 @@ export default function Footer() {
           como antes; a partir de `md` a fileira volta a ser horizontal e os
           links ficam no meio, entre wordmark e copyright. */}
       <div className="container-page flex flex-col items-center justify-between gap-4 text-center md:flex-row md:text-left">
-        <span className="reveal font-display text-lg font-bold text-grad">Beyond The Lab</span>
+        {/* A assinatura do rodapé é o wordmark — não há nome de pessoa aqui.
+            O registro entra logo abaixo dele, no mesmo `text-sm text-muted` do
+            copyright ao lado: é a "única voz" que o comentário do FOOTER_LINK
+            descreve, e o token de legenda do projeto.
+            ⚠️ derivado: o container usa gap-4 entre os três blocos, mas não há
+            referência de espaçamento DENTRO de um bloco. mt-1 é o menor passo
+            que separa as duas linhas sem as colar. */}
+        <div className="flex flex-col items-center md:items-start">
+          <span className="reveal font-display text-lg font-bold text-grad">Beyond The Lab</span>
+          <span className="reveal mt-1 font-sans text-sm text-muted" style={{ '--reveal-delay': '30ms' }}>
+            CRBM-7 11567
+          </span>
+        </div>
 
         {/* <nav> e não uma <div>: é um grupo de navegação, e o
             `aria-label` o distingue do menu principal para quem navega

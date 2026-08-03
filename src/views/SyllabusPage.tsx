@@ -2,7 +2,7 @@
 
 import { useId, useState, type CSSProperties } from 'react'
 import PageHeader from '@/components/PageHeader.jsx'
-import CtaInscricao from '@/components/CtaInscricao.jsx'
+import LinkListaEspera from '@/components/LinkListaEspera.jsx'
 import Footer from '@/components/Footer.jsx'
 import { ArrowUpRight } from '@/components/Icons.jsx'
 import useScrollReveal from '@/hooks/useScrollReveal.js'
@@ -75,7 +75,11 @@ function AccordionItem({
         className="syl-panel"
         data-open={open}
       >
-        <ul className="flex flex-col gap-2 pt-1">
+        {/* a div intermediária é a caixa de overflow do grid; o respiro de
+            12px virou padding dela para sair do caminho da animação */}
+        <div>
+        {/* pt-4 = os 12px do antigo margin-top do painel + os 4px do pt-1 */}
+        <ul className="syl-panel-inner flex flex-col gap-2 pt-4">
           {module.topics.map((topic) => (
             <li key={topic} className="flex items-start gap-3 text-sm leading-relaxed text-body">
               <span
@@ -86,6 +90,7 @@ function AccordionItem({
             </li>
           ))}
         </ul>
+        </div>
       </div>
     </div>
   )
@@ -141,11 +146,12 @@ export default function SyllabusPage() {
             <p className="reveal p-section font-display text-body">
               As turmas são reduzidas e separadas por nível de inglês.
             </p>
-            {/* Antes navegava de volta para a âncora da lista na landing. A
-                modal está no layout raiz, que cobre esta rota também, então
-                abre aqui mesmo — sem mandar a pessoa sair da página só para
-                ver um formulário. */}
-            <CtaInscricao
+            {/* Único "Lista de espera" fora da landing: o card de compra não
+                existe neste documento, então a âncora precisa do caminho
+                absoluto. O foco no card fica por conta do navegador ao
+                resolver o fragmento no carregamento da landing. */}
+            <LinkListaEspera
+              href="/#planos"
               className="btn-brand reveal w-[300px] max-w-full"
               style={{ '--reveal-delay': '90ms' } as CSSProperties}
             >
@@ -153,7 +159,7 @@ export default function SyllabusPage() {
               <span className="arrow-badge">
                 <ArrowUpRight className="h-4 w-4" />
               </span>
-            </CtaInscricao>
+            </LinkListaEspera>
           </div>
         </div>
       </main>

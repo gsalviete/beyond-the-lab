@@ -332,9 +332,9 @@ O conteúdo mora em `src/content/termos.jsx` e `src/content/privacidade.jsx` —
 estrutura, sem nenhuma classe de CSS. A apresentação inteira está em
 `src/components/DocumentoLegal.jsx`.
 
-> **Os dois são rascunhos não revisados por advogado.** Precisam de revisão profissional
-> antes de o site operar com cobrança recorrente. O aviso está no topo de cada arquivo e
-> também visível na própria página.
+> **Os dois textos foram homologados por advogado.** O aviso de rascunho que ficava no
+> topo das duas páginas foi removido junto com essa homologação. Mudança de redação volta
+> a ser assunto jurídico: passa pela revisão antes de virar commit.
 
 **Antes do push:** os dois documentos têm marcadores `[[PREENCHER: ...]]` que renderizam
 destacados na tela. Liste todos com:

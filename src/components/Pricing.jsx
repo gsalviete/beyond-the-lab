@@ -1,5 +1,7 @@
+import Image from 'next/image'
 import { ArrowUpRight, ChevronRight, Shield, Trophy, Lock } from './Icons.jsx'
 import CtaInscricao from './CtaInscricao.jsx'
+import { ID_CARD_COMPRA } from './LinkListaEspera.jsx'
 const ghostCard = '/assets/ghost-card.png'
 const microscope = '/assets/microscope-pink.svg'
 const dna = '/assets/dna.svg'
@@ -22,10 +24,9 @@ const guarantees = [
 
 export default function Pricing() {
   return (
-    // O formulário deixou de ser seção e virou modal, então a antiga âncora
-    // da lista de espera não existe mais em lugar nenhum. Esta seção segue
-    // como `#preco`: nenhum CTA aponta para ela, mas o id fica disponível
-    // para link direto ao preço.
+    // `#preco` segue na seção para não quebrar link já compartilhado, mas o
+    // destino dos CTAs é o card lá dentro (`#planos`) — parar na seção
+    // deixaria o card, que é o objeto do clique, fora da tela.
     <section id="preco" className="px-6 py-16 md:px-10 lg:px-0">
       <div className="mx-auto w-[1212px] max-w-full">
         {/* ═══════════ FRAME DA SEÇÃO — 1212×835 ═══════════ */}
@@ -49,6 +50,10 @@ export default function Pricing() {
             src={microscope}
             alt=""
             aria-hidden="true"
+            width={560}
+            height={560}
+            loading="lazy"
+            decoding="async"
             className="pointer-events-none absolute -left-61 -top-24 hidden h-[560px] w-[560px]
            max-w-none select-none opacity-[0.4] lg:block"
           />
@@ -56,6 +61,10 @@ export default function Pricing() {
             src={dna}
             alt=""
             aria-hidden="true"
+            width={150}
+            height={240}
+            loading="lazy"
+            decoding="async"
             className="pointer-events-none absolute bottom-8 left-2 hidden h-[240px] w-[150px]
                        max-w-none select-none lg:block"
           />
@@ -63,10 +72,17 @@ export default function Pricing() {
           {/* ───── GHOST — left 671 / top 70 (confirmado) ───── */}
           {/* era md:block, mas em 768 o left-[671px] já joga o ghost pra fora
               do frame — o breakpoint real dele é o layout absoluto, ou seja lg */}
-          <img
+          {/* só existe em lg: — o `sizes` fixo em 480px evita que o otimizador
+              gere variantes mobile que nunca serão pedidas */}
+          <Image
             src={ghostCard}
             alt=""
             aria-hidden="true"
+            width={960}
+            height={1312}
+            loading="lazy"
+            decoding="async"
+            sizes="480px"
             className="pointer-events-none absolute left-[671px] top-[70px] hidden
                        h-[656px] w-[480px] max-w-none select-none lg:block"
           />
@@ -75,7 +91,16 @@ export default function Pricing() {
           {/* order-2: no DOM o card vem antes da coluna de texto (o absoluto
               não liga pra ordem), mas no stack mobile ele fecha a seção,
               depois da lista que justifica o preço */}
+          {/* Alvo do fluxo em duas etapas: todo "Lista de espera" da página
+              aponta para cá, e só o "Garantir minha vaga" daqui de dentro abre
+              a modal. `tabIndex={-1}` existe só para o foco poder pousar no
+              card depois do salto — não entra na ordem de Tab.
+              Sem `scroll-margin-top`: o recuo do header sticky já vem do
+              `html { scroll-padding-top: 96px }` do globals.css. Os dois se
+              somam, e declarar aqui também pararia 192px abaixo do card. */}
           <div
+            id={ID_CARD_COMPRA}
+            tabIndex={-1}
             className="reveal-soft relative order-2 z-10 flex w-full flex-col
                        items-center justify-center gap-8 overflow-hidden
                        rounded-2xl border border-transparent

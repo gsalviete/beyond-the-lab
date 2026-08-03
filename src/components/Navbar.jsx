@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ArrowUpRight } from './Icons.jsx'
-import CtaInscricao from './CtaInscricao.jsx'
+import LinkListaEspera from './LinkListaEspera.jsx'
 
 const links = [
   { label: 'O curso', href: '#curso' },
@@ -81,10 +81,10 @@ export default function Navbar() {
         </ul>
 
         {/* Figma: 190 x 41, padding 8/24, gap 8, sem effects */}
-        <CtaInscricao className="btn-brand-sm hidden w-[190px] lg:inline-flex">
+        <LinkListaEspera className="btn-brand-sm hidden w-[190px] lg:inline-flex">
           Lista de espera
           <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
-        </CtaInscricao>
+        </LinkListaEspera>
 
         {/* ⚠️ derivado: não há botão de menu no design de 1440 — 44x44 é o
             alvo de toque mínimo, e as duas barras viram "X" quando abre */}
@@ -96,15 +96,18 @@ export default function Navbar() {
           aria-label={open ? 'Fechar menu' : 'Abrir menu'}
           className="-mr-2 grid h-11 w-11 shrink-0 place-items-center rounded-xl text-ink lg:hidden"
         >
+          {/* as barras saíam do lugar animando `top`, que é layout. Agora as
+              duas ficam ancoradas em top-0 e o deslocamento é translate-y —
+              as posições finais (0 / 14px fechado, 7px aberto) são as mesmas */}
           <span className="relative block h-4 w-6">
             <span
-              className={`absolute left-0 block h-[2px] w-6 rounded-full bg-current [transition:transform_var(--motion-short)_var(--ease-out),top_var(--motion-short)_var(--ease-out)] ${
-                open ? 'top-[7px] rotate-45' : 'top-0'
+              className={`absolute left-0 top-0 block h-[2px] w-6 rounded-full bg-current [transition:transform_var(--motion-short)_var(--ease-out)] ${
+                open ? 'translate-y-[7px] rotate-45' : 'translate-y-0'
               }`}
             />
             <span
-              className={`absolute left-0 block h-[2px] w-6 rounded-full bg-current [transition:transform_var(--motion-short)_var(--ease-out),top_var(--motion-short)_var(--ease-out)] ${
-                open ? 'top-[7px] -rotate-45' : 'top-[14px]'
+              className={`absolute left-0 top-0 block h-[2px] w-6 rounded-full bg-current [transition:transform_var(--motion-short)_var(--ease-out)] ${
+                open ? 'translate-y-[7px] -rotate-45' : 'translate-y-[14px]'
               }`}
             />
           </span>
@@ -134,13 +137,13 @@ export default function Navbar() {
               </li>
             ))}
             <li className="mt-3">
-              <CtaInscricao
+              <LinkListaEspera
                 onClick={() => setOpen(false)}
                 className="btn-brand-sm w-full"
               >
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-3.5 w-3.5" /></span>
-              </CtaInscricao>
+              </LinkListaEspera>
             </li>
           </ul>
         </div>

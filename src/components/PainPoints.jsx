@@ -1,5 +1,6 @@
+import Image from 'next/image'
 import { ArrowUpRight, FileText } from './Icons.jsx'
-import CtaInscricao from './CtaInscricao.jsx'
+import LinkListaEspera from './LinkListaEspera.jsx'
 
 const cards = [
   { n: '01', text: 'Dificuldade para compreender artigos científicos.' },
@@ -12,10 +13,22 @@ export default function PainPoints() {
   return (
     <section
         id="pain-points"
-        className="relative overflow-hidden bg-cover bg-center bg-no-repeat py-20"
-        style={{ backgroundImage: "url('/assets/painpoints-bg.png')" }}
+        className="relative overflow-hidden py-20"
       >
-      
+      {/* Era `background-image` em CSS: o PNG de 2880px (949 KB) baixava inteiro
+          em qualquer viewport, sem webp e sem srcset. Como <Image fill> ele
+          passa pelo otimizador e o mobile recebe a versão estreita. O resultado
+          visual é idêntico ao `bg-cover bg-center` anterior. */}
+      <Image
+        src="/assets/painpoints-bg.png"
+        alt=""
+        aria-hidden="true"
+        fill
+        sizes="100vw"
+        loading="lazy"
+        className="pointer-events-none -z-10 select-none object-cover object-center"
+      />
+
       <div className="container-page relative grid items-center gap-12 lg:grid-cols-2">
         <div className="flex flex-col gap-6">
           <h2 className="reveal h2-section max-w-[332px] font-display font-semibold leading-normal text-ink">
@@ -28,10 +41,10 @@ export default function PainPoints() {
             Se você se identifica com alguma dessas situações, talvez seja hora de dar um novo passo na sua carreira.
           </p>
 
-          <CtaInscricao className="btn-brand reveal w-[300px] max-w-full" style={{ '--reveal-delay': '220ms' }}>
+          <LinkListaEspera className="btn-brand reveal w-[300px] max-w-full" style={{ '--reveal-delay': '220ms' }}>
             Lista de espera
             <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-          </CtaInscricao>
+          </LinkListaEspera>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">

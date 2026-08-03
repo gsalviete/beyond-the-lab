@@ -1,11 +1,13 @@
 // ============================================================
-// TERMOS DE USO — RASCUNHO NÃO REVISADO POR ADVOGADO
+// TERMOS DE USO
 //
-// ⚠️ Este texto foi redigido como ponto de partida, por quem não é
-// advogado. Ele PRECISA passar por revisão profissional antes de o site
-// operar com cobrança recorrente. Contrato de consumo com assinatura
-// mensal tem exigências que um rascunho técnico não cobre — e o erro
-// aqui não aparece em teste, aparece em reclamação.
+// Texto homologado por advogado. O aviso de rascunho que ficava no topo
+// da página saiu junto com esta nota, porque deixou de ser verdade.
+//
+// Mudança de redação aqui volta a ser assunto jurídico, não de código:
+// este é um contrato de consumo com assinatura mensal, e o erro não
+// aparece em teste, aparece em reclamação. Ajuste de texto passa pela
+// revisão antes de virar commit.
 //
 // Os marcadores `<PREENCHER>` foram preenchidos com os dados reais da
 // prestadora. O componente segue existindo em `DocumentoLegal.jsx` para

@@ -1,11 +1,13 @@
 // ============================================================
-// POLÍTICA DE PRIVACIDADE — RASCUNHO NÃO REVISADO POR ADVOGADO
+// POLÍTICA DE PRIVACIDADE
 //
-// ⚠️ Este texto foi redigido como ponto de partida, por quem não é
-// advogado. Ele PRECISA passar por revisão profissional antes de o site
-// operar com cobrança recorrente — a entrada do Stripe acrescenta um
-// operador que trata dado financeiro, e isso muda o que esta política
-// precisa declarar.
+// Texto homologado por advogado. O aviso de rascunho que ficava no topo
+// da página saiu junto com esta nota, porque deixou de ser verdade.
+//
+// A entrada do Stripe ainda é o gatilho de uma revisão nova: ela
+// acrescenta um operador que trata dado financeiro, e isso muda o que
+// esta política precisa declarar. Mudança de redação passa pela revisão
+// antes de virar commit.
 //
 // Os marcadores `<PREENCHER>` foram preenchidos com os dados reais da
 // controladora. O componente segue existindo em `DocumentoLegal.jsx`

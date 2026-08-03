@@ -19,3 +19,6 @@ node_modules
 
 # design reference exports (source PNG + slices)
 design/
+
+# renders de validação do shot.mjs — regerados a cada rodada, nunca versionados
+render_*.png

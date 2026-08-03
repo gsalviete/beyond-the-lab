@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { Microscope } from './Icons.jsx'
 
 const personas = [
@@ -70,9 +71,16 @@ export default function Personas() {
                 style={{ '--reveal-delay': `${i * 70}ms` }}
               >
                 <div className="overflow-hidden rounded-xl">
-                  <img
+                  {/* 499×224 é o tamanho natural do PNG; a caixa renderiza
+                      160px de altura em largura fluida, daí o `sizes` por coluna. */}
+                  <Image
                     src={p.img}
                     alt=""
+                    width={499}
+                    height={224}
+                    loading="lazy"
+                    decoding="async"
+                    sizes="(min-width: 1024px) 280px, (min-width: 768px) 45vw, 90vw"
                     className="h-40 w-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
                   />
                 </div>

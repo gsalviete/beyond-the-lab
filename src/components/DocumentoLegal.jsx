@@ -119,25 +119,6 @@ export function PREENCHER({ children }) {
 }
 
 /**
- * Aviso de rascunho, no topo de cada documento.
- *
- * Fica na página, e não só no comentário do arquivo-fonte, porque quem
- * precisa saber que o texto não passou por advogado é a cliente ao
- * revisar — e ela lê o site, não o repositório.
- */
-export function DocAvisoRascunho() {
-  return (
-    <aside className="mt-6 rounded-2xl bg-rose-50 p-5 ring-1 ring-brand/15">
-      <p className="font-sans text-[15px] leading-[24px] text-body">
-        <DocForte>Rascunho não revisado por advogado.</DocForte> Este texto foi redigido como
-        ponto de partida e precisa de revisão profissional antes de qualquer operação com
-        cobrança recorrente.
-      </p>
-    </aside>
-  )
-}
-
-/**
  * Casca da página: header, medida de leitura, data de atualização, footer.
  *
  * A data de atualização é passada como string literal por quem chama, e
@@ -159,8 +140,6 @@ export default function DocumentoLegal({ titulo, atualizadoEm, children }) {
             <p className="mt-3 font-sans text-[14px] leading-[22px] text-muted">
               Última atualização: {atualizadoEm}
             </p>
-
-            <DocAvisoRascunho />
 
             <div className="mt-10">{children}</div>
           </article>

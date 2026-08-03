@@ -1,6 +1,7 @@
 import Link from 'next/link'
+import Image from 'next/image'
 import { ArrowUpRight, Check } from './Icons.jsx'
-import CtaInscricao from './CtaInscricao.jsx'
+import LinkListaEspera from './LinkListaEspera.jsx'
 
 const perks = [
   { label: 'Conteúdo especializado',       w: 'w-[96px]'  },
@@ -67,10 +68,10 @@ export default function Hero() {
 
             {/* CTA principal nunca passa de 500ms — a pessoa precisa poder agir logo */}
             <div className="reveal flex flex-wrap items-center gap-4" style={{ '--reveal-delay': '340ms' }}>
-              <CtaInscricao className="btn-brand w-[300px] max-w-full">
+              <LinkListaEspera className="btn-brand w-[300px] max-w-full">
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
-              </CtaInscricao>
+              </LinkListaEspera>
               <Link href="/conteudo-programatico" className="btn-outline">Conteúdo programático</Link>
             </div>
           </div>
@@ -113,9 +114,17 @@ export default function Hero() {
             <div className="pointer-events-none absolute left-[12%] top-[6%] z-0 h-20 w-20 rounded-full
                             bg-[radial-gradient(circle,rgba(255,255,255,0.75)_0%,transparent_70%)]" />
 
-            <img
+            {/* elemento LCP da página. `priority` = preload + fetchpriority="high"
+                e desliga o lazy; `sizes` mantém o mobile em ~380px de largura
+                servida em vez do PNG de 906px. As medidas vêm da altura do card:
+                h-[95%] de 560/656 com w-auto e proporção 906/1312. */}
+            <Image
               src={PORTRAIT}
               alt="Profissional de laboratório sorrindo em jaleco branco"
+              width={906}
+              height={1312}
+              priority
+              sizes="(min-width: 640px) 460px, 380px"
               className="absolute bottom-0 left-1/2 z-10 h-[95%] w-auto max-w-none -translate-x-1/2 object-contain"
             />
           </div>
@@ -136,6 +145,11 @@ export default function Hero() {
           <img
             src="/assets/flag.svg"
             alt="Inglês"
+            /* 122×120 é o viewBox do SVG — presente só para reservar a caixa
+               e não deixar o CLS sair de 0; a largura real vem do w-[82px] */
+            width={122}
+            height={120}
+            decoding="async"
             /* ⚠️ derivado: no mobile encosta na borda de dentro em vez de sangrar */
             className="animate-floaty absolute -bottom-4 left-2 z-30 w-[82px]
                        lg:-bottom-[38px] lg:-left-[30px]"

@@ -69,7 +69,11 @@ for (const { prefixo, width, height } of alvos) {
   // acima não a alcança — precisa de captura própria. `clip` na viewport
   // e não `fullPage`: o overlay é `position: fixed` e num print de página
   // inteira sairia esticado ou repetido.
-  const ctaModal = pg.locator('main button:has-text("Lista de espera")').first()
+  // O fluxo virou duas etapas: "Lista de espera" agora é uma âncora que rola
+  // até o card de compra, e quem abre a modal é o "Garantir minha vaga" de
+  // dentro dele. Antes daqui saía um clique em `button:has-text("Lista de
+  // espera")`, que não casa mais com nada — os CTAs são <a href="#planos">.
+  const ctaModal = pg.locator('#planos button:has-text("Garantir minha vaga")')
   await ctaModal.scrollIntoViewIfNeeded()
   await ctaModal.click()
   await pg.waitForSelector('[role="dialog"]', { state: 'visible' })

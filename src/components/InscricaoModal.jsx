@@ -53,6 +53,33 @@ const NIVEIS = [
   { valor: 'avancado', rotulo: 'Avançado' },
 ]
 
+// Curso e período eram texto livre. A lista fecha a grafia — "Biomed",
+// "biomedicina", "Biomedicina " eram a mesma pessoa em três linhas
+// diferentes do banco, e a segmentação por curso não fechava.
+//
+// O valor enviado é o próprio rótulo, e não um slug: a coluna `curso` é
+// texto livre no schema (min 2, max 100) e já tem linhas gravadas com o
+// nome por extenso. Um slug obrigaria a traduzir na leitura e deixaria as
+// linhas antigas num formato e as novas em outro.
+const CURSOS = [
+  'Biomedicina',
+  'Biologia / Ciências Biológicas',
+  'Farmácia',
+  'Enfermagem',
+  'Medicina Veterinária',
+  'Medicina',
+  'Outro',
+]
+
+// 'Já formada(o)' está aqui porque é resposta real e frequente — o campo
+// pergunta em que ponto do curso a pessoa está, e "já terminei" é um
+// desses pontos. Ver o comentário no campo sobre por que ele NÃO some da
+// tela quando essa opção é escolhida.
+const PERIODOS = ['1º ao 3º', '4º ao 6º', '7º ao 10º', 'Já formada(o)', 'Outro']
+
+// Quem revela o campo de texto curto logo abaixo do select.
+const OUTRO = 'Outro'
+
 // O `valor` é exatamente o que o CHECK da coluna `disponibilidade` aceita
 // no banco — não traduza aqui sem mexer lá.
 const DIAS = [
@@ -106,12 +133,18 @@ export default function InscricaoModal({ onFechar }) {
 
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
+  const [curso, setCurso] = useState('')
+  const [cursoOutro, setCursoOutro] = useState('')
+  const [periodo, setPeriodo] = useState('')
+  const [periodoOutro, setPeriodoOutro] = useState('')
   const [dias, setDias] = useState([])
   const [consentimento, setConsentimento] = useState(false)
 
-  // Qual botão disparou o submit. Ref e não state: é lido uma vez dentro do
-  // handler, e um re-render entre o clique e o submit não ajudaria em nada.
-  const escolhaRef = useRef('agora')
+  // O que de fato vai para a coluna: o rótulo escolhido, ou o texto digitado
+  // quando a escolha foi "Outro". Resolver aqui mantém o handleSubmit lendo
+  // uma variável só e o corpo do POST com o mesmo formato de sempre.
+  const cursoFinal = curso === OUTRO ? cursoOutro.trim() : curso
+  const periodoFinal = periodo === OUTRO ? periodoOutro.trim() : periodo
 
   const carregando = status === 'carregando'
   const submitting = status === 'submitting'
@@ -250,14 +283,16 @@ export default function InscricaoModal({ onFechar }) {
     const dados = new FormData(event.currentTarget)
     const name = String(dados.get('name') ?? '').trim()
     const email = String(dados.get('email') ?? '').trim()
-    const curso = String(dados.get('curso') ?? '').trim()
-    const periodo = String(dados.get('periodo') ?? '').trim()
     const website = String(dados.get('website') ?? '')
 
     // Sem turma aberta não há escolha de pagamento para fazer — não existe
     // cobrança a adiantar. O servidor descarta este campo nesse caso de
     // qualquer jeito; mandamos 'depois' para o corpo dizer a verdade.
-    const escolha = inscricaoAberta ? escolhaRef.current : 'depois'
+    //
+    // Com turma aberta sobrou um botão só, então é sempre 'agora'. O campo
+    // continua no corpo porque a coluna `payment_choice` existe, o schema da
+    // rota a exige, e é ela que o B2 lê para ordenar a fila de cobrança.
+    const escolha = inscricaoAberta ? 'agora' : 'depois'
 
     // Validação client-side: só para retorno imediato. A que vale é a do
     // servidor, que roda mesmo com o JS desligado ou adulterado.
@@ -277,12 +312,22 @@ export default function InscricaoModal({ onFechar }) {
       setErro('Selecione o seu nível de inglês.')
       return
     }
-    if (curso.length < 2 || curso.length > 100) {
+    if (!curso) {
+      setErro('Selecione o seu curso.')
+      return
+    }
+    // Só cobrado quando a escolha foi "Outro" — nas demais o rótulo da lista
+    // já satisfaz o min(2) do schema por construção.
+    if (cursoFinal.length < 2 || cursoFinal.length > 100) {
       setErro('Digite o nome do seu curso.')
       return
     }
-    if (periodo.length < 1 || periodo.length > 40) {
-      setErro('Digite o seu período — por exemplo, 3º semestre.')
+    if (!periodo) {
+      setErro('Selecione o seu período.')
+      return
+    }
+    if (periodoFinal.length < 1 || periodoFinal.length > 40) {
+      setErro('Digite o seu período.')
       return
     }
     // Mesmo espírito da mensagem de consentimento: é erro que se corrige
@@ -310,8 +355,8 @@ export default function InscricaoModal({ onFechar }) {
           phone: paraE164(telefone),
           payment_choice: escolha,
           nivel_ingles: nivel,
-          curso,
-          periodo,
+          curso: cursoFinal,
+          periodo: periodoFinal,
           disponibilidade: dias,
           consent: consentimento,
           website,
@@ -513,72 +558,80 @@ export default function InscricaoModal({ onFechar }) {
                 <label htmlFor={nivelId} className={LABEL}>
                   Nível de inglês
                 </label>
-                <div className="relative">
-                  <select
-                    id={nivelId}
-                    name="nivel_ingles"
-                    required
-                    disabled={submitting}
-                    value={nivel}
-                    onChange={(e) => setNivel(e.target.value)}
-                    className={`${SELECT} ${nivel ? 'text-ink' : 'text-muted'}`}
-                  >
-                    <option value="" disabled>
-                      Selecione
-                    </option>
-                    {NIVEIS.map((n) => (
-                      <option key={n.valor} value={n.valor} className="text-ink">
-                        {n.rotulo}
-                      </option>
-                    ))}
-                  </select>
-                  {/* ChevronRight a 90° é a seta para baixo — mesmo
-                      princípio do Plus a 45° virando X ali em cima:
-                      asset existente, rotacionado, em vez de SVG novo.
-                      `pointer-events-none` para o clique atravessar e
-                      abrir o select, e aria-hidden porque é decoração. */}
-                  <span
-                    aria-hidden="true"
-                    className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 text-ink"
-                  >
-                    <ChevronRight className="h-4 w-4 rotate-90" />
-                  </span>
-                </div>
+                <CampoSelect
+                  id={nivelId}
+                  name="nivel_ingles"
+                  valor={nivel}
+                  aoMudar={setNivel}
+                  opcoes={NIVEIS}
+                  disabled={submitting}
+                />
               </div>
 
+              {/* CURSO — era texto livre. Ver CURSOS lá em cima. */}
               <div className="flex flex-col gap-2 text-left">
                 <label htmlFor={cursoId} className={LABEL}>
                   Curso
                 </label>
-                <input
+                <CampoSelect
                   id={cursoId}
                   name="curso"
-                  type="text"
-                  required
-                  minLength={2}
-                  maxLength={100}
-                  placeholder="Biomedicina"
+                  valor={curso}
+                  aoMudar={setCurso}
+                  opcoes={CURSOS}
                   disabled={submitting}
-                  className={FIELD}
                 />
+                {curso === OUTRO && (
+                  <input
+                    id={`${cursoId}-outro`}
+                    name="curso_outro"
+                    type="text"
+                    required
+                    minLength={2}
+                    maxLength={100}
+                    autoFocus
+                    aria-label="Qual curso?"
+                    placeholder="Qual curso?"
+                    disabled={submitting}
+                    value={cursoOutro}
+                    onChange={(e) => setCursoOutro(e.target.value)}
+                    className={FIELD}
+                  />
+                )}
               </div>
 
+              {/* PERÍODO — 'Já formada(o)' é uma das opções, e o campo NÃO
+                  some quando ela é escolhida: ele é a única pergunta que faz
+                  essa distinção, então escondê-lo apagaria a própria resposta
+                  que acabou de ser dada e o envio cairia no `!periodo`. */}
               <div className="flex flex-col gap-2 text-left">
                 <label htmlFor={periodoId} className={LABEL}>
                   Período
                 </label>
-                <input
+                <CampoSelect
                   id={periodoId}
                   name="periodo"
-                  type="text"
-                  required
-                  maxLength={40}
-                  /* Texto livre de propósito — "formada" e "trancado" são
-                     respostas reais, e um campo numérico as perderia. */
-                  placeholder="3º semestre"
+                  valor={periodo}
+                  aoMudar={setPeriodo}
+                  opcoes={PERIODOS}
                   disabled={submitting}
-                  className={FIELD}
                 />
+                {periodo === OUTRO && (
+                  <input
+                    id={`${periodoId}-outro`}
+                    name="periodo_outro"
+                    type="text"
+                    required
+                    maxLength={40}
+                    autoFocus
+                    aria-label="Qual período?"
+                    placeholder="Qual período?"
+                    disabled={submitting}
+                    value={periodoOutro}
+                    onChange={(e) => setPeriodoOutro(e.target.value)}
+                    className={FIELD}
+                  />
+                )}
               </div>
 
               {/* DISPONIBILIDADE — fieldset e não uma <div> com label:
@@ -590,14 +643,21 @@ export default function InscricaoModal({ onFechar }) {
                 <span className="pl-5 font-sans text-[13px] leading-[20px] text-[#345372]">
                   Marque todos os dias em que você poderia assistir às aulas.
                 </span>
-                <div className="mt-1 flex flex-wrap gap-x-5 gap-y-3 pl-5">
+                {/* Eram cinco itens em `flex-wrap`: com larguras diferentes
+                    ("Segunda" x "Terça") caíam 3 na primeira linha e 2 na
+                    segunda, cada caixa começando num x diferente. Em grid de
+                    duas colunas as caixas se alinham em coluna, porque cada
+                    item ocupa a largura inteira da sua célula.
+                    `lg:` volta ao flex-wrap, que é o que está validado no
+                    desktop. O gap é o mesmo dos dois eixos que já havia. */}
+                <div className="mt-1 grid grid-cols-2 gap-x-5 gap-y-3 pl-5 lg:flex lg:flex-wrap">
                   {DIAS.map((dia) => {
                     const diaId = `${id}-dia-${dia.valor}`
                     return (
                       <label
                         key={dia.valor}
                         htmlFor={diaId}
-                        className="flex cursor-pointer items-center gap-2"
+                        className="flex w-full cursor-pointer items-center gap-2 lg:w-auto"
                       >
                         <input
                           id={diaId}
@@ -704,16 +764,9 @@ export default function InscricaoModal({ onFechar }) {
 
               {inscricaoAberta ? (
                 <>
-                  {/* Hierarquia: o primário é o .btn-brand cheio; o
-                      secundário é o .btn-outline, mesma altura e mesmo
-                      raio, peso visual menor. Os dois gravam igual neste
-                      prompt — o Stripe ramifica no B2. */}
                   <button
                     type="submit"
                     disabled={submitting}
-                    onClick={() => {
-                      escolhaRef.current = 'agora'
-                    }}
                     className="btn-brand mt-2 w-full text-[17px] disabled:cursor-not-allowed
                                disabled:opacity-60 disabled:hover:translate-y-0
                                disabled:hover:shadow-none"
@@ -726,44 +779,19 @@ export default function InscricaoModal({ onFechar }) {
                     )}
                   </button>
 
-                  {/* "Prefiro pagar depois" descrevia uma escolha que não
-                      existe: nenhum dos dois botões cobra nada, os dois
-                      gravam a mesma linha, e a única diferença real entre
-                      eles é a intenção declarada. O rótulo antigo prometia
-                      ao clicante do primário que ELE estaria pagando agora
-                      — e não está.
-
-                      O VALOR gravado continua 'depois', de propósito. O
-                      rótulo mudou porque descrevia mal a interface; o dado
-                      não mudou porque descreve bem a fila: o B2 lê
-                      `payment_choice` para saber a quem mandar o link de
-                      cobrança primeiro, e quem clicou aqui segue sendo
-                      quem não pediu pressa. Rótulo e valor respondem a
-                      perguntas diferentes. */}
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    onClick={() => {
-                      escolhaRef.current = 'depois'
-                    }}
-                    className="btn-outline w-full text-[16px] disabled:cursor-not-allowed
-                               disabled:opacity-60 disabled:hover:translate-y-0"
-                  >
-                    Quero saber mais antes
-                  </button>
-
                   {/* A frase que sustenta o "Garantir minha vaga" logo
                       acima. Sem ela o botão promete uma transação que a
-                      página não faz — dizer o que de fato acontece (nada
-                      é cobrado, o link chega por e-mail, e até quando) é
-                      o que torna o rótulo forte defensável. */}
+                      página não faz — dizer o que de fato acontece é o que
+                      torna o rótulo forte defensável.
+
+                      Não cita mais `data_primeira_cobranca`: a data virava
+                      compromisso com dia marcado, e o envio do link passou a
+                      acompanhar o início da turma. Os outros dois canais
+                      entram aqui porque é por eles que o aviso realmente
+                      sai. */}
                   <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                    Nada é cobrado agora. Sua vaga fica reservada e o link de pagamento chega
-                    no seu e-mail antes de{' '}
-                    <strong className="font-semibold text-ink">
-                      {formatarDataPorExtenso(paraDataUTC(turma.data_primeira_cobranca))}
-                    </strong>
-                    , data da primeira cobrança.
+                    Nada é cobrado agora. O link de pagamento é enviado por e-mail mais perto
+                    do início da turma, e também avisamos pelo WhatsApp e nas redes sociais.
                   </p>
                 </>
               ) : (
@@ -803,6 +831,57 @@ export default function InscricaoModal({ onFechar }) {
   )
 
   return createPortal(conteudo, document.body)
+}
+
+// ============================================================
+// SELECT — a marcação que era só do "Nível de inglês", agora compartilhada
+//
+// Extraída, e não copiada, quando Curso e Período viraram select: três
+// cópias do mesmo par <select> + chevron divergiriam no primeiro ajuste de
+// padding. É o estilo único de select do projeto — SELECT, o ChevronRight
+// rotacionado e a cor de placeholder saem todos daqui.
+//
+// `opcoes` aceita string simples (o rótulo é o próprio valor gravado) ou
+// { valor, rotulo } para quando os dois diferem, que é o caso do nível de
+// inglês: a coluna guarda 'basico', a tela mostra 'Básico'.
+// ============================================================
+function CampoSelect({ id, name, valor, aoMudar, opcoes, disabled }) {
+  const itens = opcoes.map((o) => (typeof o === 'string' ? { valor: o, rotulo: o } : o))
+
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        name={name}
+        required
+        disabled={disabled}
+        value={valor}
+        onChange={(e) => aoMudar(e.target.value)}
+        /* text-muted enquanto vazio faz a opção "Selecione" ler como
+           placeholder, igual aos campos de texto ao lado. */
+        className={`${SELECT} ${valor ? 'text-ink' : 'text-muted'}`}
+      >
+        <option value="" disabled>
+          Selecione
+        </option>
+        {itens.map((o) => (
+          <option key={o.valor} value={o.valor} className="text-ink">
+            {o.rotulo}
+          </option>
+        ))}
+      </select>
+      {/* ChevronRight a 90° é a seta para baixo — mesmo princípio do Plus a
+          45° virando X: asset existente, rotacionado, em vez de SVG novo.
+          `pointer-events-none` para o clique atravessar e abrir o select, e
+          aria-hidden porque é decoração. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute right-5 top-1/2 -translate-y-1/2 text-ink"
+      >
+        <ChevronRight className="h-4 w-4 rotate-90" />
+      </span>
+    </div>
+  )
 }
 
 // ============================================================
@@ -867,17 +946,23 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
              — vago o bastante para a pessoa imaginar qualquer coisa,
              inclusive uma cobrança que não vem hoje. Cada promessa aqui
              tem alguém do outro lado obrigado a cumpri-la, e nenhuma
-             delas foi acrescentada por soar bem. */
+             delas foi acrescentada por soar bem.
+
+             A promessa de pagamento passou a ser a MESMA do rodapé do
+             formulário, palavra por palavra. Antes esta tela prometia o
+             link "antes de {data_primeira_cobranca}" e o formulário
+             prometia outra coisa — duas promessas diferentes sobre o
+             mesmo evento, para a mesma pessoa, com dois minutos de
+             diferença. A data de início das aulas fica, que é fato de
+             calendário e não promessa de cobrança. */
           <>
-            Sua vaga está reservada. O link de pagamento chega no seu e-mail antes de{' '}
-            <strong className="font-semibold text-ink">
-              {formatarDataPorExtenso(paraDataUTC(turma.data_primeira_cobranca))}
-            </strong>
-            , data da primeira cobrança. Mais perto do início das aulas, em{' '}
+            Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
+            início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
+            começam em{' '}
             <strong className="font-semibold text-ink">
               {formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))}
             </strong>
-            , você recebe o convite do grupo da turma no WhatsApp.
+            , e é perto dessa data que você recebe o convite do grupo da turma no WhatsApp.
           </>
         ) : (
           <>

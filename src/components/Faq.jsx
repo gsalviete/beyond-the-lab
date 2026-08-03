@@ -75,7 +75,12 @@ function Item({ q, a, delay = 0, className = '' }) {
         className="faq-panel"
         data-open={open}
       >
-        <p className="text-sm leading-relaxed text-body">{a}</p>
+        {/* a div intermediária é a caixa de overflow do grid; o respiro de
+            12px virou padding dela para sair do caminho da animação */}
+        <div>
+          {/* pt-3 = os 12px que eram margin-top animado do painel */}
+          <p className="faq-panel-inner pt-3 text-sm leading-relaxed text-body">{a}</p>
+        </div>
       </div>
     </div>
   )

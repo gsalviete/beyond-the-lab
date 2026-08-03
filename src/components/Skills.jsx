@@ -1,3 +1,5 @@
+import Image from 'next/image'
+
 const skills = [
   {
     img: '/assets/skill1.png',
@@ -38,9 +40,15 @@ export default function Skills() {
               <div className="flex w-full flex-col items-start gap-[6px]">
                 {/* Bloco da ilustração — h 111, radius 13, badge-grad, stretch */}
                 <div className="h-[111px] w-full overflow-hidden rounded-[13px] bg-badge-grad">
-                  <img
+                  {/* 658×222 natural; a caixa é 111px de altura em 3 colunas. */}
+                  <Image
                     src={s.img}
                     alt=""
+                    width={658}
+                    height={222}
+                    loading="lazy"
+                    decoding="async"
+                    sizes="(min-width: 1024px) 380px, (min-width: 768px) 45vw, 90vw"
                     className="h-full w-full object-contain transition-transform duration-500 ease-out group-hover:scale-105"
                   />
                 </div>

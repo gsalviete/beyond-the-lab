@@ -38,6 +38,21 @@
   --focus-color: #F75883;
 }
 
+/* Blur de entrada só no desktop. O 1440 está validado contra o Figma e não
+   muda. No mobile o blur sai por UX: repaint de superfície grande em GPU de
+   Android de entrada é caro mesmo quando a animação é composta.
+   ⚠️ Zerar só os tokens NÃO basta: com `filter` ainda na transition-property,
+   o Chrome cria a animação de filter mesmo interpolando 0px → none, e o audit
+   "Avoid non-composited animations" segue acusando os mesmos 9 elementos com
+   "Filter-related property may move pixels" (verificado no Lighthouse 13.4).
+   Por isso o `filter` também sai da lista de propriedades aqui embaixo. */
+@media (max-width: 1023px) {
+  :root {
+    --motion-blur: 0px;
+    --motion-hero-blur: 0px;
+  }
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
@@ -265,11 +280,14 @@
   transition-timing-function: var(--ease-scale);
 }
 
-/* superfície visual do hero — profundidade na entrada, estável no fim */
+/* superfície visual do hero — profundidade na entrada, estável no fim.
+   Era a propriedade independente `scale`, que o Chrome não compõe da mesma
+   forma; virou `transform: scale()` para entrar na mesma camada de GPU do
+   resto dos reveals. */
 .js-reveal .hero-surface {
-  scale: 1.012;
+  transform: scale(1.012);
   transform-origin: center;
-  transition-property: opacity, scale;
+  transition-property: opacity, transform;
   transition-duration: var(--motion-surface-opacity), var(--motion-surface-scale);
   transition-timing-function: var(--ease-out), var(--ease-scale);
 }
@@ -284,12 +302,30 @@
 }
 .js-reveal .hero-surface.in-view {
   opacity: 1;
-  scale: 1;
+  transform: none;
 }
 
 /* liberar a camada de composição depois da entrada */
 .js-reveal .in-view {
   will-change: auto;
+}
+
+/* Mobile: tira `filter` da lista de propriedades animadas.
+   Zerar --motion-blur/--motion-hero-blur (lá em cima, no :root) apaga o efeito
+   visual, mas NÃO apaga a animação: com `filter` ainda na transition-property
+   o Chrome cria a animação mesmo interpolando blur(0px) → none, e o audit
+   "Avoid non-composited animations" continua acusando os mesmos 9 elementos
+   com "Filter-related property may move pixels" — medido no Lighthouse 13.4.
+   Precisa vir DEPOIS das regras de .reveal: media query não soma
+   especificidade, então quem ganha é a última declaração do arquivo.
+   O desktop (>=1024px) não é tocado — blur e curva seguem como no Figma. */
+@media (max-width: 1023px) {
+  .js-reveal .reveal,
+  .js-reveal .reveal-hero,
+  .js-reveal .reveal-soft {
+    filter: none;
+    transition-property: opacity, transform;
+  }
 }
 
 /* ============================================================
@@ -360,30 +396,40 @@ body[data-modal-aberta] .scroll-lock-shift {
 /* ============================================================
    FAQ / accordion
    ============================================================ */
+/* `margin-top` animado forçava layout a cada frame. Os 12px de respiro agora
+   são padding-top do conteúdo, dentro da caixa com overflow: hidden — ficam
+   recortados junto com o resto enquanto a linha vale 0fr, então o espaçamento
+   aberto é idêntico ao de antes sem nada de layout no meio da animação. */
 .faq-panel {
   display: grid;
   grid-template-rows: 0fr;
-  opacity: 0;
-  visibility: hidden;
   transition:
     grid-template-rows var(--motion-short) var(--ease-out),
-    opacity var(--motion-short) var(--ease-out),
-    margin-top var(--motion-short) var(--ease-out),
     visibility 0s linear var(--motion-short);
+  visibility: hidden;
 }
 .faq-panel > * {
   overflow: hidden;
   min-height: 0;
 }
+.faq-panel-inner {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--motion-short) var(--ease-out),
+    transform var(--motion-short) var(--ease-out);
+}
 .faq-panel[data-open='true'] {
   grid-template-rows: 1fr;
-  opacity: 1;
   visibility: visible;
-  margin-top: 12px;
   transition-delay: 0s;
 }
+.faq-panel[data-open='true'] .faq-panel-inner {
+  opacity: 1;
+  transform: none;
+}
 .faq-icon {
-  transition: transform var(--motion-fast) var(--ease-out);
+  transition: transform var(--motion-short) var(--ease-out);
 }
 .faq-trigger[aria-expanded='true'] .faq-icon {
   transform: rotate(45deg);
@@ -395,27 +441,33 @@ body[data-modal-aberta] .scroll-lock-shift {
 .syl-panel {
   display: grid;
   grid-template-rows: 0fr;
-  opacity: 0;
-  visibility: hidden;
   transition:
     grid-template-rows var(--motion-short) var(--ease-out),
-    opacity var(--motion-short) var(--ease-out),
-    margin-top var(--motion-short) var(--ease-out),
     visibility 0s linear var(--motion-short);
+  visibility: hidden;
 }
 .syl-panel > * {
   overflow: hidden;
   min-height: 0;
 }
+.syl-panel-inner {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--motion-short) var(--ease-out),
+    transform var(--motion-short) var(--ease-out);
+}
 .syl-panel[data-open='true'] {
   grid-template-rows: 1fr;
-  opacity: 1;
   visibility: visible;
-  margin-top: 12px;
   transition-delay: 0s;
 }
+.syl-panel[data-open='true'] .syl-panel-inner {
+  opacity: 1;
+  transform: none;
+}
 .syl-icon {
-  transition: transform var(--motion-fast) var(--ease-out);
+  transition: transform var(--motion-short) var(--ease-out);
 }
 .syl-trigger[aria-expanded='true'] .syl-icon {
   transform: rotate(180deg);
@@ -450,13 +502,10 @@ body[data-modal-aberta] .scroll-lock-shift {
     will-change: auto !important;
   }
 
-  /* `scale` é propriedade independente de `transform`. No mesmo bloco, o
-     minificador de CSS do Next funde as duas em `transform: scale3d(1,1,1)`
-     e o `scale: 1.012` da regra base do .hero-surface sobrevive. Em bloco
-     próprio não há o que fundir. */
-  .js-reveal .hero-surface {
-    scale: 1 !important;
-  }
+  /* o .hero-surface agora usa `transform: scale()`, coberto pelo
+     `transform: none !important` do bloco acima — a regra separada de
+     `scale: 1 !important` (que existia só por causa do minificador fundir
+     `scale` + `transform`) deixou de ser necessária. */
 
   .intro-nav,
   .animate-floaty,
@@ -468,7 +517,17 @@ body[data-modal-aberta] .scroll-lock-shift {
 
   /* o accordion continua funcional, só sem animar */
   .faq-panel,
-  .syl-panel {
+  .syl-panel,
+  .faq-panel-inner,
+  .syl-panel-inner {
     transition: none !important;
+  }
+  .faq-panel-inner,
+  .syl-panel-inner {
+    transform: none !important;
+  }
+  .faq-panel[data-open='false'] .faq-panel-inner,
+  .syl-panel[data-open='false'] .syl-panel-inner {
+    opacity: 0;
   }
 }
