@@ -958,11 +958,17 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
           <>
             Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
             início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
-            começam em{' '}
+            começam na{' '}
+            {/* ⚠️ Texto literal, não mais `turma.data_inicio_aulas`: a turma
+                começa na primeira semana de setembro, com o dia escolhido pela
+                aluna, e uma coluna `date` não representa isso. Mesma troca em
+                `email.ts`, para as duas superfícies dizerem a mesma coisa.
+                O import de `formatarDataPorExtenso`/`paraDataUTC` fica: volta a
+                ser usado quando a migração do campo por extenso for feita. */}
             <strong className="font-semibold text-ink">
-              {formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))}
+              primeira semana de setembro de 2026
             </strong>
-            , e é perto dessa data que você recebe o convite do grupo da turma no WhatsApp.
+            , e é perto do início que você recebe o convite do grupo da turma no WhatsApp.
           </>
         ) : (
           <>

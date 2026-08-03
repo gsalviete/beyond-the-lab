@@ -361,12 +361,24 @@ function montarInscrita(inscricao: InscricaoEmail, turma: Turma | null) {
     ? `Recebemos sua inscrição no Beyond The Lab. Deu tudo certo — agora é com a gente.`
     : `Recebemos seu cadastro no Beyond The Lab. No momento não há turma com inscrições abertas, então você entrou na lista de espera.`
 
+  // ⚠️ A data de início voltou a ser TEXTO LITERAL aqui, e só aqui. A turma
+  // começa na primeira semana de setembro, com o dia escolhido pela aluna —
+  // algo que uma coluna `date` não consegue representar. Enquanto a migração
+  // que cria o campo por extenso não acontece, o banco segue com 2026-09-01
+  // (provisória, como o seed já registra) e estas duas frases deixam de lê-la.
+  //
+  // O que NÃO mudou, de propósito: `inicio` continua vindo de
+  // `inicioPorExtenso()` e continua decidindo assunto, título e abertura. Ela
+  // é o booleano "existe turma aberta?", e trocar isso por texto faria toda
+  // inscrição cair no modo lista-de-espera — o e-mail diria a quem acabou de
+  // se inscrever que não há turma. Por isso a condicional fica intacta e só
+  // o corpo do ramo verdadeiro passa a não interpolar a data.
   const proximos = inicio
-    ? `As aulas começam em <strong style="color:${COR.ink};">${esc(inicio)}</strong>. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+    ? `As aulas começam na <strong style="color:${COR.ink};">primeira semana de setembro de 2026</strong>. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
   const proximosTexto = inicio
-    ? `As aulas começam em ${inicio}. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+    ? `As aulas começam na primeira semana de setembro de 2026. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
   const html = moldura(`
