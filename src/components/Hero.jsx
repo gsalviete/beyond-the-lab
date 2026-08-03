@@ -72,7 +72,14 @@ export default function Hero() {
                 Lista de espera
                 <span className="arrow-badge"><ArrowUpRight className="h-4 w-4" /></span>
               </LinkListaEspera>
-              <Link href="/conteudo-programatico" className="btn-outline">Conteúdo programático</Link>
+              {/* mesma largura do "Lista de espera" enquanto os dois empilham;
+                  em lg: volta a shrink-to-fit, que é o desktop já validado */}
+              <Link
+                href="/conteudo-programatico"
+                className="btn-outline w-[300px] max-w-full lg:w-auto"
+              >
+                Conteúdo programático
+              </Link>
             </div>
           </div>
 
@@ -132,12 +139,15 @@ export default function Hero() {
           {/* BADGE — Figma: padding 13/37/13/16, radius 16, gradiente 87deg */}
           {/* ⚠️ derivado: no mobile o badge não pode sangrar pra fora do card
               (a coluna ocupa a largura toda), então recolhe pra dentro do topo */}
-          <div className="reveal absolute right-3 top-3 z-30 rounded-2xl bg-badge-grad
-                          py-[13px] pl-4 pr-[37px] text-white
+          {/* ⚠️ derivado: a caixa é fixa em 194x80 e o card cai de 480 para 342 —
+              a escala menor no mobile é o que devolve a proporção, não o offset */}
+          <div className="reveal absolute right-3 top-3 z-30 rounded-xl bg-badge-grad
+                          py-[10px] pl-3 pr-[28px] text-white
+                          lg:rounded-2xl lg:py-[13px] lg:pl-4 lg:pr-[37px]
                           lg:-top-[52px] lg:-right-[42px]"
                style={{ '--reveal-delay': '460ms' }}>
-            <p className="text-[13px] leading-[17px] text-white/80">Primeira turma</p>
-            <p className="font-display text-[30px] font-semibold leading-[37px]">Setembro</p>
+            <p className="text-[11px] leading-[15px] text-white/80 lg:text-[13px] lg:leading-[17px]">Primeira turma</p>
+            <p className="font-display text-[24px] font-semibold leading-[30px] lg:text-[30px] lg:leading-[37px]">Setembro</p>
           </div>
 
           {/* BANDEIRA — Figma: 62.36 x 59.2, rotate -10.174°, radius 19 */}
@@ -151,8 +161,9 @@ export default function Hero() {
             height={120}
             decoding="async"
             /* ⚠️ derivado: no mobile encosta na borda de dentro em vez de sangrar */
-            className="animate-floaty absolute -bottom-4 left-2 z-30 w-[82px]
-                       lg:-bottom-[38px] lg:-left-[30px]"
+            /* ⚠️ derivado: 60/342 = 17,5%, a mesma proporção que os 82/480 do desktop */
+            className="animate-floaty absolute -bottom-4 left-2 z-30 w-[60px]
+                       lg:w-[82px] lg:-bottom-[38px] lg:-left-[30px]"
           />
           
           {/* ESPERMATOZOIDE — SVG do Figma, 159 x 152 */}
