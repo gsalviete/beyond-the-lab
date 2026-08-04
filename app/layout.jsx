@@ -1,6 +1,7 @@
 import { Geist } from 'next/font/google'
 import './globals.css'
 import InscricaoProvider from '@/components/InscricaoProvider.jsx'
+import Clarity from '@/components/Clarity.jsx'
 
 // Antes vinha de um <link> do Google Fonts no index.html. Via next/font a
 // fonte é auto-hospedada e o @font-face entra no HTML inicial — sem FOUT.
@@ -65,6 +66,9 @@ export default function RootLayout({ children }) {
           continua sendo renderizado no servidor — passar árvore de server
           component como filho de um client component não a converte. */}
       <body>
+        {/* Carrega o Clarity depois da hidratação. Fica dentro do <body>
+            porque é componente de efeito, não de marcação. */}
+        <Clarity />
         <InscricaoProvider>{children}</InscricaoProvider>
       </body>
     </html>
