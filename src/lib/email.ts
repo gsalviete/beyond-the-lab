@@ -19,7 +19,15 @@
 import 'server-only'
 
 import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
-import type { DiaDaSemana, NivelIngles, Turma } from '@/lib/supabase'
+// Os rótulos vêm do domínio, não de uma cópia local. Ver o bloco RÓTULOS
+// mais abaixo para o que isso desfaz.
+import {
+  ROTULO_NIVEL_INGLES,
+  listarDias,
+  type DiaDaSemana,
+  type NivelIngles,
+} from '@/config/dominio'
+import type { Turma } from '@/lib/supabase'
 
 // Nenhuma com prefixo NEXT_PUBLIC_, de propósito: o Next só expõe ao cliente
 // as variáveis com esse prefixo. Sem ele, elas nunca saem do servidor.
@@ -54,26 +62,42 @@ export type InscricaoEmail = {
 // ============================================================
 // RÓTULOS
 //
-// Espelham os `rotulo` de `NIVEIS` e `DIAS` em `InscricaoModal.jsx`. Não
-// importo de lá porque aquele módulo é client (`'use client'`, hooks,
-// JSX) e arrastá-lo para o servidor por causa de dois mapas seria pior do
-// que a duplicação. Os valores são fixados pelos CHECK do banco, então
-// não derivam sozinhos — se um dia mudarem, mudam nos dois lugares.
+// Aqui havia duas cópias — `ROTULO_NIVEL` e `ROTULO_DIA` — com um
+// comentário honesto explicando por que existiam: "espelham os `rotulo`
+// de `NIVEIS` e `DIAS` em `InscricaoModal.jsx`. Não importo de lá porque
+// aquele módulo é client (`'use client'`, hooks, JSX) e arrastá-lo para o
+// servidor por causa de dois mapas seria pior do que a duplicação. Se um
+// dia mudarem, mudam nos dois lugares."
+//
+// O diagnóstico estava certo e a conclusão estava errada — havia uma
+// terceira saída, e o `src/config/consentimento.ts` já a tinha provado no
+// mesmo repositório: um módulo NEUTRO, que não é client nem server, do
+// qual os dois lados importam. É o que `src/config/dominio.ts` é.
+//
+// Agora este arquivo lê o mesmo `ROTULO_NIVEL_INGLES` que a modal usa
+// para desenhar o <select>. Não uma cópia igual: o mesmo objeto. Se
+// "Intermediário" virar outra coisa amanhã, muda num lugar e chega aos
+// quatro — tela, e-mail, Zod e a lista que o CHECK do SQL espelha.
+//
+// ⚠️ O QUE **NÃO** VEM DO DOMÍNIO, E POR QUE NÃO
+//
+// As cores e a fonte deste arquivo (`COR`, `FONTE`) continuam literais, e
+// isso não é dívida a pagar depois. Não existe forma de referenciar uma
+// classe do Tailwind dentro de um e-mail: o Gmail remove `<style>` e o
+// Outlook renderiza com o motor do Word, então tudo é atributo inline. Os
+// valores foram copiados dos tokens à mão de propósito — ver o bloco
+// CORES logo abaixo.
+//
+// A regra é essa: **rótulo vem do domínio; token visual continua
+// literal.** Um é vocabulário de negócio, compartilhado com a tela e com
+// o banco. O outro é uma restrição de cliente de e-mail que nenhuma
+// abstração nossa remove.
 // ============================================================
-const ROTULO_NIVEL: Record<NivelIngles, string> = {
-  basico: 'Básico',
-  intermediario: 'Intermediário',
-  avancado: 'Avançado',
-}
 
-const ROTULO_DIA: Record<DiaDaSemana, string> = {
-  seg: 'Segunda',
-  ter: 'Terça',
-  qua: 'Quarta',
-  qui: 'Quinta',
-  sex: 'Sexta',
-}
-
+// Este continua local, e é o único que fica. `payment_choice` morre no
+// `c25` (D-11) — levar os rótulos dele para o domínio seria dar sobrevida
+// a um campo que a refatoração existe para remover. Ele sai daqui junto
+// com a coluna.
 const ROTULO_PAGAMENTO: Record<'agora' | 'depois', string> = {
   agora: 'Quer pagar agora',
   depois: 'Prefere pagar depois',
@@ -126,10 +150,6 @@ function telefoneLegivel(e164: string): string {
 /** '+5511987654321' → 'https://wa.me/5511987654321'. */
 function linkWhatsApp(e164: string): string {
   return `https://wa.me/${e164.replace(/\D/g, '')}`
-}
-
-function listaDias(dias: DiaDaSemana[]): string {
-  return dias.map((d) => ROTULO_DIA[d]).join(', ')
 }
 
 /** Data de início da turma por extenso, ou null na lista de espera. */
@@ -270,8 +290,8 @@ function montarAdmin(inscricao: InscricaoEmail, turma: Turma | null) {
 
   const wa = linkWhatsApp(phone)
   const telefone = telefoneLegivel(phone)
-  const dias = listaDias(disponibilidade)
-  const nivel = ROTULO_NIVEL[nivel_ingles]
+  const dias = listarDias(disponibilidade)
+  const nivel = ROTULO_NIVEL_INGLES[nivel_ingles]
   const pagamento = ROTULO_PAGAMENTO[payment_choice]
   const turmaTexto = turma ? turma.nome : 'Lista de espera (nenhuma turma aberta)'
   // Hora do servidor, em São Paulo. `dateStyle`/`timeStyle` curtos porque
@@ -338,8 +358,8 @@ function montarInscrita(inscricao: InscricaoEmail, turma: Turma | null) {
 
   const inicio = inicioPorExtenso(turma)
   const primeiroNome = name.trim().split(/\s+/)[0]
-  const dias = listaDias(disponibilidade)
-  const nivel = ROTULO_NIVEL[nivel_ingles]
+  const dias = listarDias(disponibilidade)
+  const nivel = ROTULO_NIVEL_INGLES[nivel_ingles]
   const telefone = telefoneLegivel(phone)
 
   const assunto = inicio

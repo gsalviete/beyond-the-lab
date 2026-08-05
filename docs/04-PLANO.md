@@ -76,6 +76,22 @@ c19  test(db): verifica contagem pessoas == inscricoes == legado
 > null permanece null, `payment_choice` não migra. Rodar em staging e
 > conferir `c19` antes de tocar produção.
 
+> **⚠️ Todo diferencial ou contagem precisa de um controle negativo antes
+> de valer como prova.** Rode o teste contra uma versão propositalmente
+> quebrada e confirme que ele fica vermelho. Um teste que passa sem
+> exercitar nada é indistinguível de um que passa exercitando tudo.
+>
+> A regra nasceu no `c07`, onde um diferencial de e-mails deu "0
+> divergências" comparando **vazio com vazio** — as env vars do Resend
+> são lidas na carga do módulo e as duas versões abortavam antes de
+> montar qualquer coisa.
+>
+> É aqui que ela importa de verdade. `count(pessoas) == count(inscricoes)
+> == count(waitlist_legado)` bate perfeitamente quando as três estão
+> vazias, e uma migração que não migrou nada tem exatamente essa cara.
+> O `c19` precisa afirmar também que a contagem é **> 0** e conferir uma
+> linha conhecida de ponta a ponta.
+
 > `c18b` não estava no plano e precisa estar. É a **primeira e única**
 > geração de tipos do corte: ela acontece aqui porque aqui é o primeiro
 > momento em que o schema é o schema final — `safras`, `grupos`,
@@ -95,6 +111,14 @@ c23  feat(landing): data de início vem da safra, remove texto fixo
 c24  feat(email): datas e valores vêm da safra
 c25  refactor(modal): remove pergunta payment_choice (D-11)
 c26  test(api): payload de insert, par safra_id/status, resposta de duplicata
+```
+> `c26` também fecha uma lacuna deixada em aberto no `c06`: o corpo do POST
+> carregando `curso: "Fonoaudiologia"` quando a escolha foi "Outro" e
+> `curso_outro` está preenchido. A tentativa de provar isso por navegador
+> esbarrou num dev server instável e foi abandonada de propósito — teste
+> frágil é pior que lacuna declarada. Sem navegador, é uma asserção
+> direta sobre a montagem do payload.
+```
 ```
 
 ### Fecho
