@@ -10,6 +10,24 @@ import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/cur
 // a partir dali o banco guardaria a prova de um texto que a tela não
 // mostra mais. Ver o cabeçalho de `src/config/consentimento.ts`.
 import { CONSENT_SEGMENTS } from '@/config/consentimento'
+// As opções dos quatro campos de escolha saíram daqui para `dominio.ts`,
+// pelo mesmo motivo que a frase do consentimento saiu: eram uma das
+// quatro cópias dos mesmos valores (aqui, no Zod, no `email.ts` e no
+// CHECK do SQL), mantidas em fase por disciplina — que é o que funciona
+// até não funcionar.
+//
+// ⚠️ Importamos as OPÇÕES, não o schema. `src/config/schemas.ts` puxaria
+// o Zod inteiro para o bundle do navegador, onde hoje ele não está. A
+// validação daqui é um punhado de `if` de propósito: ela existe para dar
+// retorno imediato, não para decidir — quem decide é o servidor, e é lá
+// que o rigor mora. Ver o cabeçalho de `schemas.ts`.
+import {
+  CURSOS,
+  OPCOES_DIA_SEMANA,
+  OPCOES_NIVEL_INGLES,
+  OUTRO,
+  PERIODOS,
+} from '@/config/dominio'
 import { mascararTelefone, paraE164, telefoneEhValido } from '@/lib/telefone'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
@@ -46,49 +64,6 @@ const FIELDSET = 'm-0 flex flex-col gap-2 border-0 p-0 text-left'
 const CHECKBOX =
   'h-5 w-5 shrink-0 cursor-pointer rounded-md border border-border-soft accent-brand ' +
   'disabled:cursor-not-allowed disabled:opacity-60'
-
-const NIVEIS = [
-  { valor: 'basico', rotulo: 'Básico' },
-  { valor: 'intermediario', rotulo: 'Intermediário' },
-  { valor: 'avancado', rotulo: 'Avançado' },
-]
-
-// Curso e período eram texto livre. A lista fecha a grafia — "Biomed",
-// "biomedicina", "Biomedicina " eram a mesma pessoa em três linhas
-// diferentes do banco, e a segmentação por curso não fechava.
-//
-// O valor enviado é o próprio rótulo, e não um slug: a coluna `curso` é
-// texto livre no schema (min 2, max 100) e já tem linhas gravadas com o
-// nome por extenso. Um slug obrigaria a traduzir na leitura e deixaria as
-// linhas antigas num formato e as novas em outro.
-const CURSOS = [
-  'Biomedicina',
-  'Biologia / Ciências Biológicas',
-  'Farmácia',
-  'Enfermagem',
-  'Medicina Veterinária',
-  'Medicina',
-  'Outro',
-]
-
-// 'Já formada(o)' está aqui porque é resposta real e frequente — o campo
-// pergunta em que ponto do curso a pessoa está, e "já terminei" é um
-// desses pontos. Ver o comentário no campo sobre por que ele NÃO some da
-// tela quando essa opção é escolhida.
-const PERIODOS = ['1º ao 3º', '4º ao 6º', '7º ao 10º', 'Já formada(o)', 'Outro']
-
-// Quem revela o campo de texto curto logo abaixo do select.
-const OUTRO = 'Outro'
-
-// O `valor` é exatamente o que o CHECK da coluna `disponibilidade` aceita
-// no banco — não traduza aqui sem mexer lá.
-const DIAS = [
-  { valor: 'seg', rotulo: 'Segunda' },
-  { valor: 'ter', rotulo: 'Terça' },
-  { valor: 'qua', rotulo: 'Quarta' },
-  { valor: 'qui', rotulo: 'Quinta' },
-  { valor: 'sex', rotulo: 'Sexta' },
-]
 
 // Tudo que pode receber foco pelo teclado. `:not([disabled])` importa: os
 // campos ficam disabled durante o envio, e um ciclo de Tab que pousa em
@@ -143,6 +118,18 @@ export default function InscricaoModal({ onFechar }) {
   // O que de fato vai para a coluna: o rótulo escolhido, ou o texto digitado
   // quando a escolha foi "Outro". Resolver aqui mantém o handleSubmit lendo
   // uma variável só e o corpo do POST com o mesmo formato de sempre.
+  //
+  // ⚠️ ESTAS DUAS LINHAS SÃO O MOTIVO DE `curso` E `periodo` NÃO SEREM
+  // `z.enum` NO SERVIDOR, e é aqui que a derivação do domínio parece
+  // errada sem ser.
+  //
+  // `CURSOS` e `PERIODOS` vêm de `dominio.ts`, mas o que sai no POST não é
+  // necessariamente um deles: escolhendo "Outro", sai o que a pessoa
+  // digitou — "Fonoaudiologia", "6º semestre". A lista é o que a UI
+  // OFERECE; o schema é o que o servidor ACEITA, e onde há "Outro" os dois
+  // divergem de propósito. Fechar `curso` num enum "para ficar coerente"
+  // recusaria exatamente as pessoas cujo curso não está na lista — que são
+  // a razão de o campo de texto existir. Ver o topo de `dominio.ts`.
   const cursoFinal = curso === OUTRO ? cursoOutro.trim() : curso
   const periodoFinal = periodo === OUTRO ? periodoOutro.trim() : periodo
 
@@ -563,12 +550,12 @@ export default function InscricaoModal({ onFechar }) {
                   name="nivel_ingles"
                   valor={nivel}
                   aoMudar={setNivel}
-                  opcoes={NIVEIS}
+                  opcoes={OPCOES_NIVEL_INGLES}
                   disabled={submitting}
                 />
               </div>
 
-              {/* CURSO — era texto livre. Ver CURSOS lá em cima. */}
+              {/* CURSO — era texto livre. A lista fecha a grafia; ver `dominio.ts`. */}
               <div className="flex flex-col gap-2 text-left">
                 <label htmlFor={cursoId} className={LABEL}>
                   Curso
@@ -651,7 +638,7 @@ export default function InscricaoModal({ onFechar }) {
                     `lg:` volta ao flex-wrap, que é o que está validado no
                     desktop. O gap é o mesmo dos dois eixos que já havia. */}
                 <div className="mt-1 grid grid-cols-2 gap-x-5 gap-y-3 pl-5 lg:flex lg:flex-wrap">
-                  {DIAS.map((dia) => {
+                  {OPCOES_DIA_SEMANA.map((dia) => {
                     const diaId = `${id}-dia-${dia.valor}`
                     return (
                       <label
