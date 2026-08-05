@@ -73,9 +73,41 @@ begin;
 -- inscrição de janeiro, aí é coluna em `inscricoes` — mas ninguém
 -- precisou disso ainda, e o WhatsApp do grupo usa o número de agora.
 --
--- `email` e `telefone` são `not null` sem medo: a tabela nasce vazia e
--- o `c17` só produz linha a partir de `waitlist`, onde os dois campos
--- sempre existiram e sempre foram obrigatórios.
+-- `nome` e `email` são `not null` sem medo: os dois são `not null` na
+-- `waitlist` de origem, conforme o extrato de produção.
+--
+-- ============================================================
+-- ⚠️⚠️ `telefone`: DECISÃO PENDENTE — A `010` NÃO PODE SER ESCRITA
+--       ANTES QUE ELA SEJA TOMADA PELO DONO DO REPOSITÓRIO.
+-- ============================================================
+--
+-- A coluna está `not null` AQUI, e `waitlist.phone` é NULLABLE LÁ. O
+-- extrato de produção confirma: a coluna nasceu na migração `001`, depois
+-- das primeiras linhas, e nunca foi promovida. Existe portanto uma forma
+-- de linha, permitida pelo schema de origem, que esta tabela não aceita.
+-- A linha ④ do seed da `000` reproduz exatamente essa forma.
+--
+-- Enquanto isto não for resolvido, a `010` falha ao migrar essa linha —
+-- e falhar é o comportamento correto por ora: melhor a migração parar do
+-- que o modelo afrouxar ou o dado ser inventado sem alguém decidir.
+--
+-- AS DUAS SAÍDAS:
+--
+--   A) `telefone` NULLABLE. `null` = "não sabemos", como em `consent`.
+--      Todo consumidor futuro passa a tratar null.
+--
+--   B) `telefone` NOT NULL. As linhas sem telefone viram outra coisa —
+--      e QUAL coisa é a pergunta que precisa de resposta explícita.
+--
+-- ⚠️ O QUE NÃO PODE, em qualquer das duas: preencher com placeholder
+-- ('', 'desconhecido', '+550000000000'). É o backfill de `consent`
+-- vestido de outra roupa — afirma um dado de contato que ninguém tem. E
+-- é pior que em `consent`, porque um telefone inventado é
+-- indistinguível de um real numa listagem, e uma hora alguém manda
+-- mensagem para ele.
+--
+-- O número que decide: `select count(*) from public.waitlist
+-- where phone is null` em PRODUÇÃO.
 -- ------------------------------------------------------------
 create table if not exists public.pessoas (
   id          uuid primary key default gen_random_uuid(),
@@ -148,7 +180,10 @@ comment on column public.pessoas.telefone is
   'E.164, ex.: +5521999999999. Formato que a API do WhatsApp entende sem '
   'reprocessar — e o WhatsApp é como o grupo da turma é montado. '
   'Normalizado por src/lib/telefone.ts, que roda no cliente e no servidor '
-  'a partir do mesmo arquivo. Sobrescrito a cada inscrição nova.';
+  'a partir do mesmo arquivo. Sobrescrito a cada inscrição nova. '
+  'NOT NULL aqui, enquanto waitlist.phone é NULLABLE na origem: decisão '
+  'pendente do dono do repositório. Ver o bloco DECISÃO PENDENTE na '
+  'migração 007. Em nenhuma das saídas vale placeholder.';
 
 commit;
 
@@ -158,6 +193,8 @@ commit;
 
 -- 1. Colunas certas, e NENHUMA de token (elas vêm na 016)?
 --    Esperado: id, nome, email, telefone, created_at. Só isso.
+--    ⚠️ `telefone` sai is_nullable = NO enquanto a decisão pendente não
+--    for tomada. Ver o bloco DECISÃO PENDENTE acima.
 select column_name, data_type, is_nullable
 from information_schema.columns
 where table_schema = 'public' and table_name = 'pessoas'
