@@ -1,8 +1,13 @@
 import { after } from 'next/server'
-import { z } from 'zod'
 import { buscarTurmaAtiva, insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
 import { confirmarInscricao, notificarAdmin } from '@/lib/email'
-import { E164_BR_REGEX, e164EhValido } from '@/lib/telefone'
+// O schema e a mensagem de erro moram juntos, em `src/config/schemas.ts`.
+// Metade do schema é derivada de `dominio.ts` e a outra metade não é
+// (`curso` e `periodo` continuam texto livre) — a fronteira está comentada
+// lá. A regra da mensagem genérica também: ela é decisão de segurança, não
+// de UX, e ficava exposta a "melhoria" enquanto morava aqui no meio do
+// fluxo da requisição.
+import { inscricaoSchema, mensagemDeErro } from '@/config/schemas'
 // O MESMO módulo que a modal importa para exibir a frase. É essa
 // identidade que dá valor ao que gravamos: o texto registrado no banco
 // não é uma cópia parecida do que estava na tela, é o mesmo objeto.
@@ -10,46 +15,6 @@ import { CONSENT_TEXT } from '@/config/consentimento'
 
 // Nunca pré-renderizar nem cachear: é um POST que escreve no banco.
 export const dynamic = 'force-dynamic'
-
-// ============================================================
-// VALIDAÇÃO
-// Esta é a validação que vale. A do formulário existe só para dar
-// retorno imediato — o cliente pode desligar o JS, e aí sobra só isto.
-// ============================================================
-const schema = z.object({
-  name: z.string().trim().min(2).max(100),
-  email: z.string().trim().toLowerCase().max(255).pipe(z.email()),
-  // O cliente já manda em E.164; aqui conferimos a forma e, além dela, o
-  // DDD e o nono dígito — a mesma função que a máscara usa, para os dois
-  // lados não discordarem sobre o que é um celular válido.
-  phone: z.string().trim().regex(E164_BR_REGEX).refine(e164EhValido),
-  payment_choice: z.enum(['agora', 'depois']),
-  // ------------------------------------------------------------
-  // PERFIL — obrigatórios AQUI, nullable no banco.
-  //
-  // A divisão é proposital: as linhas anteriores a esta migração não
-  // têm nenhum destes campos, e um `not null` na coluna faria o ALTER
-  // falhar. Quem exige o preenchimento é este schema, por onde passa
-  // toda escrita nova. O banco cuida do domínio dos valores (os CHECK
-  // de `nivel_ingles` e `disponibilidade`), a aplicação cuida da
-  // obrigatoriedade.
-  // ------------------------------------------------------------
-  nivel_ingles: z.enum(['basico', 'intermediario', 'avancado']),
-  curso: z.string().trim().min(2).max(100),
-  periodo: z.string().trim().min(1).max(40),
-  // `min(1)` é o que barra `[]`. Array vazio não é undefined e passaria
-  // por qualquer checagem de presença, virando uma inscrita sem nenhum
-  // dia — exatamente o que o formulário proíbe e o CHECK do banco
-  // também barra, em segunda instância.
-  disponibilidade: z.array(z.enum(['seg', 'ter', 'qua', 'qui', 'sex'])).min(1).max(5),
-  // Consentimento: `z.literal(true)` e não `z.boolean()` — `false` tem que
-  // reprovar. É a base legal da coleta (LGPD art. 7º, I); sem ela não há
-  // por que gravar dado nenhum.
-  consent: z.literal(true),
-  // Honeypot: campo escondido por CSS que só bot preenche. Opcional de
-  // propósito — humano nunca manda, e a ausência não pode ser erro.
-  website: z.string().optional(),
-})
 
 // ============================================================
 // RATE LIMIT
@@ -121,23 +86,13 @@ export async function POST(req: Request) {
     return json({ ok: false, message: 'Requisição inválida.' }, 400)
   }
 
-  const parsed = schema.safeParse(payload)
+  const parsed = inscricaoSchema.safeParse(payload)
   if (!parsed.success) {
-    // Consentimento e disponibilidade merecem mensagem própria: são os
-    // dois erros que a pessoa corrige com um clique, e "confira seus
-    // dados" a mandaria revisar campos que estão certos. O resto continua
-    // genérico de propósito — nada do payload recebido é ecoado de volta.
-    const campos = new Set(parsed.error.issues.map((i) => i.path[0]))
-    const so = (campo: string) => campos.size === 1 && campos.has(campo)
-
-    let message = 'Confira os dados informados e tente de novo.'
-    if (so('consent')) {
-      message = 'É preciso concordar em receber as comunicações para concluir a inscrição.'
-    } else if (so('disponibilidade')) {
-      message = 'Marque pelo menos um dia da semana em que você pode assistir às aulas.'
-    }
-
-    return json({ ok: false, message }, 400)
+    // Genérica por padrão; específica só para consentimento e
+    // disponibilidade, e só quando são o único erro. A regra inteira, com
+    // o porquê de serem exatamente essas duas exceções, está em
+    // `schemas.ts` — nada do payload recebido é ecoado de volta.
+    return json({ ok: false, message: mensagemDeErro(parsed.error) }, 400)
   }
 
   const {
