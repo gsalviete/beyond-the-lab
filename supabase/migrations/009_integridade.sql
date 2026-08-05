@@ -86,6 +86,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'inscricoes_status_check'
+      and conrelid = to_regclass('public.inscricoes')
   ) then
     alter table public.inscricoes
       add constraint inscricoes_status_check
@@ -119,6 +120,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'inscricoes_safra_status_coerentes_check'
+      and conrelid = to_regclass('public.inscricoes')
   ) then
     alter table public.inscricoes
       add constraint inscricoes_safra_status_coerentes_check
@@ -152,6 +154,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'inscricoes_nivel_ingles_check'
+      and conrelid = to_regclass('public.inscricoes')
   ) then
     alter table public.inscricoes
       add constraint inscricoes_nivel_ingles_check
@@ -168,6 +171,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'inscricoes_disponibilidade_check'
+      and conrelid = to_regclass('public.inscricoes')
   ) then
     alter table public.inscricoes
       add constraint inscricoes_disponibilidade_check
@@ -201,6 +205,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'inscricoes_consent_nunca_false_check'
+      and conrelid = to_regclass('public.inscricoes')
   ) then
     alter table public.inscricoes
       add constraint inscricoes_consent_nunca_false_check

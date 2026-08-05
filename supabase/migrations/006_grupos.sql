@@ -98,6 +98,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'grupos_dia_semana_check'
+      and conrelid = to_regclass('public.grupos')
   ) then
     alter table public.grupos
       add constraint grupos_dia_semana_check
@@ -110,6 +111,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'grupos_capacidade_check'
+      and conrelid = to_regclass('public.grupos')
   ) then
     alter table public.grupos
       add constraint grupos_capacidade_check

@@ -83,22 +83,35 @@ end $$;
 -- Cada um guardado pela existência do nome ANTIGO: rodando de novo,
 -- nenhum entra.
 -- ------------------------------------------------------------
+-- ⚠️ Os guardas usam `to_regclass` e `conrelid`, e não `conname` solto.
+--
+-- `conname` NÃO é único no banco: nomes de constraint são únicos por
+-- tabela. Um `where conname = 'turmas_pkey'` casa com uma constraint de
+-- qualquer tabela, em qualquer schema — e aí o guarda diria "existe" e o
+-- `alter index public.turmas_pkey` falharia, porque o objeto que existe
+-- é outro. Improvável neste banco, e o custo de fechar é uma linha.
+--
+-- Para índice, `to_regclass('public.x')` é a pergunta exata: ela é
+-- qualificada por schema e devolve `null` em vez de erro. Para a
+-- constraint, o escopo vem do `conrelid`.
 do $$
 begin
-  if exists (
-    select 1 from pg_constraint where conname = 'turmas_pkey'
-  ) then
+  if to_regclass('public.turmas_pkey') is not null then
     alter index public.turmas_pkey rename to safras_pkey;
   end if;
 
-  if exists (
-    select 1 from pg_constraint where conname = 'turmas_slug_key'
-  ) then
+  if to_regclass('public.turmas_slug_key') is not null then
     alter index public.turmas_slug_key rename to safras_slug_key;
   end if;
 
+  -- `conrelid = to_regclass(...)` e não `'public.safras'::regclass`: o
+  -- cast levanta exceção se a relação não existir, enquanto
+  -- `to_regclass` devolve `null` — e comparação com `null` não casa
+  -- nada, que é exatamente o comportamento desejado num guarda.
   if exists (
-    select 1 from pg_constraint where conname = 'turmas_cobranca_antes_das_aulas_check'
+    select 1 from pg_constraint
+    where conname = 'turmas_cobranca_antes_das_aulas_check'
+      and conrelid = to_regclass('public.safras')
   ) then
     alter table public.safras
       rename constraint turmas_cobranca_antes_das_aulas_check
@@ -139,6 +152,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'safras_vagas_total_check'
+      and conrelid = to_regclass('public.safras')
   ) then
     alter table public.safras
       add constraint safras_vagas_total_check
