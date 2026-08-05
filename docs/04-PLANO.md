@@ -24,6 +24,39 @@ errado.
 
 # Corte 1 — Fundação
 
+## ⛔ PRÉ-REQUISITO DO `c17`: staging de DADOS
+
+**O `c17` não roda sem um segundo projeto Supabase, com o dump de
+produção restaurado nele.** Não é recomendação. É condição de partida, e
+sem ela o passo não começa.
+
+O que **não** conta como staging de dados:
+
+- branch `staging` no git;
+- deploy de Preview na Vercel.
+
+Os dois isolam **código**. O `README.md` manda marcar `SUPABASE_URL` e
+`SUPABASE_SERVICE_ROLE_KEY` para *Production, Preview e Development* — o
+mesmo banco nos três. Com essa configuração, uma Preview da `staging`
+escreve na tabela onde estão as pessoas reais da lista de espera, e
+"rodei em staging primeiro" não significa nada.
+
+Checklist, todo ele antes do `c17`:
+
+1. Dump de produção feito e guardado **fora do repositório**.
+2. Segundo projeto Supabase criado, com o dump restaurado.
+3. Variáveis de *Preview* na Vercel apontando para o projeto novo, e
+   **conferidas** — não basta ter criado, tem que estar apontando.
+4. `005`–`009` rodadas lá primeiro, inclusive as aditivas.
+
+*Por que também as aditivas:* um `ALTER` do qual se precise voltar atrás
+é mais barato de descobrir no banco de mentira. `add column` é fácil de
+reverter; `rename` de tabela com FK apontando para ela, menos.
+
+*Por que isto está escrito aqui e não numa conversa:* daqui a três
+semanas ninguém lembra da conversa, e o `c17` continua sendo o passo que
+lê e reescreve dado de gente real.
+
 ### Preparação
 ```
 c01  chore(docs): adiciona docs/ com decisões e modelo da refatoração
@@ -68,6 +101,27 @@ c14  feat(db): 007 — cria pessoas
 c15  feat(db): 008 — cria inscricoes (sem dados)
 c16  feat(db): 009 — CHECKs NOT VALID + trigger grupo/safra coerentes
 ```
+> **⚠️ Dois CHECKs saem do `c16` e entram no `c17`.** O de consentimento
+> tudo-ou-nada e o de perfil obrigatório. No `c16` eles fariam o `c17`
+> **falhar inteiro**.
+>
+> A intuição sobre `NOT VALID` erra exatamente aqui: ele dispensa a
+> varredura das linhas que **já estão** na tabela no instante do `ALTER`,
+> e não dispensa nada de um `INSERT` futuro. A base atual tem linhas com
+> `consent` nulo e ao menos uma com o perfil inteiro nulo — a do
+> incidente da `004` —, e o `c17` precisa trazê-las como estão.
+>
+> Ordem certa, dentro da transação única do `c17`:
+>
+> 1. `INSERT` das linhas herdadas — passam, sem CHECK no caminho;
+> 2. `ALTER TABLE ... ADD CONSTRAINT ... NOT VALID` — as recém-inseridas
+>    viram "linhas que já estavam" e são dispensadas;
+> 3. daí em diante, toda escrita nova é verificada.
+>
+> É a forma da `004` — obrigar sem falsificar o passado —, só que aqui o
+> "passado" nasce dentro da própria transação. A `009` verifica que os
+> dois CHECKs **não** estão presentes antes de o `c17` rodar.
+
 > **Teste que lê `.sql` como texto tira os comentários antes de
 > comparar.** As migrações deste projeto documentam **contraexemplos em
 > prosa** — o `002` termina com testes de barreira comentados
