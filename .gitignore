@@ -22,3 +22,8 @@ design/
 
 # renders de validação do shot.mjs — regerados a cada rodada, nunca versionados
 render_*.png
+
+# lixo do Finder do macOS. Aparece modificado no `git status` sem ninguém ter
+# tocado no repositório, e o ruído é o problema: um working tree que sempre
+# tem uma linha suja treina a gente a ignorar `git status`.
+.DS_Store
