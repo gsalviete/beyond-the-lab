@@ -79,15 +79,54 @@ begin;
 -- novo — é um banco com dados, e a seção 6 escreveria pessoas falsas ao
 -- lado de pessoas reais. A transação inteira aborta aqui.
 -- ------------------------------------------------------------
+-- ⚠️⚠️ O `execute` É OBRIGATÓRIO. NÃO "SIMPLIFIQUE" PARA A FORMA DIRETA.
+--
+-- A versão que qualquer um escreveria — e que eu escrevi primeiro — é:
+--
+--     if to_regclass('public.waitlist') is not null
+--        and exists (select 1 from public.waitlist)
+--     then ...
+--
+-- Ela PARECE certa: o `to_regclass` devolve null quando a tabela não
+-- existe, e o `and` curto-circuita. Só que ela quebra exatamente no
+-- caso que veio proteger, num banco vazio:
+--
+--     ERROR: 42P01: relation "public.waitlist" does not exist
+--     CONTEXT: PL/pgSQL function inline_code_block line 3 at IF
+--
+-- POR QUÊ: o PL/pgSQL avalia a condição de um `if` preparando-a como UM
+-- ÚNICO comando SQL (`select <condição>`). O parser resolve TODOS os
+-- nomes de relação da expressão antes de a expressão começar a ser
+-- avaliada. Quando `public.waitlist` não existe, ele falha no parse — e
+-- o curto-circuito do `and` nunca chega a acontecer, porque não há o que
+-- curto-circuitar: o comando ainda nem foi planejado.
+--
+-- É por isso que `to_regclass()` existe. Ela responde "esta relação
+-- existe?" sem citar a relação como tabela — recebe uma STRING, não um
+-- identificador, e por isso não passa pelo resolvedor de nomes.
+--
+-- O `execute` resolve a segunda metade: ele adia o parse para o momento
+-- da execução, que só é alcançado DENTRO do ramo que já confirmou a
+-- existência da tabela.
+--
+-- ⚠️ A mesma armadilha vale para qualquer expressão do PL/pgSQL —
+-- `if`, `while`, `select ... into`, atribuição — que cite uma relação
+-- que pode não existir na ordem de execução. Condição sobre catálogo
+-- (`pg_constraint`, `pg_class`) é sempre segura, porque o catálogo
+-- sempre existe.
 do $$
+declare
+  tem_linha boolean;
 begin
-  if to_regclass('public.waitlist') is not null
-     and exists (select 1 from public.waitlist)
-  then
-    raise exception
-      'RECUSADO: public.waitlist ja tem linhas. Este arquivo documenta o '
-      'schema inicial e so roda em ambiente NOVO e VAZIO. Ver o cabecalho.'
-      using errcode = 'raise_exception';
+  if to_regclass('public.waitlist') is not null then
+    execute 'select exists (select 1 from public.waitlist)' into tem_linha;
+
+    if tem_linha then
+      raise exception
+        'RECUSADO: public.waitlist ja tem linhas. Este arquivo documenta o '
+        'schema inicial e so roda em ambiente NOVO e VAZIO. Ver o cabecalho.'
+        using errcode = 'raise_exception';
+    end if;
   end if;
 end $$;
 
@@ -124,6 +163,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'turmas_cobranca_antes_das_aulas_check'
+      and conrelid = to_regclass('public.turmas')
   ) then
     alter table public.turmas
       add constraint turmas_cobranca_antes_das_aulas_check
@@ -218,7 +258,8 @@ create index if not exists waitlist_turma_id_idx
 -- ------------------------------------------------------------
 do $$
 begin
-  if not exists (select 1 from pg_constraint where conname = 'waitlist_payment_choice_check') then
+  if not exists (select 1 from pg_constraint where conname = 'waitlist_payment_choice_check'
+      and conrelid = to_regclass('public.waitlist')) then
     alter table public.waitlist
       add constraint waitlist_payment_choice_check
       check (payment_choice in ('agora', 'depois'));
@@ -226,7 +267,8 @@ begin
 
   -- SEIS valores, com 'lista_espera'. O `001` criou com cinco; o `002`
   -- dropou e recriou com seis. Produção e repositório concordam.
-  if not exists (select 1 from pg_constraint where conname = 'waitlist_status_check') then
+  if not exists (select 1 from pg_constraint where conname = 'waitlist_status_check'
+      and conrelid = to_regclass('public.waitlist')) then
     alter table public.waitlist
       add constraint waitlist_status_check
       check (status in (
@@ -239,14 +281,16 @@ begin
       ));
   end if;
 
-  if not exists (select 1 from pg_constraint where conname = 'waitlist_nivel_ingles_check') then
+  if not exists (select 1 from pg_constraint where conname = 'waitlist_nivel_ingles_check'
+      and conrelid = to_regclass('public.waitlist')) then
     alter table public.waitlist
       add constraint waitlist_nivel_ingles_check
       check (nivel_ingles is null
              or nivel_ingles in ('basico', 'intermediario', 'avancado'));
   end if;
 
-  if not exists (select 1 from pg_constraint where conname = 'waitlist_disponibilidade_check') then
+  if not exists (select 1 from pg_constraint where conname = 'waitlist_disponibilidade_check'
+      and conrelid = to_regclass('public.waitlist')) then
     alter table public.waitlist
       add constraint waitlist_disponibilidade_check
       check (
@@ -256,7 +300,8 @@ begin
       );
   end if;
 
-  if not exists (select 1 from pg_constraint where conname = 'waitlist_turma_id_fkey') then
+  if not exists (select 1 from pg_constraint where conname = 'waitlist_turma_id_fkey'
+      and conrelid = to_regclass('public.waitlist')) then
     alter table public.waitlist
       add constraint waitlist_turma_id_fkey
       foreign key (turma_id) references public.turmas(id) on delete restrict;
@@ -400,6 +445,7 @@ do $$
 begin
   if not exists (
     select 1 from pg_constraint where conname = 'waitlist_perfil_obrigatorio_check'
+      and conrelid = to_regclass('public.waitlist')
   ) then
     alter table public.waitlist
       add constraint waitlist_perfil_obrigatorio_check
@@ -415,6 +461,7 @@ begin
 
   if not exists (
     select 1 from pg_constraint where conname = 'waitlist_consentimento_obrigatorio_check'
+      and conrelid = to_regclass('public.waitlist')
   ) then
     alter table public.waitlist
       add constraint waitlist_consentimento_obrigatorio_check
@@ -428,6 +475,7 @@ begin
 
   if not exists (
     select 1 from pg_constraint where conname = 'waitlist_turma_status_coerentes_check'
+      and conrelid = to_regclass('public.waitlist')
   ) then
     alter table public.waitlist
       add constraint waitlist_turma_status_coerentes_check

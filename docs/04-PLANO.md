@@ -127,6 +127,27 @@ c14  feat(db): 007 — cria pessoas
 c15  feat(db): 008 — cria inscricoes (sem dados)
 c16  feat(db): 009 — CHECKs NOT VALID + trigger grupo/safra coerentes
 ```
+> **⚠️ Guarda de PL/pgSQL sobre tabela que pode não existir precisa de
+> `execute`.** A forma direta parece certa e quebra:
+>
+> ```sql
+> -- ERRO 42P01 num banco vazio, apesar do to_regclass e do curto-circuito
+> if to_regclass('public.x') is not null and exists (select 1 from public.x)
+> ```
+>
+> O PL/pgSQL prepara a condição do `if` como **um único comando SQL**, e
+> o parser resolve todos os nomes de relação antes de a expressão começar
+> a ser avaliada — o `and` nunca chega a curto-circuitar. `execute`
+> adia o parse para dentro do ramo que já confirmou a existência.
+>
+> Condição sobre catálogo (`pg_constraint`, `pg_class`) é sempre segura.
+> Auditado nas `000`–`009`: só a `000` tinha o caso. A `010` vai ter
+> vários — ela lê `waitlist` e escreve em três tabelas.
+>
+> No mesmo passe: guarda de índice usa `to_regclass('public.nome')`, não
+> `conname` solto. **`conname` não é único no banco** — nomes de
+> constraint são únicos por tabela.
+
 > **⚠️ Dois CHECKs saem do `c16` e entram no `c17`.** O de consentimento
 > tudo-ou-nada e o de perfil obrigatório. No `c16` eles fariam o `c17`
 > **falhar inteiro**.
