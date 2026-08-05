@@ -94,6 +94,32 @@ c11  test(consentimento): CONSENT_TEXT deriva dos segmentos
 
 ### Schema novo
 ```
+c11b feat(db): 000 — schema inicial extraído de produção + seed de staging
+```
+> `c11b` fecha a 8.3 do REPORT no objeto onde ela mais doía: **a tabela
+> `waitlist` nunca foi criada por arquivo nenhum.** O `001` já a encontra
+> existindo e só acrescenta colunas. Ficaram meses em produção sem SQL
+> versionado: `id`, `email`, `name`, `created_at`, `waitlist_pkey`,
+> `waitlist_created_at_idx` e — o que mais importa —
+> `waitlist_email_lower_key`, um **unique funcional sobre `lower(email)`**.
+> É a constraint que levanta o `23505` de onde nasce a resposta de
+> duplicata, o comportamento mais deliberado do sistema, e ela não estava
+> escrita em lugar nenhum.
+>
+> **Não houve drift no `waitlist_status_check`.** O `001` lista cinco
+> valores e o `002` faz `drop constraint` e recria com os seis, incluindo
+> `lista_espera`. Repositório e banco concordam.
+>
+> **O seed vem ANTES dos três `NOT VALID` da `004`,** e é a mesma pegada
+> do `c16` um nível acima: as linhas que reproduzem o passivo real
+> (`consent` nulo, perfil nulo, par turma/status incoerente) violam esses
+> CHECKs, e `NOT VALID` só dispensa linha existente — nunca `INSERT`
+> novo. Seed antes, constraint depois. Se staging entrar limpo, o `c17`
+> passa lá e falha em produção.
+>
+> O arquivo **nunca roda em produção**, e isso é mecânico: a seção 0
+> aborta a transação se `waitlist` já tiver qualquer linha.
+```
 c12  feat(db): 005 — renomeia turmas → safras, adiciona
                      vagas_total, stripe_price_id
 c13  feat(db): 006 — cria grupos

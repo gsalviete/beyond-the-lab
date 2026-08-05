@@ -101,6 +101,14 @@ create table if not exists public.pessoas (
 -- índice funcional é o fato: nenhum build, atual ou velho, consegue
 -- criar as duas.
 --
+-- ⚠️ ISTO NÃO É DECISÃO NOVA — é continuidade, e só se soube depois.
+-- Esta seção foi escrita a partir do raciocínio acima. O extrato de
+-- produção que originou a `000` mostrou em seguida que a `waitlist` já
+-- tem exatamente isso desde sempre: `waitlist_email_lower_key`, unique
+-- funcional sobre `lower(email)`, criado no Studio e nunca versionado.
+-- É a constraint que levanta o `23505` de onde nasce o caminho de
+-- duplicata da rota. `pessoas` herda a forma que já estava no ar.
+--
 -- Consequência prática: toda consulta por e-mail precisa usar
 -- `where lower(email) = lower($1)` para aproveitar o índice.
 -- ------------------------------------------------------------
