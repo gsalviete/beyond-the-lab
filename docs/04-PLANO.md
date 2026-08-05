@@ -67,6 +67,15 @@ c13  feat(db): 006 — cria grupos
 c14  feat(db): 007 — cria pessoas
 c15  feat(db): 008 — cria inscricoes (sem dados)
 c16  feat(db): 009 — CHECKs NOT VALID + trigger grupo/safra coerentes
+```
+> **Teste que lê `.sql` como texto tira os comentários antes de
+> comparar.** As migrações deste projeto documentam **contraexemplos em
+> prosa** — o `002` termina com testes de barreira comentados
+> (`-- update ... set disponibilidade = array['sab']`) que mostram o que
+> o CHECK deve recusar. Um teste que varre o arquivo inteiro lê o
+> contraexemplo como se fosse regra. Descoberto no `c10`, e o `c16` cria
+> seis CHECKs novos — é onde volta a morder.
+```
 c17  feat(db): 010 — migra waitlist → pessoas + inscricoes (transacional)
 c18  feat(db): 011 — renomeia waitlist → waitlist_legado
 c18b refactor(supabase): tipos gerados do schema, remove tipos manuais
