@@ -213,46 +213,69 @@ declare
   v_inscricao_id uuid;
 begin
   -- ..........................................................
-  -- 2.1 A pessoa, resolvida por e-mail
+  -- 2.1 A pessoa, RESOLVIDA — não atualizada
+  --
+  -- Este passo só responde "qual é o id desta pessoa?". Ele NÃO
+  -- SOBRESCREVE NENHUM DADO DE CONTATO. A atualização de `nome` e
+  -- `telefone` acontece na 2.3, depois de a inscrição ter nascido, e só
+  -- se ela tiver nascido.
+  --
+  -- ⚠️⚠️ POR QUE O UPSERT NÃO PODE ATUALIZAR AQUI
+  --
+  -- Um `do update set nome = excluded.nome, telefone = excluded.telefone`
+  -- parece o óbvio ("o dado mais recente serve para falar com a pessoa",
+  -- `007`) e é um DEFEITO DE SEGURANÇA, porque este é um formulário
+  -- PÚBLICO e SEM AUTENTICAÇÃO. Qualquer pessoa que digite um e-mail
+  -- conhecido troca o nome e o telefone daquele contato no banco, em
+  -- silêncio e sem rastro. Somado à resposta de duplicata, o formulário
+  -- deixaria de ser só um oráculo de "este e-mail existe?" e passaria a
+  -- ser um oráculo QUE TAMBÉM EDITA: digita o e-mail, descobre que
+  -- existe, substitui o telefone. A Giovana liga para o número errado e
+  -- não tem como saber por quê — a linha não guarda quem a mudou.
+  --
+  -- Escrever contato só quando uma INSCRIÇÃO NOVA nasce é o que amarra a
+  -- edição a um ato que a pessoa de fato praticou (preencheu o
+  -- formulário inteiro, para uma safra em que ainda não estava). Não é
+  -- autenticação — o formulário não tem —, mas é a diferença entre
+  -- "quem se inscreve atualiza o próprio contato" e "quem adivinha um
+  -- e-mail edita o contato alheio".
+  --
+  -- ⚠️ O `set email = pessoas.email` é um TOQUE NO-OP, e cada metade
+  -- dele é obrigatória:
+  --
+  --   ...POR QUE `do update` E NÃO `do nothing`: com `do nothing` o
+  --   comando não devolve linha nenhuma no conflito, e `v_pessoa_id`
+  --   ficaria null. O remendo seria um `select` depois — e aí volta a
+  --   corrida: se outra transação acabou de inserir o mesmo e-mail e
+  --   ainda não commitou, o `select` não a enxerga e a função escreve
+  --   uma inscrição com pessoa nula. O `do update` é o idioma que faz o
+  --   `returning` disparar nos dois caminhos, e é atômico com o insert.
+  --   Ele reescreve a linha com os MESMOS VALORES: nenhum campo muda.
+  --
+  --   ...POR QUE `pessoas.email` E NUNCA `excluded.email`: o conflito
+  --   casa por `lower()`, então `excluded` pode trazer OUTRA CAIXA.
+  --   `set email = excluded.email` reescreveria 'maria@x.com' como
+  --   'Maria@x.com' — mudança silenciosa na grafia de dado herdado da
+  --   `010`, feita de passagem, por quem só digitou o e-mail com o shift
+  --   preso. `pessoas.email` é o valor JÁ ARMAZENADO: a linha continua
+  --   exatamente como entrou.
+  --
+  -- O upsert é ATÔMICO: duas submissões simultâneas do mesmo e-mail não
+  -- criam duas pessoas. Uma insere, a outra encontra.
+  --
+  -- E ele NÃO PODE VAZAR se o e-mail já existia (`007`, §CONSEQUÊNCIA):
+  -- é por isso que os dois ramos devolvem `id` do mesmo jeito e nada
+  -- daqui chega ao valor de retorno da função.
   --
   -- `on conflict (lower(email))` infere o índice FUNCIONAL da `007`. A
   -- inferência precisa repetir a EXPRESSÃO do índice, não o nome da
   -- coluna: `on conflict (email)` não encontra índice nenhum e falha com
   -- 42P10.
-  --
-  -- ⚠️ `email` NÃO ENTRA no `do update`. Quem volta com 'Maria@x.com'
-  -- depois de ter entrado como 'maria@x.com' continua gravada como
-  -- entrou. Reescrever a coluna seria mexer em dado herdado sem
-  -- necessidade — o índice funcional já garante que são a MESMA pessoa,
-  -- que é a única coisa que o sistema precisa saber. Normalizar a coluna
-  -- é decisão separada, e não se toma de passagem dentro de um upsert.
-  --
-  -- `nome` e `telefone` ENTRAM: são "o dado mais recente serve para
-  -- falar com a pessoa" (`007`, comentário das colunas). Quem volta com
-  -- telefone novo tem o telefone atualizado, e é o número de agora que o
-  -- grupo de WhatsApp usa.
-  --
-  -- ⚠️ ISTO DEPENDE DE `pessoas.telefone` SER `not null`. Se a decisão
-  -- pendente da `007` tornar a coluna NULLABLE, este `do update` vira um
-  -- caminho de PERDA DE DADO: uma submissão sem telefone sobrescreveria
-  -- com null um número que já se conhecia. Hoje o `not null` recusa a
-  -- linha inteira e o problema não existe; no dia em que ele sair, aqui
-  -- precisa virar `coalesce(excluded.telefone, public.pessoas.telefone)`.
-  -- Escrever o `coalesce` agora seria código morto que ninguém consegue
-  -- exercitar — a nota é a forma honesta de deixar isso resolvido.
-  --
-  -- O upsert é ATÔMICO: duas submissões simultâneas do mesmo e-mail não
-  -- criam duas pessoas. Uma insere, a outra atualiza.
-  --
-  -- E ele NÃO PODE VAZAR se o e-mail já existia (`007`, §CONSEQUÊNCIA):
-  -- é por isso que os dois ramos devolvem `id` do mesmo jeito e nada
-  -- daqui chega ao valor de retorno da função.
   -- ..........................................................
   insert into public.pessoas (nome, email, telefone)
   values (p_nome, p_email, p_telefone)
   on conflict (lower(email)) do update
-    set nome     = excluded.nome,
-        telefone = excluded.telefone
+    set email = pessoas.email   -- toque no-op, valor já armazenado — ver acima
   returning id into v_pessoa_id;
 
   -- ..........................................................
@@ -379,6 +402,52 @@ begin
   on conflict do nothing
   returning id into v_inscricao_id;
 
+  -- ..........................................................
+  -- 2.3 O contato, atualizado SE E SÓ SE a inscrição nasceu agora
+  --
+  -- `nome` e `telefone` são "o dado mais recente serve para falar com a
+  -- pessoa" (`007`, comentário das colunas): quem volta para comprar com
+  -- telefone novo fica com o telefone novo, e é o número de agora que o
+  -- grupo de WhatsApp usa. O que muda em relação ao upsert ingênuo é
+  -- QUANDO isso acontece — ver o ⚠️ da 2.1.
+  --
+  -- O `if` é a barreira inteira. Ele produz duas propriedades, e as duas
+  -- valem mais do que a economia de uma linha:
+  --
+  --   INSCRIÇÃO NOVA, inclusive em SAFRA NOVA → o contato é atualizado.
+  --     Quem estava na lista de espera e agora compra passa pelo `if`, e
+  --     o telefone que ela acabou de digitar é o que fica. Não há
+  --     regressão em relação ao comportamento pretendido.
+  --
+  --   DUPLICATA → a função NÃO ALTERA UM ÚNICO VALOR. Não é "no-op na
+  --     inscrição": é no-op na transação toda. Quem enumera e-mails no
+  --     formulário não edita nada, porque não há nada a editar sem uma
+  --     inscrição nova para justificar a edição.
+  --
+  -- ⚠️ Não converta isto num `update ... where id = v_pessoa_id and
+  -- <alguma condição sobre os valores>`. A condição que autoriza a
+  -- escrita não é "o telefone está diferente", é "esta pessoa acabou de
+  -- se inscrever". Comparar valores devolveria a edição para quem só
+  -- adivinhou o e-mail, e passaria a vazar mais uma coisa: o tempo de
+  -- resposta diferiria conforme o telefone digitado bater ou não com o
+  -- armazenado.
+  --
+  -- ⚠️ ISTO DEPENDE DE `pessoas.telefone` SER `not null`. Se a decisão
+  -- pendente da `007` tornar a coluna NULLABLE, este `update` vira um
+  -- caminho de PERDA DE DADO: uma inscrição nova sem telefone
+  -- sobrescreveria com null um número que já se conhecia. Hoje o
+  -- `not null` recusa a linha e o problema não existe; no dia em que ele
+  -- sair, aqui precisa virar `coalesce(p_telefone, telefone)`. Escrever
+  -- o `coalesce` agora seria código morto que ninguém consegue
+  -- exercitar — a nota é a forma honesta de deixar isso resolvido.
+  -- ..........................................................
+  if v_inscricao_id is not null then
+    update public.pessoas
+      set nome     = p_nome,
+          telefone = p_telefone
+    where id = v_pessoa_id;
+  end if;
+
   return v_inscricao_id is not null;
 end;
 $$;
@@ -395,12 +464,17 @@ comment on function public.criar_inscricao(
   'gravado sem NENHUM registro de consentimento, e sob LGPD isso é o '
   'requisito probatório quebrado, não uma linha órfã. Duas requisições '
   'do PostgREST sao duas transacoes; a transacao so pode existir aqui. '
-  'Resolve a pessoa por lower(email) com upsert (nome e telefone viram '
-  'os mais recentes; o email NAO e reescrito) e insere a inscricao com '
-  'on conflict do nothing — duplicata e MESMA PESSOA NA MESMA SAFRA, e '
-  'safra nova e inscricao nova, porque o curso e recompravel. '
-  'Em duplicata o consentimento existente NAO e sobrescrito: a prova e a '
-  'da primeira vez, com a data da primeira vez. '
+  'RESOLVE a pessoa por lower(email) — o upsert e um toque no-op que so '
+  'devolve o id, e NAO sobrescreve contato: o formulario e publico e sem '
+  'autenticacao, e um do update ali deixaria qualquer um trocar o nome e '
+  'o telefone de um contato conhecido so digitando o e-mail. '
+  'Insere a inscricao com on conflict do nothing — duplicata e MESMA '
+  'PESSOA NA MESMA SAFRA, e safra nova e inscricao nova, porque o curso '
+  'e recompravel. Nome e telefone so sao atualizados SE a inscricao '
+  'nasceu agora. '
+  'Em DUPLICATA a funcao nao altera UM UNICO VALOR: nem o consentimento '
+  'da inscricao existente (a prova e a da primeira vez, com a data da '
+  'primeira vez), nem o perfil dela, nem o contato da pessoa. '
   'status e DERIVADO de safra_id (null -> lista_espera, senao '
   'pendente_pagamento), respeitando o CHECK da 009; nao existe aprovada '
   'nem rejeitada (D-02). '
@@ -520,12 +594,19 @@ order by c.relname, i.relname;
 -- join public.pessoas p on p.id = i.pessoa_id
 -- where lower(p.email) = 'barreira@exemplo.invalid';
 
--- C. Mesmo e-mail em caixa diferente, com telefone novo → false,
---    e o telefone da pessoa atualizado SEM criar segunda pessoa.
---    Esperado: uma pessoa só, telefone = ...998, e-mail ainda em
---    minúscula (o `do update` não toca em `email`).
+-- C. ⚠️ DUPLICATA NÃO EDITA NADA — o teste do defeito que a 2.1 fecha.
+--    Mesmo e-mail em CAIXA DIFERENTE, com nome e telefone diferentes:
+--    é a forma exata do ataque (adivinhar o e-mail para trocar o
+--    contato alheio).
+--    Esperado: `false`, UMA pessoa só, e a linha INTEIRA intacta —
+--    nome 'Teste Barreira', telefone ...999, e-mail ainda em minúscula.
+--    Se o nome virar 'Invasor' ou o telefone virar ...998, o upsert
+--    voltou a sobrescrever contato e o formulário público virou uma
+--    ferramenta de edição sem autenticação.
+--    Se o e-mail virar 'BARREIRA@...', o `set` do passo 1 está usando
+--    `excluded.email` em vez de `pessoas.email`.
 -- select public.criar_inscricao(
---   'Teste Barreira', 'BARREIRA@exemplo.invalid', '+5521999999998',
+--   'Invasor', 'BARREIRA@exemplo.invalid', '+5521999999998',
 --   'basico', 'Fonoaudiologia', '3', array['seg','qua'],
 --   now(), 'texto de consentimento do teste'
 -- );  -- esperado: FALSE
@@ -569,10 +650,18 @@ order by c.relname, i.relname;
 -- G. A mesma pessoa se inscreve numa SAFRA de verdade depois de estar na
 --    lista de espera → true. NÃO é duplicata: safra nova é inscrição
 --    nova, e é o que destrava quem está esperando o checkout abrir.
+--    ⚠️ E é AQUI que o contato PODE ser atualizado: a chamada vai com
+--    telefone novo (...990) e ele TEM que ficar, porque houve inscrição
+--    nova. Se o telefone continuar ...999, o `if` da 2.3 está fechado
+--    demais e quem volta para comprar não consegue corrigir o próprio
+--    número.
 --    Troque <SAFRA> por um id real.
 -- select public.criar_inscricao(
---   'Teste Barreira', 'barreira@exemplo.invalid', '+5521999999999',
+--   'Teste Barreira', 'barreira@exemplo.invalid', '+5521999999990',
 --   'basico', 'Fonoaudiologia', '3', array['seg','qua'],
 --   now(), 'texto de consentimento do teste',
 --   '<SAFRA>'
 -- );  -- esperado: TRUE, e a linha nasce em pendente_pagamento
+-- select nome, email, telefone from public.pessoas
+-- where lower(email) = 'barreira@exemplo.invalid';
+--     esperado: telefone = ...990
