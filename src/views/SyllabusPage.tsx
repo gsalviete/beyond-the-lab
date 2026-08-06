@@ -108,11 +108,24 @@ export default function SyllabusPage() {
           {/* mesma cadência da primeira dobra da landing: kicker → título →
               apoio, com o título no curso longo do .reveal-hero */}
           <div className="mx-auto flex max-w-[820px] flex-col items-center gap-4 text-center">
+            {/* A duração saiu daqui de propósito — não é esquecimento, e não
+                deve voltar. Este kicker dizia "6 meses · 12 módulos", e o
+                "6 meses" era literal de duração em componente, que a D-13
+                proíbe inclusive como fallback: a Giovana publica uma safra de
+                outra duração no Studio e esta linha continuaria dizendo seis.
+                A fonte da duração é `safra.duracao_meses`, e o lugar onde ela
+                aparece é o card de preço da landing (`Pricing`), que a lê do
+                banco desde o c22 — o que sai daqui é a REPETIÇÃO, não o dado.
+                Esta página é estática e não recebe safra; buscar uma só para
+                repetir um número que a landing já mostra seria pagar leitura
+                de banco para criar uma segunda string que pode divergir da
+                primeira. "12 módulos" fica: é contagem de `@/data/modules`,
+                não tem coluna, e não varia de safra para safra. */}
             <p
               className="reveal font-sans text-[12px] font-semibold uppercase leading-[16px] tracking-[2.16px] text-[#F15D89]"
               style={{ '--reveal-delay': '40ms' } as CSSProperties}
             >
-              6 meses · 12 módulos
+              12 módulos
             </p>
             <h1
               className="reveal-hero h2-section font-display font-semibold leading-[normal] text-ink"
