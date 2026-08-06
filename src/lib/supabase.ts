@@ -420,7 +420,7 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
  *      trabalho para jogar fora, e cachear a contagem de vagas por 60
  *      segundos é justamente o tipo de dado que não pode envelhecer.
  *
- *   3. AS COLUNAS. Aqui vêm duas. Nem `id`, nem `inscricoes_abertas`,
+ *   3. AS COLUNAS. Aqui vêm três. Nem `id`, nem `inscricoes_abertas`,
  *      nem `vagas_total` — nada que a vitrine não imprima. É o corte de
  *      fronteira do REPORT §9.6 feito na origem: o que não é selecionado
  *      não vaza mais adiante por um spread distraído.
@@ -432,18 +432,35 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
  * mesma tela. Está escrita duas vezes porque as consultas divergem em
  * tudo o mais; este comentário é a amarra.
  *
- * ⚠️ SEM `data_inicio_aulas`. A data de início continua sendo texto
- * literal na tela até o `c23`, que tem regra própria (D-14): a frase é
- * "na semana de dd/mm/yyyy", nunca a data seca, porque cada grupo começa
- * num dia diferente da mesma semana. Acrescentar a coluna aqui antes
- * disso seria transportar um dado que ninguém pode exibir ainda.
+ * ⚠️ `data_inicio_aulas` ENTROU NO `c23`, e ela NÃO é exibida seca.
+ *
+ * O comentário que ocupava este lugar dizia que a data continuava sendo
+ * texto literal na tela até o `c23`, e que trazer a coluna antes disso
+ * seria transportar um dado que ninguém podia exibir. O `c23` chegou: o
+ * badge do hero, que dizia `Setembro` escrito à mão, passa a derivar o
+ * mês daqui.
+ *
+ * O que a condição daquele comentário exigia continua valendo e agora é
+ * cumprido por `formatarSemanaDeInicio` e `nomeDoMes`, em
+ * `src/config/curso.ts`: pela D-14 a data NUNCA vira `dd/mm/yyyy` na
+ * tela, porque cada grupo começa num dia diferente da mesma semana (D-01)
+ * e a data seca seria uma promessa que o produto não faz. Esta função
+ * transporta o dia de calendário; quem decide a frase é aquele módulo, e
+ * é o único que decide.
+ *
+ * ⚠️ É uma coluna `date` e chega como 'YYYY-MM-DD' — dia de calendário,
+ * sem fuso, sem instante. Quem a consumir com `new Date(str)` seguido de
+ * `getDate()` lê o dia anterior no Brasil. Ver `paraDataUTC`.
  */
-export type SafraVitrine = Pick<Tables<'safras'>, 'valor_mensal' | 'duracao_meses'>
+export type SafraVitrine = Pick<
+  Tables<'safras'>,
+  'valor_mensal' | 'duracao_meses' | 'data_inicio_aulas'
+>
 
 export async function buscarSafraDeVitrine(): Promise<SafraVitrine | null> {
   const { data, error } = await supabaseVitrine()
     .from('safras')
-    .select('valor_mensal,duracao_meses')
+    .select('valor_mensal,duracao_meses,data_inicio_aulas')
     .order('data_inicio_aulas', { ascending: false })
     .limit(1)
 

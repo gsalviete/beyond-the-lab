@@ -53,9 +53,20 @@ export const revalidate = 60
  * travessia de fronteira do projeto (REPORT §9.6), aplicado à fronteira
  * servidor → componente.
  *
- * As datas NÃO estão aqui de propósito: `data_inicio_aulas` continua
- * sendo texto literal na tela até o `c23`, que tem regra própria (D-14 —
- * "na semana de dd/mm/yyyy", nunca a data seca).
+ * `data_inicio_aulas` ENTROU NO `c23`, e o corte duplo é justamente o
+ * que a deixou entrar de propósito em vez de por descuido: a linha
+ * abaixo é a decisão de que esta coluna vai para o HTML público, tomada
+ * por alguém, num commit. `data_primeira_cobranca` continua fora — ela
+ * não é selecionada pela consulta e não tem nada que fazer numa página
+ * que não fala de cobrança.
+ *
+ * ⚠️ A DATA NÃO É EXIBIDA SECA, EM LUGAR NENHUM (D-14). O que atravessa
+ * daqui é o dia de calendário cru; quem decide a frase é
+ * `src/config/curso.ts`, e só ele. Pela D-01 cada grupo começa num dia
+ * diferente da mesma semana, então "as aulas começam em 02/09/2026"
+ * seria uma promessa que o produto não faz. Se um dia aparecer um
+ * `dd/mm/yyyy` de data de início nesta tela, o erro está em quem
+ * formatou.
  *
  * ============================================================
  * ⚠️ SE NÃO HÁ SAFRA, O BUILD FALHA. É DE PROPÓSITO.
@@ -91,37 +102,39 @@ export const revalidate = 60
  * a única em que o sistema podia dizer algo falso a quem está comprando,
  * e é ela que este passo fecha.
  */
-async function precoDaSafra() {
+async function vitrineDaSafra() {
   const safra = await buscarSafraDeVitrine()
 
   if (!safra) {
     throw new Error(
-      'Nenhuma safra no banco: a landing não tem valor nem duração para exibir, ' +
-        'e não existe fallback honesto (D-13 proíbe literal, inclusive como fallback). ' +
-        'Crie a safra em public.safras antes de buildar.',
+      'Nenhuma safra no banco: a landing não tem valor, duração nem data de início ' +
+        'para exibir, e não existe fallback honesto (D-13 proíbe literal, inclusive ' +
+        'como fallback). Crie a safra em public.safras antes de buildar.',
     )
   }
 
   return {
     valorMensal: safra.valor_mensal,
     duracaoMeses: safra.duracao_meses,
+    dataInicioAulas: safra.data_inicio_aulas,
   }
 }
 
 export default async function Page() {
-  const { valorMensal, duracaoMeses } = await precoDaSafra()
+  const { valorMensal, duracaoMeses, dataInicioAulas } = await vitrineDaSafra()
 
   return (
     <div className="relative">
       <ScrollReveal />
       <Navbar />
       <main>
-        {/* As três seções que falavam de duração ou preço agora recebem os
-            números por prop. Elas não consultam o banco por conta própria,
-            e é assim que a página inteira sai de UMA leitura: três
-            consumidores lendo cada um a sua produziriam três respostas
-            possivelmente diferentes no mesmo HTML. */}
-        <Hero duracaoMeses={duracaoMeses} />
+        {/* As seções que falavam de duração, preço ou data agora recebem os
+            valores por prop. Elas não consultam o banco por conta própria,
+            e é assim que a página inteira sai de UMA leitura: cada
+            consumidor lendo a sua produziria respostas possivelmente
+            diferentes no mesmo HTML — e com `revalidate = 60` elas nem
+            precisariam ser lidas no mesmo segundo para divergir. */}
+        <Hero duracaoMeses={duracaoMeses} dataInicioAulas={dataInicioAulas} />
         <PainPoints />
         <Personas />
         <Skills />

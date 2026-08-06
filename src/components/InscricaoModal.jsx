@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
-import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
+import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
 // A frase do consentimento saiu daqui para um módulo próprio. Não foi
 // arrumação: `/api/inscricao` grava esta mesma constante em
 // `inscricoes.consent_text`, e duas cópias divergiriam sem ninguém notar —
@@ -490,6 +490,12 @@ export default function InscricaoModal({ onFechar }) {
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
             inscricaoAberta={inscricaoAberta}
+            /* Sem `??` e sem default: `inscricaoAberta` só é `true` quando
+               `safra` existe (é `safra?.inscricoes_abertas === true`), e é
+               só nesse ramo que a tela de sucesso imprime a data. O `?.`
+               aqui existe para o ramo de lista de espera, onde `safra`
+               pode ser null e a data não é lida. */
+            dataInicioAulas={safra?.data_inicio_aulas}
             onFechar={pedirFechamento}
           />
         ) : (
@@ -965,7 +971,13 @@ function TelaDeCarregamento({ tituloId }) {
 // reservada" na frente de quem entrou na lista de espera. A pergunta que
 // esta tela faz sempre foi booleana; agora ela recebe o booleano.
 // ============================================================
-function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, onFechar }) {
+//
+// `dataInicioAulas` é 'YYYY-MM-DD' cru, e só é lido no ramo de inscrição
+// aberta — ver a nota no call site. Sem default, pelo mesmo motivo do
+// `Hero`: um `'2026-09-01'` de reserva aqui seria o literal que este
+// passo remove, voltando invisível e ativado justo quando o dado real
+// faltasse.
+function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, onFechar }) {
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -1003,15 +1015,26 @@ function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, onFechar }) {
           <>
             Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
             início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
-            começam na{' '}
-            {/* ⚠️ Texto literal, não mais `turma.data_inicio_aulas`: a turma
-                começa na primeira semana de setembro, com o dia escolhido pela
-                aluna, e uma coluna `date` não representa isso. Mesma troca em
-                `email.ts`, para as duas superfícies dizerem a mesma coisa.
-                O import de `formatarDataPorExtenso`/`paraDataUTC` fica: volta a
-                ser usado quando a migração do campo por extenso for feita. */}
+            começam{' '}
+            {/* ⚠️ VOLTOU A SAIR DA `data_inicio_aulas`, e desta vez sem mentir.
+                O texto era o literal "primeira semana de setembro de 2026", e o
+                comentário que estava aqui explicava por quê: a turma começa num
+                dia escolhido pela aluna, e uma coluna `date` exibida seca não
+                representa isso. O diagnóstico estava certo — a solução é que
+                congelou a informação fora do banco, e virou a tensão 8.1 do
+                `REPORT.md`: a coluna dizia uma coisa e a tela dizia outra, para
+                sempre.
+
+                `formatarSemanaDeInicio` mantém o diagnóstico e desfaz o
+                congelamento (D-14): devolve "na primeira semana de setembro" a
+                partir da própria data, sem nunca imprimir o dia. O que era um
+                literal por falta de formatação virou uma formatação.
+
+                ⚠️ O `email.ts` ainda tem a frase literal, e é o `c24` que a
+                pega — as duas superfícies precisam dizer a mesma coisa, e a
+                função que garante isso é esta. */}
             <strong className="font-semibold text-ink">
-              primeira semana de setembro de 2026
+              {formatarSemanaDeInicio(dataInicioAulas)}
             </strong>
             , e é perto do início que você recebe o convite do grupo da turma no WhatsApp.
           </>

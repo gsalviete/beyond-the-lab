@@ -103,3 +103,88 @@ export function formatarValorMensal(valor: number): string {
 export function formatarDuracao(meses: number): string {
   return `${meses} ${meses === 1 ? 'mês' : 'meses'}`
 }
+
+/**
+ * O mês de `data_inicio_aulas`, por extenso e em minúscula — "setembro".
+ *
+ * Existe para o badge do hero, que dizia `Setembro` escrito à mão ao lado
+ * de "Primeira turma". Era a mesma classe de literal que o `R$ 299,99` do
+ * `c22`: a Giovana publica a safra de janeiro no Studio, o preço da
+ * página acompanha em 60s, e o badge continua anunciando setembro.
+ *
+ * Devolve minúscula sempre, como `formatarDuracao`. Onde a tela pede
+ * caixa alta (o badge do hero), quem resolve é `capitalize` no CSS: a
+ * variação é de apresentação e não merece uma segunda string para
+ * divergir da primeira.
+ *
+ * ⚠️ O `paraDataUTC` no caminho NÃO é decoração — ver o comentário dele
+ * acima. `new Date('2026-09-01')` seguido de `toLocaleString` no fuso do
+ * Brasil devolveria **agosto**, e um badge que anuncia o mês errado é
+ * pior que o literal que ele substitui.
+ */
+export function nomeDoMes(iso: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    timeZone: 'UTC',
+  })
+    .format(paraDataUTC(iso))
+    .toLocaleLowerCase('pt-BR')
+}
+
+/**
+ * Em que semana as aulas começam — "na primeira semana de setembro".
+ *
+ * ============================================================
+ * POR QUE NUNCA A DATA SECA (D-14)
+ * ============================================================
+ *
+ * Pela D-01 a safra tem calendário e o grupo é só um horário dentro
+ * dela: quem cai no grupo de quarta não começa na segunda. "As aulas
+ * começam em 02/09/2026" seria uma promessa que o produto não faz para a
+ * maior parte das inscritas — e é exatamente por isso que o texto
+ * literal ("primeira semana de setembro de 2026") foi parar no código no
+ * sistema atual. O diagnóstico daquele comentário estava certo; o que
+ * estava errado era a solução, que congelou a informação fora do banco.
+ * Esta função mantém o diagnóstico e devolve a informação para a
+ * `data_inicio_aulas`.
+ *
+ * ============================================================
+ * O MÊS SAI DA PRÓPRIA DATA, NÃO DA SEGUNDA-FEIRA DA SEMANA
+ * ============================================================
+ *
+ * Aula que começa na quarta 02/09 é "primeira semana de setembro", ainda
+ * que a semana civil comece em 31/08. É decisão de produto, não
+ * descuido: quem lê está se preparando para a semana em que as aulas
+ * acontecem, e essa semana é de setembro para quem vai assistir.
+ * Retroceder até a segunda-feira para nomear o mês faria a página dizer
+ * "agosto" sobre uma turma que não tem uma única aula em agosto.
+ *
+ * ============================================================
+ * A FAIXA FINAL É ABERTA DE PROPÓSITO
+ * ============================================================
+ *
+ * As três primeiras faixas são de sete dias; a última absorve 22–31.
+ * `Math.ceil(29 / 7)` daria "quinta semana", que ninguém fala — e
+ * "quarta semana" para o dia 22 e "quinta" para o dia 29 dividiria em
+ * duas uma coisa que, para quem lê, é a mesma: o fim do mês.
+ *
+ * ⚠️ SEM ANO, seguindo o tom do resto da landing. A safra de vitrine é
+ * sempre a de `data_inicio_aulas` mais recente (D-13), então o ano é o
+ * próximo por construção; escrevê-lo só acrescentaria ruído a uma frase
+ * que já é deliberadamente imprecisa quanto ao dia.
+ *
+ * ⚠️ O DIA VEM DA STRING, NÃO DE UM `Date`. `data_inicio_aulas` é uma
+ * coluna `date` — dia de calendário, não instante —, e
+ * `new Date('2026-09-01').getDate()` no fuso do Brasil devolve **31**,
+ * de agosto. Um dia para trás basta para trocar a faixa inteira ("última
+ * semana de agosto" no lugar de "primeira semana de setembro"). A string
+ * é tratada pelo que ela é: três componentes separados por hífen.
+ */
+export function formatarSemanaDeInicio(iso: string): string {
+  const dia = Number(iso.split('-')[2])
+
+  const ordinal =
+    dia <= 7 ? 'primeira' : dia <= 14 ? 'segunda' : dia <= 21 ? 'terceira' : 'última'
+
+  return `na ${ordinal} semana de ${nomeDoMes(iso)}`
+}

@@ -2,7 +2,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowUpRight, Check } from './Icons.jsx'
 import LinkListaEspera from './LinkListaEspera.jsx'
-import { formatarDuracao } from '@/config/curso'
+import { formatarDuracao, nomeDoMes } from '@/config/curso'
 
 const perks = [
   { label: 'Conteúdo especializado',       w: 'w-[96px]'  },
@@ -14,11 +14,22 @@ const perks = [
 const PORTRAIT = '/assets/hero.png'
 
 /**
- * `duracaoMeses` é obrigatório e sem default — ver o porquê em
- * `Pricing.jsx`: um default seria o literal voltando invisível, ativado
- * justamente quando o dado real não chegasse.
+ * `duracaoMeses` e `dataInicioAulas` são obrigatórios e sem default — ver
+ * o porquê em `Pricing.jsx`: um default seria o literal voltando
+ * invisível, ativado justamente quando o dado real não chegasse.
+ *
+ * Vale em dobro para a data. Um `dataInicioAulas = '2026-09-01'` aqui
+ * pareceria inofensivo e reproduziria o bug inteiro que este passo
+ * fecha: o badge anunciaria setembro para sempre, sem ninguém ver a
+ * falha — porque não haveria falha, haveria uma resposta errada. Sem
+ * default, a ausência do dado é o build falhando em `app/page.jsx`, que
+ * é o único lugar onde ela pode ser tratada com honestidade.
+ *
+ * `dataInicioAulas` é 'YYYY-MM-DD' cru, do jeito que sai da coluna
+ * `date`. Ele NÃO é formatado aqui: quem sabe virar texto é
+ * `src/config/curso.ts`, e é o único que sabe.
  */
-export default function Hero({ duracaoMeses }) {
+export default function Hero({ duracaoMeses, dataInicioAulas }) {
   return (
     <section id="top" className="relative overflow-hidden pb-16 pt-28 lg:pt-[190px]">
       <div className="container-page grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_480px] lg:gap-0">
@@ -165,8 +176,28 @@ export default function Hero({ duracaoMeses }) {
                           lg:rounded-2xl lg:py-[13px] lg:pl-4 lg:pr-[37px]
                           lg:-top-[52px] lg:-right-[42px]"
                style={{ '--reveal-delay': '460ms' }}>
+            {/* "Primeira turma" é rótulo, não data: ele diz que esta é a
+                primeira leva do curso, e isso não muda quando a safra
+                muda. Fica literal de propósito. */}
             <p className="text-[11px] leading-[15px] text-white/80 lg:text-[13px] lg:leading-[17px]">Primeira turma</p>
-            <p className="font-display text-[24px] font-semibold leading-[30px] lg:text-[30px] lg:leading-[37px]">Setembro</p>
+            {/* O mês vem da safra. Era `Setembro` escrito à mão — a mesma
+                classe de literal que o `R$ 299,99` do c22, e pior na
+                consequência: preço errado a pessoa questiona, mês errado
+                ela agenda. `data_inicio_aulas` é coluna de `safras`
+                (D-01: o calendário é da safra), e a Giovana publica a
+                safra seguinte no Studio sem falar com ninguém.
+
+                Só o MÊS, e não a data, pela D-14: cada grupo começa num
+                dia diferente da mesma semana, e um badge com "02/09"
+                prometeria o dia para quem cai na segunda-feira. A frase
+                completa ("na primeira semana de setembro") mora na tela
+                de sucesso da modal, onde há espaço para ela.
+
+                `capitalize` no CSS e não uma segunda string em maiúscula:
+                `nomeDoMes` devolve minúscula sempre, e a caixa alta é
+                apresentação — mesma escolha do chip de duração do card de
+                preço. */}
+            <p className="font-display text-[24px] font-semibold capitalize leading-[30px] lg:text-[30px] lg:leading-[37px]">{nomeDoMes(dataInicioAulas)}</p>
           </div>
 
           {/* BANDEIRA — Figma: 62.36 x 59.2, rotate -10.174°, radius 19 */}
