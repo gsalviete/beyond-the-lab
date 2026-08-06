@@ -101,10 +101,18 @@ export default function InscricaoModal({ onFechar }) {
   const [status, setStatus] = useState('carregando')
   const [erro, setErro] = useState('')
 
-  // A turma aberta, ou null para lista de espera. É o que decide o MODO da
-  // modal, e é ortogonal ao `status` acima — continua valendo durante o
-  // envio e na tela de sucesso, que precisa da data de início das aulas.
-  const [turma, setTurma] = useState(null)
+  // A safra mais recente, ou null se não houver nenhuma. É ortogonal ao
+  // `status` acima — continua valendo durante o envio e na tela de
+  // sucesso, que precisa da data de início das aulas.
+  //
+  // ⚠️ NÃO é mais "a turma aberta". A rota passou a devolver a safra de
+  // vitrine sempre, aberta ou não (D-13), porque fechar as inscrições não
+  // pode apagar preço e data do site. Quem decide o MODO da modal agora é
+  // o campo `inscricoes_abertas`, logo abaixo — trocar `safra !== null`
+  // por ele foi obrigatório no c20: sem a troca, com as inscrições
+  // fechadas a modal prometeria "sua vaga está reservada" para todo
+  // mundo, que é a pior mentira que esta tela pode contar.
+  const [safra, setSafra] = useState(null)
 
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
@@ -136,7 +144,11 @@ export default function InscricaoModal({ onFechar }) {
   const carregando = status === 'carregando'
   const submitting = status === 'submitting'
   const sucesso = status === 'success'
-  const inscricaoAberta = turma !== null
+  // `=== true` e não coerção: `safra` pode ser null, e um corpo de
+  // resposta inesperado (ou uma versão antiga da rota em cache) não deve
+  // conseguir abrir o formulário de inscrição por acidente. Só o booleano
+  // verdadeiro, vindo do servidor, abre.
+  const inscricaoAberta = safra?.inscricoes_abertas === true
 
   // `onFechar` numa ref para o efeito de teclado poder rodar uma única vez
   // (array de dependências vazio) sem capturar uma versão velha da função.
@@ -148,7 +160,7 @@ export default function InscricaoModal({ onFechar }) {
   const pedirFechamento = useCallback(() => onFecharRef.current(), [])
 
   // ------------------------------------------------------------
-  // QUAL TURMA ESTÁ ABERTA
+  // QUAL É A SAFRA, E SE ELA ESTÁ ABERTA
   //
   // A modal só é montada quando abre (ver InscricaoProvider), então este
   // efeito de montagem É o "ao abrir" — não precisa de gatilho próprio.
@@ -165,16 +177,16 @@ export default function InscricaoModal({ onFechar }) {
   useEffect(() => {
     let cancelado = false
 
-    fetch('/api/turma-ativa', { cache: 'no-store' })
+    fetch('/api/safra-ativa', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((body) => {
         if (cancelado) return
-        setTurma(body?.turma ?? null)
+        setSafra(body?.safra ?? null)
         setStatus('idle')
       })
       .catch(() => {
         if (cancelado) return
-        setTurma(null)
+        setSafra(null)
         setStatus('idle')
       })
 
@@ -437,7 +449,7 @@ export default function InscricaoModal({ onFechar }) {
           <TelaDeSucesso
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
-            turma={turma}
+            inscricaoAberta={inscricaoAberta}
             onFechar={pedirFechamento}
           />
         ) : (
@@ -902,12 +914,18 @@ function TelaDeCarregamento({ tituloId }) {
 // ============================================================
 // TELA DE SUCESSO — substitui o conteúdo, sem fechar a modal
 //
-// `turma` é null quando o cadastro foi para a lista de espera. Não é
-// detalhe de estilo: com turma há vaga reservada e data de início para
-// prometer; sem turma há só o compromisso de avisar. Prometer errado
-// aqui é a pior coisa que esta tela pode fazer.
+// `inscricaoAberta` é false quando o cadastro foi para a lista de espera.
+// Não é detalhe de estilo: com inscrição aberta há vaga reservada e data
+// de início para prometer; sem ela há só o compromisso de avisar.
+// Prometer errado aqui é a pior coisa que esta tela pode fazer.
+//
+// Antes esta tela recebia o objeto da turma e ramificava na existência
+// dele. Não dá mais: depois do c20 a safra existe mesmo com as inscrições
+// fechadas (D-13), e ramificar na existência colocaria "sua vaga está
+// reservada" na frente de quem entrou na lista de espera. A pergunta que
+// esta tela faz sempre foi booleana; agora ela recebe o booleano.
 // ============================================================
-function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
+function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, onFechar }) {
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -922,11 +940,11 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
         tabIndex={-1}
         className="mt-5 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]"
       >
-        {turma ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
+        {inscricaoAberta ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
       </h2>
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
-        {turma ? (
+        {inscricaoAberta ? (
           /* Três frases, três acontecimentos, nesta ordem: o que já é
              verdade, o que chega por e-mail e quando, e o que chega
              depois. O texto anterior dizia "enviamos os próximos passos"

@@ -3,7 +3,7 @@
 // Links institucionais e formatação. Só isto.
 //
 // As datas, o valor e a duração NÃO moram mais aqui: são colunas da
-// tabela `public.turmas` e chegam pela rota `/api/turma-ativa`. Foi uma
+// tabela `public.safras` e chegam pela rota `/api/safra-ativa`. Foi uma
 // troca deliberada — enquanto eram constantes, mudar a data de cobrança
 // ou abrir a turma seguinte exigia commit e deploy. Agora é um UPDATE no
 // Supabase Studio.

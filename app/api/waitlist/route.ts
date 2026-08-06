@@ -1,5 +1,5 @@
 import { after } from 'next/server'
-import { buscarTurmaAtiva, insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
+import { buscarSafraAtiva, insertWaitlistEntry, SupabaseNotConfiguredError } from '@/lib/supabase'
 import { confirmarInscricao, notificarAdmin } from '@/lib/email'
 // O schema e a mensagem de erro moram juntos, em `src/config/schemas.ts`.
 // Metade do schema é derivada de `dominio.ts` e a outra metade não é
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------
     // QUAL É A TURMA — pergunta feita AO BANCO, não ao cliente.
     //
-    // A modal também consulta `/api/turma-ativa` para decidir o que
+    // A modal também consulta `/api/safra-ativa` para decidir o que
     // mostrar, mas aquilo é interface. Qualquer pessoa pode mandar um
     // POST direto afirmando o que quiser, e entre a resposta que a modal
     // recebeu e este insert a professora pode ter fechado a turma. A
@@ -135,8 +135,20 @@ export async function POST(req: Request) {
     //
     // Se a consulta falhar, o `catch` de fora trata: não gravamos
     // ninguém como inscrita numa turma que não conseguimos confirmar.
+    //
+    // ⚠️ `buscarSafraAtiva` mudou de significado no c20 e este ponto teve
+    // que acompanhar. Ela devolve a safra mais recente SEM olhar
+    // `inscricoes_abertas` (D-13) — o que serve para a vitrine e não
+    // serve para gravar. Aqui a pergunta continua sendo "há safra
+    // ABERTA?", então a flag é aplicada na hora: sem ela, com as
+    // inscrições fechadas, toda inscrição passaria a ser gravada como
+    // `pendente` numa turma que ninguém abriu. O `null` é o mesmo `null`
+    // de antes, e tudo daqui para baixo continua lendo a mesma variável.
+    //
+    // A reescrita desta rota para `pessoas` + `inscricoes` é do c21.
     // ------------------------------------------------------------
-    const turma = await buscarTurmaAtiva()
+    const safra = await buscarSafraAtiva()
+    const turma = safra?.inscricoes_abertas ? safra : null
 
     // Sem turma aberta, `payment_choice` é DESCARTADO e vira 'depois'.
     // Não há o que escolher: não existe cobrança para adiantar, e

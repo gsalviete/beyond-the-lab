@@ -87,32 +87,26 @@ export type { NivelIngles, DiaDaSemana }
  * escrita à mão.
  *
  * O nome mudou junto com a tabela: a migração `005` renomeou `turmas`
- * para `safras`, e o tipo acompanha. A função abaixo ainda se chama
- * `buscarTurmaAtiva` porque quem a reescreve é o `c20`; renomear os dois
- * no mesmo commit misturaria a troca de tipos com a reescrita da rota.
+ * para `safras`, e o tipo acompanha.
  *
  * É um `Pick`, e não `Tables<'safras'>` inteiro, de propósito: a lista
  * de colunas aqui é exatamente a do `select` lá embaixo. Tipar com a
- * `Row` completa afirmaria que `slug`, `vagas_total` e
- * `stripe_price_id` chegaram, quando não chegaram — é o mesmo princípio
- * de toda travessia de fronteira deste projeto (REPORT §7): carregar o
- * mínimo, com o corte explícito no ponto onde acontece.
+ * `Row` completa afirmaria que `slug` e `stripe_price_id` chegaram,
+ * quando não chegaram — é o mesmo princípio de toda travessia de
+ * fronteira deste projeto (REPORT §7): carregar o mínimo, com o corte
+ * explícito no ponto onde acontece.
  *
- * ⚠️ Atenção ao `valor_mensal`. A coluna é `numeric(10,2)`, e o tipo
- * gerado a chama de `number` — é o mapeamento fixo do `supabase gen
- * types`. O tipo manual que estava aqui afirmava o contrário, `string`,
- * com o motivo escrito: `numeric(10,2)` tem precisão que o double do
- * JSON não garante, e converter no meio do caminho é como se perde
- * centavo. Os dois não podem estar certos, e **quem decide é o wire, não
- * o tipo** — nenhum dos dois foi medido contra o banco neste commit.
+ * Sobre o `valor_mensal`, que é `number`: **medido na resposta real do
+ * PostgREST — vem `299.99`, número JSON, não string.** O tipo gerado
+ * está certo, e o `Number()` que existia na montagem da resposta era
+ * redundante e saiu.
  *
- * O que segura a diferença é a regra que não mudou: quem converte é quem
- * vai exibir, no último momento possível. O `Number(...)` em
- * `app/api/turma-ativa/route.ts` é correto vindo string ou number, e é
- * por isso que ele fica. **Medir o valor real na resposta do PostgREST é
- * pré-requisito do `c22`**, que é onde o preço passa a vir da safra — se
- * for string mesmo, é lá que o tipo gerado precisa de um envelope, e não
- * um `Number()` a mais espalhado pelo caminho.
+ * `number` é o tipo certo para **exibir** um preço, e é só para isso que
+ * ele atravessa daqui até a landing. ⚠️ Aritmética de dinheiro NÃO
+ * acontece em float: o Stripe cobra em centavo inteiro, e a conversão
+ * para inteiro é do corte 2, no ponto que monta a Checkout Session. Se
+ * um dia aparecer soma, desconto ou proporcional escrito sobre este
+ * campo, o erro está em quem somou, não neste tipo.
  *
  * As datas são `date` no banco e chegam como 'YYYY-MM-DD' — dia de
  * calendário, sem fuso. Ver `paraDataUTC` em `src/config/curso.ts`.
@@ -125,7 +119,28 @@ export type Safra = Pick<
   | 'data_primeira_cobranca'
   | 'valor_mensal'
   | 'duracao_meses'
+  | 'inscricoes_abertas'
+  | 'vagas_total'
 >
+
+/**
+ * A safra de vitrine mais a contagem de quem já está nela.
+ *
+ * `inscritas` é dado cru de operação e **não atravessa para o cliente**:
+ * quem corta é `app/api/safra-ativa/route.ts`, que devolve só
+ * `vagas_restantes`. Ele existe aqui porque o painel da Giovana (`c36`)
+ * precisa da contagem server-side para exibir `inscritas / vagas_total`
+ * — que é a forma dela, não a da visitante.
+ *
+ * O corte entre as duas camadas é deliberado (REPORT §9.6): esta função
+ * devolve o dado rico, a rota devolve o mínimo. Fundir as duas faria a
+ * rota pública virar a única leitura possível, e o painel teria que
+ * pedir ao seu próprio site uma informação que ele tem no banco.
+ */
+export type SafraAtiva = Safra & {
+  /** Inscrições com `safra_id` = esta safra. Ver `buscarSafraAtiva`. */
+  inscritas: number
+}
 
 /**
  * O cliente, criado uma vez por instância e reaproveitado.
@@ -183,60 +198,123 @@ function supabase(): SupabaseClient<Database> {
 }
 
 /**
- * A turma com `inscricoes_abertas = true`, ou `null` se não houver.
+ * A safra mais recente por `data_inicio_aulas`, com a contagem de
+ * inscritas. `null` só quando não existe safra nenhuma no banco.
  *
- * O banco garante que existe no máximo uma (índice parcial
- * `turmas_uma_aberta_idx`), então o `limit(1)` é só cinto de segurança —
- * não é ele que resolve a ambiguidade, é a constraint. E é por isso que
- * aqui não entra `.single()`: ele transformaria "duas linhas abertas" num
- * erro do SDK, escondendo atrás de uma exceção de transporte uma
- * violação de invariante que o índice não deveria ter deixado acontecer.
+ * ============================================================
+ * ELA NÃO FILTRA POR `inscricoes_abertas` — E ISSO É A D-13
+ * ============================================================
  *
- * `.is(..., true)` e não `.eq(..., true)`: é a tradução exata do
- * `inscricoes_abertas=is.true` que estava aqui antes.
+ * A versão anterior perguntava "qual turma está com inscrições
+ * abertas?", e devolvia `null` quando nenhuma estava. As duas perguntas
+ * que essa query juntava são diferentes:
+ *
+ *   - **"Quanto custa e quando começa?"** é informação de vitrine. Não
+ *     pode sumir da página nunca.
+ *   - **"Dá para comprar agora?"** é estado de operação, e muda no dia
+ *     em que a Giovana decide.
+ *
+ * Amarradas na mesma flag, fechar as inscrições apagava o preço e a data
+ * do site junto. Era o efeito colateral que ninguém pediu e que a
+ * refatoração existe para fechar. Agora a flag vai **na resposta, como
+ * campo**, e governa só o CTA — botão de inscrição quando `true`, lista
+ * de espera quando `false`.
+ *
+ * Por isso o `order(...).limit(1)` no lugar do filtro. O `limit(1)` aqui
+ * é o que de fato resolve a escolha, e não mais um cinto de segurança
+ * sobre uma constraint: o índice parcial que garante **no máximo uma
+ * safra aberta** continua no banco e continua valendo, mas esta query
+ * deixou de depender dele — ela ordena e pega a primeira.
+ *
+ * Continua sem `.single()`/`.maybeSingle()`, pelo mesmo motivo de
+ * sempre, agora aplicado a outro caso: eles transformam "veio um número
+ * de linhas diferente do esperado" num erro do SDK, escondendo atrás de
+ * uma exceção de transporte um fato sobre os dados. Aqui o caso é "não
+ * há safra nenhuma", que é um estado legítimo do banco vazio e tem que
+ * chegar como `null`, não como exceção.
  *
  * `id` VEM na seleção porque a rota de inscrição precisa dele para
- * gravar a FK. Ele não pode chegar ao navegador — quem faz esse corte é
- * `app/api/turma-ativa/route.ts`, que monta a resposta sem o campo. A
+ * gravar a FK, e a contagem de vagas logo abaixo precisa dele para
+ * filtrar. Ele não pode chegar ao navegador — quem faz esse corte é
+ * `app/api/safra-ativa/route.ts`, que monta a resposta sem o campo. A
  * lista de colunas continua escrita à mão, e não `select('*')`: é o
  * mesmo princípio de toda travessia de fronteira deste projeto (REPORT
  * §7) — carregar o mínimo, com o corte explícito no ponto onde acontece.
  *
  * Erro aqui é lançado, não engolido: cada chamador decide o que fazer.
- * Hoje os dois decidem a mesma coisa — tratar como "nenhuma turma
- * aberta" e cair para lista de espera —, mas quem toma essa decisão é a
- * rota, não esta função. O SDK devolve `{ data, error }` em vez de
- * lançar, então o `throw` passa a ser explícito aqui.
+ * Hoje os dois decidem a mesma coisa — tratar como "nenhuma safra" e
+ * cair para lista de espera —, mas quem toma essa decisão é a rota, não
+ * esta função. O SDK devolve `{ data, error }` em vez de lançar, então o
+ * `throw` passa a ser explícito aqui.
  */
-export async function buscarTurmaAtiva(): Promise<Safra | null> {
+export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   const { data, error } = await supabase()
-    // ⚠️ turmas → safras: a tabela foi renomeada pela migração 005 e a
-    // rota inteira é reescrita no c20. Silenciado aqui de propósito para
-    // o c18b poder compilar. REMOVER no c20.
-    // @ts-expect-error a tabela `turmas` não existe mais no schema gerado
-    .from('turmas')
-    .select('id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses')
-    .is('inscricoes_abertas', true)
+    .from('safras')
+    .select(
+      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total',
+    )
+    .order('data_inicio_aulas', { ascending: false })
     .limit(1)
 
   if (error) {
     // A mensagem do PostgREST pode conter detalhe de schema; ela vai para
     // o log do servidor e para lugar nenhum além disso.
-    throw new Error(`turmas: ${error.code ?? 'sem código'} — ${error.message}`)
+    throw new Error(`safras: ${error.code ?? 'sem código'} — ${error.message}`)
   }
 
-  // O `as unknown` é a segunda metade do silenciamento acima, e some com
-  // ele no c20. O `@ts-expect-error` cala o `from('turmas')`, mas não
-  // conserta o que vem depois: sem tabela conhecida, o SDK resolve o
-  // encadeamento contra a união de todas as tabelas e `data` vira uma
-  // união de `SelectQueryError<...>`. Um `as Safra[]` direto é recusado
-  // por não haver sobreposição entre os dois tipos, e o `as unknown` no
-  // meio é o que o compilador pede.
+  const safra = data?.[0]
+  if (!safra) return null
+
+  // ============================================================
+  // A CONTAGEM DE VAGAS — D-08, e ela é limite MOLE
+  // ============================================================
   //
-  // Ele é largo, e é largo de propósito: estreitar um cast sobre uma
-  // query que consulta tabela inexistente seria dar aparência de tipo a
-  // uma resposta que em runtime é erro do PostgREST, não linha.
-  return ((data as unknown as Safra[] | null)?.[0]) ?? null
+  // Não há trava transacional, não há lock, e isso é decisão, não
+  // pendência. Duas pessoas fechando o checkout no mesmo segundo pela
+  // última vaga é possível e aceito: na escala do produto (dezenas, não
+  // milhares) um lock distribuído não se paga, e o painel mostra o
+  // estouro em vermelho para a Giovana resolver com uma conversa.
+  //
+  // `head: true` com `count: 'exact'`: o PostgREST responde só o
+  // cabeçalho `Content-Range` e **nenhuma linha**. É o que evita
+  // arrastar a lista inteira de inscritas — com dado pessoal dentro —
+  // por um número. `data` volta `null` de propósito nesse modo; quem
+  // interessa é `count`.
+  //
+  // O filtro é `safra_id` e mais nada. Ele já exclui a lista de espera
+  // sozinho: o CHECK da `009` garante `safra_id is null ⟺ status =
+  // 'lista_espera'`, então nenhuma linha de lista de espera casa com uma
+  // safra.
+  //
+  // ⚠️ O que ele NÃO exclui é `cancelada`/`concluida`. Hoje isso não faz
+  // diferença observável: os dois estados só nascem do webhook do Stripe
+  // e do painel, que são do corte 2 e do 3 — no corte 1 nenhuma linha
+  // pode chegar neles. **A pergunta "inscrição cancelada devolve a
+  // vaga?" é de negócio e não foi decidida**; ela precisa de resposta
+  // antes do `c36`, que é quando a contagem passa a alimentar o painel e
+  // a primeira `cancelada` vira possível. Escolher aqui, por conta
+  // própria, seria inventar a regra no lugar de perguntá-la.
+  const { count, error: erroContagem } = await supabase()
+    .from('inscricoes')
+    .select('id', { count: 'exact', head: true })
+    .eq('safra_id', safra.id)
+
+  if (erroContagem) {
+    throw new Error(
+      `inscricoes(count): ${erroContagem.code ?? 'sem código'} — ${erroContagem.message}`,
+    )
+  }
+
+  // `count` é `number | null` na tipagem do SDK. `null` aqui significaria
+  // que o `Content-Range` não veio, e tratar isso como 0 seria afirmar
+  // "não há ninguém inscrita" a partir de uma resposta que não disse
+  // nada — o mesmo erro de sempre, com sinal trocado. Sem contagem, não
+  // há resposta: quem chamou trata como falha e degrada.
+  if (count === null) {
+    throw new Error('inscricoes(count): PostgREST não devolveu contagem')
+  }
+
+  return { ...safra, inscritas: count }
 }
 
 /**

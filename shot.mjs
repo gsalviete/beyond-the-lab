@@ -94,7 +94,7 @@ for (const { prefixo, width, height } of alvos) {
   await ctaModal.click()
   await pg.waitForSelector('[role="dialog"]', { state: 'visible' })
   // A modal abre em estado de carregamento e só decide o que mostrar depois
-  // de perguntar a `/api/turma-ativa` se há turma aberta. Esperar no relógio
+  // de perguntar a `/api/safra-ativa` qual é a safra e se ela está aberta. Esperar no relógio
   // fotografava o spinner — em dev a primeira chamada ainda paga a compilação
   // da rota. `aria-busy="false"` é a condição de verdade, e é o mesmo atributo
   // que o leitor de tela usa.
