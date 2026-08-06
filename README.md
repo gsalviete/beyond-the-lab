@@ -103,14 +103,19 @@ Variables**, marcadas para Production, Preview e Development.
 | Variável                    | Obrigatória | Uso |
 |-----------------------------|-------------|-----|
 | `SUPABASE_URL`              | sim         | Project URL do Supabase. Usada só no servidor, por `src/lib/supabase.ts` |
-| `SUPABASE_SERVICE_ROLE_KEY` | sim         | chave `service_role`. **Segredo.** Ignora RLS — é o que permite a tabela `waitlist` não ter nenhuma policy. Sem `NEXT_PUBLIC_`, jamais no cliente |
+| `SUPABASE_SERVICE_ROLE_KEY` | sim         | chave `service_role`. **Segredo.** Ignora RLS — é o que permite `safras`, `grupos`, `pessoas` e `inscricoes` não terem nenhuma policy. Sem `NEXT_PUBLIC_`, jamais no cliente |
 | `RESEND_API_KEY`            | não         | chave da API do Resend. **Segredo.** Usada só por `src/lib/email.ts`. Sem ela a inscrição grava normalmente e o e-mail não sai — ver *E-mails transacionais* |
 | `EMAIL_REMETENTE`           | não         | remetente dos dois e-mails. O domínio precisa estar verificado no Resend |
 | `EMAIL_ADMIN`               | não         | caixa da Giovanna. Destinatário da notificação **e** `reply_to` da confirmação |
 | `NEXT_PUBLIC_SITE_URL`      | não         | base absoluta de OG/Twitter (`metadataBase`). Sem ela, cai em `VERCEL_PROJECT_PRODUCTION_URL` (injetada pela Vercel) e, fora da Vercel, em `http://localhost:3000` |
 
-Sem as duas do Supabase o site sobe normalmente; só o POST em `/api/waitlist` responde
-500 e registra o motivo no log do servidor.
+Sem as duas do Supabase o `npm run build` **falha**, e é de propósito: a landing lê preço,
+duração e data de início do banco, e não existe fallback honesto para "quanto custa" — a
+D-13 proíbe literal de preço, duração ou data inclusive como fallback. Uma página que não
+consegue afirmar o preço não deve ser publicada, e o momento de descobrir isso é o deploy,
+não o primeiro visitante. Build que falha é deploy que não acontece: a versão anterior
+continua no ar com o último preço bom. Se o build passar e as variáveis sumirem depois, o
+POST em `/api/inscricao` responde 500 e registra o motivo no log do servidor.
 
 As três do e-mail são opcionais no sentido estrito de que a aplicação sobe e **grava
 inscrições** sem elas — o que se perde é a notificação. Faltando qualquer uma, o log
@@ -126,35 +131,92 @@ existe mais.
 |---|---|
 | `src/components/InscricaoProvider.jsx` | estado único da modal + integração com o histórico. Fica no `app/layout.jsx`, então vale para todas as rotas |
 | `src/components/InscricaoModal.jsx` | a modal: formulário, tela de sucesso, foco preso, trava de scroll |
-| `src/components/CtaInscricao.jsx` | o `<button>` que abre a modal. **Todo CTA usa este componente** — nenhum é `<a href>` |
-| `src/config/curso.ts` | só links e formatação. **As datas e o valor vêm do banco** — ver a seção "Turmas" |
+| `src/components/CtaInscricao.jsx` | o `<button>` que abre a modal. **Um único ponto de uso** — o "Garantir minha vaga" de dentro do card de preço. Ver *Os oito CTAs* logo abaixo |
+| `src/components/LinkListaEspera.jsx` | a âncora `<a href="#planos">` dos outros sete CTAs: rola até o card de preço, não abre a modal |
+| `src/config/curso.ts` | só links e formatação. **As datas e o valor vêm do banco** — ver a seção "Safras" |
 | `src/lib/telefone.ts` | máscara, DDDs válidos e E.164. Usado pelo formulário **e** pela API, para os dois não discordarem |
-| `app/api/waitlist/route.ts` | validação com Zod e insert na tabela `waitlist` via PostgREST |
-| `app/api/turma-ativa/route.ts` | diz à modal se há turma aberta, e com quais datas e valor |
+| `app/api/inscricao/route.ts` | validação com Zod e escrita em `pessoas` + `inscricoes`, numa transação só, pela RPC `criar_inscricao` |
+| `app/api/safra-ativa/route.ts` | diz à modal se há safra aberta, e com quais datas e valor |
 
-- A tabela tem **RLS ligada e nenhuma policy**, de propósito: todo o acesso é
-  server-side com a `service_role`, que ignora RLS. Não crie policy — isso abriria a
-  tabela para a chave `anon`.
-- E-mail duplicado responde **sucesso**, não erro: a pessoa está na lista, e o
-  formulário não pode virar um oráculo de "este e-mail já é cadastrado?".
+### Os oito CTAs, e por que sete deles não abrem a modal
+
+O fluxo é de **duas etapas**, de propósito:
+
+1. os sete CTAs espalhados pela página — navbar (desktop e menu mobile), Hero,
+   PainPoints, Teacher, FinalCta e o da rota `/conteudo-programatico` — usam
+   `LinkListaEspera` e **rolam até o card de preço** (`#planos`);
+2. só o "Garantir minha vaga" de dentro desse card usa `CtaInscricao` e **abre o
+   formulário**.
+
+O motivo é a informação que a decisão precisa: quem clica no CTA do topo ainda não viu o
+preço. Mandar a modal direto dali pularia justamente o dado que a pessoa precisa ter para
+decidir, e o cadastro chegaria de alguém que não sabe quanto custa.
+
+O primeiro salto é uma **âncora de verdade** (`<a href>`), não um handler de scroll: ela
+funciona com JS desligado ou ainda não hidratado, e o link é copiável e compartilhável. O
+scroll suave e o recuo do header sticky vêm do CSS (`scroll-behavior` e
+`scroll-padding-top`), que já respeita `prefers-reduced-motion`. O alvo tem `tabIndex={-1}`
+e recebe `focus({ preventScroll: true })` porque navegador nenhum é obrigado a focar o
+destino de um fragmento — sem isso, quem navega por teclado clica no CTA do rodapé, a
+página rola, e o Tab seguinte continua lá no topo.
+
+O raciocínio inteiro está no cabeçalho de `src/components/LinkListaEspera.jsx`.
+
+### O que a rota faz, e o que o banco garante
+
+- As tabelas têm **RLS ligada e nenhuma policy**, de propósito — `safras`, `grupos`,
+  `pessoas` e `inscricoes`, todas. Todo o acesso é server-side com a `service_role`, que
+  ignora RLS, e há `revoke all ... from anon, authenticated` como cinto além do
+  suspensório. Não crie policy — isso abriria as tabelas para a chave `anon`.
+- E-mail duplicado **não é erro**: HTTP 200, `ok: true`, mais `duplicada: true` e uma
+  mensagem que diz que aquele e-mail já tem cadastro. Antes a resposta era idêntica à de
+  sucesso, para o formulário não virar um oráculo de "este e-mail já é cadastrado?" — foi
+  revertido de propósito, porque o que a tela de sucesso promete mudou: com pagamento no
+  fluxo, "Pronto!" para quem se cadastra de novo achando que garantiu a vaga é informação
+  falsa a quem está comprando. O e-mail passou a ser consultável, e as contenções são o
+  rate limit por IP e a mensagem, que não revela mais nada além disso — sem nome, sem
+  data, sem status, sem posição na fila. **Duplicata continua não disparando e-mail**: é
+  outra decisão, com outra razão, e ela ficou inteira.
 - **Consentimento** é `z.literal(true)` no servidor: sem ele, 400. É a base legal da
   coleta (LGPD art. 7º, I), então não pode ser opcional nem vir pré-marcado.
 - O telefone é gravado em **E.164** (`+5521999999999`); a máscara `(XX) XXXXX-XXXX`
   existe só na interface.
-- `payment_choice` registra qual botão foi clicado (`agora` / `depois`). **Hoje os dois
-  caminhos gravam igual** — o Stripe entra depois, e o ponto de ramificação está
-  marcado com `TODO: Prompt B2` em `InscricaoModal.jsx`. Sem turma aberta o campo é
-  **descartado** e gravado como `depois`: não há cobrança a adiantar.
-- `status` recebe `pendente` (turma aberta) ou `lista_espera` (nenhuma turma aberta).
-  Os outros valores do CHECK existem para a integração do Stripe não precisar de nova
-  migração.
-- **Quem decide o modo é o servidor, não a modal.** A rota consulta a turma aberta no
-  banco antes de gravar; o que o cliente afirmar no corpo do POST é ignorado. A modal
-  também consulta, mas só para saber o que desenhar.
+- `status` é uma máquina de estados fechada, declarada no CHECK
+  `inscricoes_status_check` da migração `009`:
+
+  ```
+  lista_espera ──► pendente_pagamento ──► confirmada ──► ativa
+                                                           │
+                             ┌─────────────────────────────┤
+                             ▼                             ▼
+                       inadimplente ──► cancelada      concluida
+  ```
+
+  Ele anda sempre em par com `safra_id`, e um segundo CHECK obriga os dois a contarem a
+  mesma história: `safra_id is null` ⟺ `status = 'lista_espera'`. Não existe `aprovada`
+  nem `rejeitada` — não há entrevista, análise nem triagem, e quem conclui o checkout
+  está dentro.
+
+  **⚠️ No corte 1, tudo a partir de `pendente_pagamento` é inalcançável de propósito.** O
+  checkout ainda não existe, então "safra aberta" não significaria nada: gravaria gente
+  em `pendente_pagamento` sem nenhuma sessão de pagamento criada e sem caminho para sair
+  — um estado sem saída inventado para não mexer numa flag. Por isso o corte 1 sobe com
+  **`inscricoes_abertas = false` em toda safra**, e **todo mundo cai em `lista_espera`**.
+  O domínio já contempla os outros estados para que as migrações não precisem ser
+  revisitadas quando o pagamento entrar.
+- **Quem decide o modo é o servidor, não a modal.** A rota consulta o banco antes de
+  gravar; o que o cliente afirmar no corpo do POST é ignorado. A modal também consulta,
+  mas só para saber o que desenhar. E o sinal é `inscricoes_abertas`, **não** "veio
+  safra": pela D-13 a consulta devolve a safra mais recente sempre, aberta ou não, para
+  que fechar as inscrições não apague preço e data do site junto.
+- **Falha ao consultar a safra degrada para lista de espera**, nunca para tela de erro:
+  banco fora do ar, contagem que não veio ou schema divergente ainda permitem gravar o
+  contato de alguém interessada, e é isso que não pode ser perdido. O contrário — prometer
+  vaga numa safra que não foi possível confirmar — é que não se pode fazer.
 - Os campos de perfil (`nivel_ingles`, `curso`, `periodo`, `disponibilidade`) são
-  **obrigatórios no Zod e nullable no banco**: as linhas anteriores à migração não os
-  têm, e um `not null` na coluna faria o `ALTER` falhar. O banco valida o *domínio* dos
-  valores; a API valida a *obrigatoriedade*.
+  **obrigatórios no Zod e nullable no banco**: as linhas trazidas da base antiga pela
+  migração `010` não os têm, e um `not null` na coluna faria a migração falhar. O banco
+  valida o *domínio* dos valores; a API valida a *obrigatoriedade*.
 - Há um honeypot (campo `website`, escondido por CSS) e um rate limit por IP em memória
   — aproximado em serverless, por instância.
 
@@ -164,12 +226,17 @@ Supabase, na ordem numérica.
 ## E-mails transacionais
 
 Cada inscrição nova dispara **dois** e-mails, pelo **Resend** (`src/lib/email.ts`, chamado
-por `app/api/waitlist/route.ts`):
+por `app/api/inscricao/route.ts`):
 
 | Para | Assunto | Conteúdo |
 |------|---------|----------|
-| `EMAIL_ADMIN` — a Giovanna | `Nova inscrição: [nome]` | todos os dados da inscrição, WhatsApp clicável, turma e horário de chegada |
-| quem se inscreveu | `Inscrição recebida` ou `Você está na lista de espera` | confirmação, recapitulação do que informou, próximos passos, data de início e Instagram |
+| `EMAIL_ADMIN` — a Giovanna | `Nova inscrição: [nome]` | todos os dados da inscrição, WhatsApp clicável, safra e horário de chegada |
+| quem se inscreveu | `Inscrição recebida` ou `Você está na lista de espera` | confirmação, recapitulação do que informou, próximos passos, **a semana** de início e Instagram |
+
+A data de início nunca sai seca no e-mail, pelo mesmo motivo da landing (D-14): a frase é
+"na primeira semana de setembro", derivada de `data_inicio_aulas`. Cada grupo começa num
+dia diferente da mesma semana, então um `dd/mm/yyyy` seria uma promessa que o produto não
+faz para a maior parte das inscritas.
 
 Ambos saem de `EMAIL_REMETENTE`, com `reply_to` apontando para `EMAIL_ADMIN` — responder
 qualquer um dos dois cai no Gmail dela.
@@ -181,9 +248,11 @@ pessoa é o que importa — perder o aviso é ruim, perder a inscrição é inac
 
 Três detalhes de comportamento que não são óbvios:
 
-- **Duplicata não dispara e-mail.** A rota responde sucesso genérico para quem já está na
-  lista, justamente para o formulário não virar um oráculo de "este e-mail já existe?".
-  Mandar a confirmação de novo entregaria a mesma informação por outro canal.
+- **Duplicata não dispara e-mail.** A resposta HTTP de duplicata mudou (ver a seção
+  *Inscrição*); o e-mail não. Eram duas coisas juntas na mesma decisão por acidente: a
+  primeira existia para não revelar quem está na lista, a segunda existe para não mandar
+  mensagem que ninguém pediu — bastaria reenviar o formulário dez vezes para a pessoa
+  receber dez e-mails, e a Giovanna também. Essa razão continua inteira.
 - **Honeypot não dispara nada** — ele nem chega ao banco.
 - **O disparo usa `after` do `next/server`**, não uma promessa solta. Em serverless a
   função pode ser congelada assim que devolve a resposta, e uma promessa não aguardada
@@ -197,27 +266,28 @@ imagem por padrão — logo remoto viraria retângulo vazio. As cores vêm dos t
 utilitária dentro de um e-mail. Vai junto uma versão em texto puro, que ajuda na
 entregabilidade e cobre quem lê sem HTML.
 
-## Turmas
+## Safras
 
 > Esta seção é para quem administra o curso, não para quem programa. Tudo aqui se faz
 > pelo **Supabase Studio**, sem mexer em código e sem publicar nada.
 
-### O que é uma turma
+### O que é uma safra
 
-Uma **turma** é uma safra de alunas, com identidade própria: data de início das aulas,
+Uma **safra** é uma leva de alunas, com identidade própria: data de início das aulas,
 data da primeira cobrança, valor da mensalidade, duração e a janela de inscrição. Hoje
 existe uma, a "Turma Setembro 2026". Quando chegar a hora da próxima, ela é uma **linha
-nova** na tabela — nunca se edita a turma atual para transformá-la na seguinte, senão
-o registro de quem entrou em qual turma se perde.
+nova** na tabela — nunca se edita a safra atual para transformá-la na seguinte, senão
+o registro de quem entrou em qual safra se perde.
 
-**Turma não é a mesma coisa que grupo.** O **grupo** ("Grupo A", "Grupo B") é a divisão
-de horário *dentro* de uma turma. Ele é só um rótulo: não tem data, não tem cobrança e
-não muda nada no sistema. Quem preenche o grupo é você, à mão, depois que as inscrições
-chegam — ver "Montando os grupos" mais abaixo.
+**Safra não é a mesma coisa que grupo.** O **grupo** é a divisão de horário *dentro* de
+uma safra ("quarta, 19:00"). Ele não tem data, não tem preço e não tem duração próprios:
+o pool de aulas começa no mesmo dia para todo mundo da safra, e a divisão por dia da
+semana é logística de agenda, não de contrato. Grupo virou **tabela própria** (`grupos`)
+na migração `006` — ver "Grupos" mais abaixo.
 
 ### Abrir e fechar as inscrições
 
-No Studio, abra **Table Editor → `turmas`**. A coluna que controla tudo é
+No Studio, abra **Table Editor → `safras`**. A coluna que controla tudo é
 **`inscricoes_abertas`**:
 
 - **marcada (`true`)** → o site mostra o formulário de inscrição normal, com a data da
@@ -229,48 +299,71 @@ No Studio, abra **Table Editor → `turmas`**. A coluna que controla tudo é
 A mudança vale **na hora**. Não precisa publicar nada, não precisa avisar ninguém — a
 próxima pessoa que abrir a modal já vê o outro modo.
 
-### Só uma turma aberta por vez
+> ⚠️ **No corte 1 a resposta certa é `false` em todas as safras**, e isso não é
+> esquecimento. Sem o checkout, marcar `true` gravaria gente em `pendente_pagamento` sem
+> nenhuma sessão de pagamento criada e sem caminho para sair. Ver a máquina de estados na
+> seção *Inscrição*.
 
-O banco **recusa** deixar duas turmas com `inscricoes_abertas` marcado ao mesmo tempo.
-Se você tentar, o Studio devolve um erro de índice duplicado (`turmas_uma_aberta_idx`)
+**A flag governa só o CTA, não a vitrine.** Com as inscrições fechadas, a landing
+continua mostrando preço, duração e mês de início — são duas perguntas diferentes.
+"Quanto custa e quando começa" é informação de vitrine e não pode sumir da página;
+"dá para comprar agora" é estado de operação. Amarradas na mesma flag, fechar as
+inscrições apagaria o preço do site junto.
+
+### Só uma safra aberta por vez
+
+O banco **recusa** deixar duas safras com `inscricoes_abertas` marcado ao mesmo tempo.
+Se você tentar, o Studio devolve um erro de índice duplicado (`safras_uma_aberta_idx`)
 e não salva.
 
-Isso é proteção, não limitação. Com duas turmas abertas o site não teria como saber em
-qual inscrever as pessoas, e a cobrança automática (que entra no Prompt B2) poderia
-cobrar alguém na data da turma errada.
+Isso é proteção, não limitação. Com duas safras abertas o site não teria como saber em
+qual inscrever as pessoas, e a cobrança automática poderia cobrar alguém na data da
+safra errada.
 
-**Para trocar de turma: desmarque a atual primeiro, salve, depois marque a nova.**
+**Para trocar de safra: desmarque a atual primeiro, salve, depois marque a nova.**
 
-### Criar uma turma nova
+### Criar uma safra nova
 
-**Table Editor → `turmas` → Insert row**. Preencha:
+**Table Editor → `safras` → Insert row**. Preencha:
 
 | Campo | O que é | Exemplo |
 |---|---|---|
-| `nome` | como você chama a turma | `Turma Março 2027` |
+| `nome` | como você chama a safra | `Turma Março 2027` |
 | `slug` | o mesmo nome em minúsculas, sem acento, com hífen | `marco-2027` |
 | `data_inicio_aulas` | primeiro dia de aula | `2027-03-01` |
 | `data_primeira_cobranca` | quando a primeira mensalidade é cobrada | `2027-02-25` |
 | `valor_mensal` | mensalidade em reais | `299.99` |
 | `duracao_meses` | quantos meses o programa dura | `6` |
+| `vagas_total` | teto de inscritas, ou **em branco** para sem limite | `20` |
 | `inscricoes_abertas` | deixe **desmarcado** por ora | — |
 
 As datas vão no formato **ano-mês-dia**. O valor usa **ponto**, não vírgula.
+
+`vagas_total` em branco (`null`) significa **sem limite**, e não "zero". Ele é limite
+**mole**: o sistema conta antes de abrir o checkout e recusa se estourou, mas não há
+trava transacional — duas pessoas fechando o checkout no mesmo segundo pela última vaga é
+possível e aceito. Na escala do curso isso se resolve com uma conversa.
 
 Duas coisas que o banco recusa, de propósito:
 
 - **cobrança depois do início das aulas** — quase sempre é engano de digitação;
 - **`slug` repetido** — dois `marco-2027` tornariam impossível saber qual é qual.
 
-Depois de criada e conferida, desmarque `inscricoes_abertas` da turma antiga e marque a
-nova. A partir daí, toda inscrição nova entra na turma nova.
+Depois de criada e conferida, desmarque `inscricoes_abertas` da safra antiga e marque a
+nova. A partir daí, toda inscrição nova entra na safra nova.
 
 > ⚠️ A data de início da Turma Setembro 2026 está como **1 de setembro**, que era
-> provisório. Quando o dia exato for definido, é só editar essa célula.
+> provisório. Quando o dia exato for definido, é só editar essa célula. A landing não
+> imprime esse dia: ela diz "na primeira semana de setembro", derivado dele (D-14).
 
-### Montando os grupos
+### Quem se inscreveu
 
-Cada inscrição na tabela `waitlist` traz o que você precisa para dividir os horários:
+Cada inscrição está espalhada por **duas** tabelas, de propósito: `pessoas` guarda o
+contato (nome, e-mail, telefone), que é o mesmo em toda safra; `inscricoes` guarda o
+vínculo, o estado e o **perfil naquela safra** — quem estava no 3º período em janeiro
+está no 5º em julho.
+
+O que interessa para dividir horários está em `inscricoes`:
 
 - **`nivel_ingles`** — `basico`, `intermediario` ou `avancado` (autodeclarado pela
   aluna, não é resultado de prova)
@@ -280,39 +373,61 @@ Cada inscrição na tabela `waitlist` traz o que você precisa para dividir os h
 Para **filtrar por dia** no Studio, vá em **SQL Editor** e rode:
 
 ```sql
-select name, email, nivel_ingles, disponibilidade, grupo
-from public.waitlist
-where disponibilidade @> array['ter']
-order by nivel_ingles, name;
+select p.nome, p.email, i.nivel_ingles, i.disponibilidade, i.status
+from public.inscricoes i
+join public.pessoas p on p.id = i.pessoa_id
+where i.disponibilidade @> array['ter']
+order by i.nivel_ingles, p.nome;
 ```
 
 Trocando `'ter'` pelo dia que interessar (`seg`, `ter`, `qua`, `qui`, `sex`). Para quem
 pode **dois dias específicos**, some os dois no array:
 
 ```sql
-where disponibilidade @> array['ter','qui']
+where i.disponibilidade @> array['ter','qui']
 ```
 
-Decidido o horário, escreva o rótulo na coluna **`grupo`** de cada pessoa — direto no
-Table Editor. Pode ser o que fizer sentido: `Grupo A`, `Terça 19h`, o que for. **O campo
-`grupo` não afeta cobrança nem nada automático**; ele existe só para você se organizar.
+### Grupos
+
+`grupos` é uma tabela: cada linha é um horário de uma safra (`safra_id`, `dia_semana`,
+`horario`, `capacidade`, `ativo`). Alocar uma aluna é apontar `inscricoes.grupo_id` para
+uma dessas linhas, e o banco tem um **trigger** que recusa alocar alguém num grupo de
+outra safra — sem ele, um erro colocaria uma aluna de setembro num horário de janeiro e
+nada quebraria.
+
+`horario` é texto (`19:00`) porque é rótulo de agenda, não instante: as aulas são no Meet
+e todas as alunas estão no Brasil. `capacidade` em branco = sem limite, mesma convenção
+de `vagas_total`.
+
+**No corte 1 não há o que alocar.** Com `inscricoes_abertas = false` em toda safra, toda
+inscrição nova entra em `lista_espera` com `safra_id` vazio — e um grupo pertence a uma
+safra, então uma linha sem safra não pode ter horário. A tela de arrastar alunas entre
+horários é do painel, que ainda não existe.
+
+> ⚠️ A coluna `grupo` de texto livre, onde antes se escrevia "Grupo A" à mão, **não foi
+> migrada**. Ela ficou em `waitlist_legado`. Eram valores digitados à mão, sem
+> correspondência garantida com nenhum horário real de agora, em linhas que hoje estão
+> todas na lista de espera. Antes de apagar aquela tabela, vale olhar o que tem lá: se o
+> campo foi usado, aquilo é informação de alocação que não se recupera depois.
 
 ### Quem está na lista de espera
 
-São as linhas com **`status = 'lista_espera'`** — elas têm `turma_id` vazio, porque
-entraram quando não havia turma aberta. Quando você abrir a próxima turma, é essa lista
-que vale a pena avisar primeiro:
+São as linhas com **`status = 'lista_espera'`** — elas têm `safra_id` vazio, porque
+entraram quando não havia safra aberta. Como no corte 1 todo mundo cai aí, é essa a lista
+inteira. Quando a próxima safra abrir, é ela que vale a pena avisar primeiro:
 
 ```sql
-select name, email, phone, nivel_ingles, disponibilidade, created_at
-from public.waitlist
-where status = 'lista_espera'
-order by created_at;
+select p.nome, p.email, p.telefone,
+       i.nivel_ingles, i.disponibilidade, i.created_at
+from public.inscricoes i
+join public.pessoas p on p.id = i.pessoa_id
+where i.status = 'lista_espera'
+order by i.created_at;
 ```
 
 ### E o painel?
 
-Tudo isto vai virar tela no **Prompt C**. Até lá, é pelo Studio mesmo.
+Tudo isto vai virar tela no painel, no corte 3. Até lá, é pelo Studio mesmo.
 
 ## Tema
 
@@ -347,8 +462,8 @@ São quatro dados, repetidos entre os arquivos: nome civil completo, CPF, endere
 e e-mail de contato. Nenhum deles pode ir para produção em branco.
 
 Ao alterar a frase do consentimento, mexa em `src/config/consentimento.ts` e em mais lugar
-nenhum: modal e API leem de lá, e o texto exato é gravado em `waitlist.consent_text` a cada
-inscrição.
+nenhum: modal e API leem de lá, e o texto exato é gravado em `inscricoes.consent_text` a
+cada inscrição.
 
 ## Imagem de compartilhamento (`public/og.png`)
 

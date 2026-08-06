@@ -53,6 +53,33 @@ export function paraDataUTC(iso: string): Date {
  *
  * `timeZone: 'UTC'` é obrigatório: as datas vêm de `paraDataUTC`, que as
  * constrói como instantes UTC. Ver o comentário lá.
+ *
+ * ============================================================
+ * ⚠️ SEM CHAMADOR HOJE, E NÃO É CÓDIGO MORTO — ELA ESPERA O CORTE 2
+ * ============================================================
+ *
+ * Ela existe para `data_primeira_cobranca`, e essa é a única data do
+ * modelo que PODE e DEVE sair seca. Cobrança tem dia exato: o cartão é
+ * debitado no dia 25, não "na última semana de fevereiro". Dizer a
+ * semana ali seria vago exatamente onde a pessoa precisa de precisão —
+ * é o oposto da `data_inicio_aulas`, que a D-14 manda dizer por semana
+ * justamente porque cada grupo começa num dia diferente da mesma semana
+ * (D-01) e o dia exato seria uma promessa que o produto não faz.
+ *
+ * As duas datas parecem a mesma coisa e não são. Confundi-las nas duas
+ * direções dá errado: data seca no início das aulas mente; semana na
+ * cobrança deixa a pessoa sem saber quando o dinheiro sai da conta.
+ *
+ * O último chamador saiu do `src/lib/email.ts` — era um
+ * `inicioPorExtenso()` aplicado à data ERRADA (o início das aulas), e
+ * saiu por isso, não por a função ser inútil. O chamador certo chega com
+ * o checkout, no corte 2, que é quando existe uma cobrança para anunciar.
+ *
+ * ⚠️ NÃO APAGAR num passe de limpeza por "parecer órfã". Apagá-la agora
+ * significa reescrevê-la depois — e reescrever significa refazer, na
+ * pressa do checkout, a decisão de fuso que `paraDataUTC` documenta logo
+ * acima: sem o `timeZone: 'UTC'` dos dois lados, a data de cobrança
+ * aparece um dia antes no Brasil.
  */
 export function formatarDataPorExtenso(data: Date): string {
   return new Intl.DateTimeFormat('pt-BR', {
