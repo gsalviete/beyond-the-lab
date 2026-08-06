@@ -469,7 +469,31 @@ export async function criarInscricao(dados: {
     p_disponibilidade: dados.disponibilidade,
     p_consent_at: dados.consent_at,
     p_consent_text: dados.consent_text,
-    p_safra_id: dados.safra_id,
+    // ⚠️ `?? undefined`, e NÃO `null`. As três coisas que essa linha é:
+    //
+    //   1. Os tipos gerados trazem `p_safra_id?: string` — OPCIONAL, não
+    //      anulável. `supabase gen types` não expressa nulidade de
+    //      ARGUMENTO de função (só de coluna), então `null` nunca vai
+    //      tipar aqui, e não existe tipo manual que conserte isso sem
+    //      desfazer o `c18b`. A ausência é como o PostgREST transporta
+    //      "sem safra": omitido o argumento, ele aplica o DEFAULT do
+    //      parâmetro, e dentro da função `p_safra_id` chega null igual.
+    //
+    //   2. A omissão só é segura porque o default é `default null`
+    //      (migração `011b`, linha da assinatura). ⚠️ ESSE DEFAULT NUNCA
+    //      PODE VIRAR UM UUID REAL. Se virar, toda chamada que omite o
+    //      argumento — ou seja, toda lista de espera — passa a gravar
+    //      inscrição NAQUELA safra, e nada reclama: o `status` é derivado
+    //      do próprio parâmetro dentro da função, então o par
+    //      (safra_id, status) sai coerente e o CHECK da `009` aprova. A
+    //      diferença entre lista de espera e inscrição paga ficaria
+    //      decidida por um valor invisível no call site.
+    //
+    //   3. `undefined` aqui NÃO significa "não sabemos" nem "faltou
+    //      dado". É a expressão de `safra_id is null`, que pelo CHECK da
+    //      `009` significa `lista_espera` — um estado afirmado, decidido
+    //      pela rota depois de ler `inscricoes_abertas` no banco.
+    p_safra_id: dados.safra_id ?? undefined,
   })
 
   if (error) {
