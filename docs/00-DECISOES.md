@@ -202,10 +202,10 @@ data em componente, inclusive como fallback.
 
 ---
 
-## D-14 · A data de início é "na semana de dd/mm/yyyy"
+## D-14 · A data de início é `na <ordinal> semana de <mês>`
 
-Nunca a data seca. A frase é *"As aulas começam na semana de
-01/09/2026"*.
+Nunca a data seca. A frase é *"As aulas começam na primeira semana de
+setembro."* — ordinal da semana, nome do mês, **sem ano**.
 
 *Por quê:* pela D-01 o pool de aulas começa junto, mas cada grupo tem
 seu dia. Quem cai no grupo de quarta não começa na segunda. Dizer
@@ -215,11 +215,76 @@ semana de setembro de 2026") foi parar no código no sistema atual. O
 diagnóstico daquele comentário estava certo; o que estava errado era a
 solução, que congelou a informação fora do banco.
 
-"Na semana de" mantém o formato de data, derivado de
+O ordinal de semana mantém a informação **derivada** de
 `data_inicio_aulas`, e não promete o dia.
 
-**Proíbe:** `dd/mm/yyyy` sozinho como data de início na UI ou no e-mail;
-data de início por extenso; qualquer literal de mês ou semana.
+**A forma anterior era "na semana de dd/mm/yyyy"** — *"As aulas começam
+na semana de 01/09/2026"* —, trocada em **06/08/2026** por decisão do
+dono do repositório. Ela saiu porque, para quem lê rápido, um
+`dd/mm/yyyy` na frase continua parecendo data seca: o olho pega o
+número e ignora o "na semana de", e a pessoa marca 01/09 na agenda.
+Ou seja, a forma antiga carregava de volta exatamente o problema que a
+decisão existe para evitar — e a única defesa contra isso eram três
+palavras que o leitor apressado pula. Sem número de dia na frase, não
+há o que pular. **O motivo da decisão não mudou; mudou só a forma que
+o cumpre.**
+
+Fica registrado aqui, e não só no histórico do git, porque decisão que
+muda sem deixar rastro obriga a próxima pessoa a redescobrir o mesmo
+debate — e a redescobrir tarde, quando a forma antiga já voltou a algum
+componente por parecer mais precisa.
+
+**O ano fica de fora, e isso é decisão, não esquecimento.** A frase da
+landing é deliberadamente imprecisa quanto ao dia; acrescentar "de
+2026" acrescentaria ruído a uma frase que já não promete data. A safra
+de vitrine é sempre a de `data_inicio_aulas` mais recente (D-13), então
+na leitura normal o ano é o próximo por construção. ⚠️ **O custo,
+escrito:** em dezembro, vendendo a safra de setembro seguinte, "na
+primeira semana de setembro" fica ambígua — pode ser lida como o
+setembro que acabou de passar. Aceito hoje, porque a janela em que isso
+acontece é curta e a página inteira fala da turma que vem. Se voltar a
+doer, **o lugar de mudar é aqui**, nesta decisão, e não numa string de
+componente.
+
+**Limitação conhecida — o ordinal é contagem de semanas do mês, não
+semana civil.** O dia sai da própria `data_inicio_aulas`: 1–7 é
+"primeira", 8–14 "segunda", 15–21 "terceira", e **22–31 é "última"**,
+numa faixa final aberta de propósito. Um `Math.ceil(dia / 7)` produziria
+"quinta semana de setembro" para o dia 29, que é frase que ninguém fala;
+e dividir em "quarta" (dia 22) e "quinta" (dia 29) separaria em duas
+coisas que, para quem lê, são a mesma: o fim do mês. O preço dessa
+escolha é que dia 22 e dia 29 leem igual — uma semana inteira de
+diferença que a frase não distingue. Nenhuma safra atual começa no fim
+do mês. Está registrado para quando cair.
+
+Pela mesma razão, o mês vem da própria data e não da segunda-feira da
+semana: aula que começa na quarta 02/09 é "primeira semana de setembro"
+ainda que a semana civil comece em 31/08. Retroceder até a segunda para
+nomear o mês faria a página dizer "agosto" sobre uma turma que não tem
+uma única aula em agosto.
+
+**Proíbe:**
+
+- `dd/mm/yyyy` sozinho como data de início, na UI ou no e-mail;
+- data de início por extenso ("1 de setembro de 2026") em qualquer
+  superfície voltada para a inscrita;
+- **literal de mês, semana ou data de início escrito à mão** em
+  componente, e-mail ou config — inclusive como fallback.
+
+⚠️ **Nome de mês DERIVADO não é literal, e a distinção é a decisão
+inteira.** O que esta decisão proíbe é o valor escrito à mão, congelado
+fora do banco: era `"primeira semana de setembro de 2026"` no meio de um
+componente, e continuava dizendo setembro depois que a safra virou
+janeiro. Produzir "setembro" **a partir de `safra.data_inicio_aulas`** é
+o mecanismo que cumpre a decisão, não uma violação dela — é o que fazem
+`formatarSemanaDeInicio` e `nomeDoMes` em `src/config/curso.ts`, e é por
+isso que a formatação mora num lugar só: duas strings para o mesmo dado
+são duas chances de divergir.
+
+O teste é a origem do valor, não a aparência dele. Se a frase muda
+sozinha quando a Giovana muda `data_inicio_aulas` no Studio, está certa.
+Se ela sobrevive à mudança, é literal — não importa quão bem escrita
+esteja.
 
 ---
 
