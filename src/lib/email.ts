@@ -27,7 +27,7 @@ import {
   type DiaDaSemana,
   type NivelIngles,
 } from '@/config/dominio'
-import type { Turma } from '@/lib/supabase'
+import type { Safra } from '@/lib/supabase'
 
 // Nenhuma com prefixo NEXT_PUBLIC_, de propósito: o Next só expõe ao cliente
 // as variáveis com esse prefixo. Sem ele, elas nunca saem do servidor.
@@ -153,7 +153,7 @@ function linkWhatsApp(e164: string): string {
 }
 
 /** Data de início da turma por extenso, ou null na lista de espera. */
-function inicioPorExtenso(turma: Turma | null): string | null {
+function inicioPorExtenso(turma: Safra | null): string | null {
   if (!turma) return null
   return formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))
 }
@@ -283,7 +283,7 @@ function linhaDado(rotulo: string, valorHtml: string): string {
 // ------------------------------------------------------------
 // E-MAIL 1 — para a Giovanna. Operacional: densidade acima de enfeite.
 // ------------------------------------------------------------
-function montarAdmin(inscricao: InscricaoEmail, turma: Turma | null) {
+function montarAdmin(inscricao: InscricaoEmail, turma: Safra | null) {
   const {
     name, email, phone, nivel_ingles, curso, periodo, disponibilidade, payment_choice,
   } = inscricao
@@ -353,7 +353,7 @@ Data e hora: ${quando}
 // na lista de espera não existe data de início nem vaga garantida, e
 // prometer qualquer uma das duas seria mentira.
 // ------------------------------------------------------------
-function montarInscrita(inscricao: InscricaoEmail, turma: Turma | null) {
+function montarInscrita(inscricao: InscricaoEmail, turma: Safra | null) {
   const { name, email, phone, nivel_ingles, curso, periodo, disponibilidade } = inscricao
 
   const inicio = inicioPorExtenso(turma)
@@ -486,7 +486,7 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 /** Avisa a Giovanna de uma inscrição nova. Não lança. */
 export async function notificarAdmin(
   inscricao: InscricaoEmail,
-  turma: Turma | null,
+  turma: Safra | null,
 ): Promise<void> {
   try {
     if (!EMAIL_ADMIN) {
@@ -506,7 +506,7 @@ export async function notificarAdmin(
 /** Confirma para quem se inscreveu. Não lança. */
 export async function confirmarInscricao(
   inscricao: InscricaoEmail,
-  turma: Turma | null,
+  turma: Safra | null,
 ): Promise<void> {
   try {
     const { assunto, html, texto } = montarInscrita(inscricao, turma)

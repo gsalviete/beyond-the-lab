@@ -5,6 +5,7 @@
 // acabar no bundle do navegador.
 import 'server-only'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { Database, Tables } from '@/lib/database.types'
 
 // ============================================================
 // POR QUE O SDK AGORA, SE ANTES ERA `fetch` CRU
@@ -82,29 +83,49 @@ import type { NivelIngles, DiaDaSemana } from '@/config/dominio'
 export type { NivelIngles, DiaDaSemana }
 
 /**
- * Uma coorte, como vive no banco.
+ * Uma coorte, como vive no banco — agora **derivada** do schema, não
+ * escrita à mão.
  *
- * Atenção ao `valor_mensal`: é `string`, não `number`. **O SDK não muda
- * isso** — quem serializa `numeric` como string é o PostgREST, e de
- * propósito: `numeric(10,2)` tem precisão que o double do JSON não
- * garante, e converter no meio do caminho é como se perde centavo. Quem
- * converte é quem vai exibir, no último momento possível.
+ * O nome mudou junto com a tabela: a migração `005` renomeou `turmas`
+ * para `safras`, e o tipo acompanha. A função abaixo ainda se chama
+ * `buscarTurmaAtiva` porque quem a reescreve é o `c20`; renomear os dois
+ * no mesmo commit misturaria a troca de tipos com a reescrita da rota.
+ *
+ * É um `Pick`, e não `Tables<'safras'>` inteiro, de propósito: a lista
+ * de colunas aqui é exatamente a do `select` lá embaixo. Tipar com a
+ * `Row` completa afirmaria que `slug`, `vagas_total` e
+ * `stripe_price_id` chegaram, quando não chegaram — é o mesmo princípio
+ * de toda travessia de fronteira deste projeto (REPORT §7): carregar o
+ * mínimo, com o corte explícito no ponto onde acontece.
+ *
+ * ⚠️ Atenção ao `valor_mensal`. A coluna é `numeric(10,2)`, e o tipo
+ * gerado a chama de `number` — é o mapeamento fixo do `supabase gen
+ * types`. O tipo manual que estava aqui afirmava o contrário, `string`,
+ * com o motivo escrito: `numeric(10,2)` tem precisão que o double do
+ * JSON não garante, e converter no meio do caminho é como se perde
+ * centavo. Os dois não podem estar certos, e **quem decide é o wire, não
+ * o tipo** — nenhum dos dois foi medido contra o banco neste commit.
+ *
+ * O que segura a diferença é a regra que não mudou: quem converte é quem
+ * vai exibir, no último momento possível. O `Number(...)` em
+ * `app/api/turma-ativa/route.ts` é correto vindo string ou number, e é
+ * por isso que ele fica. **Medir o valor real na resposta do PostgREST é
+ * pré-requisito do `c22`**, que é onde o preço passa a vir da safra — se
+ * for string mesmo, é lá que o tipo gerado precisa de um envelope, e não
+ * um `Number()` a mais espalhado pelo caminho.
  *
  * As datas são `date` no banco e chegam como 'YYYY-MM-DD' — dia de
  * calendário, sem fuso. Ver `paraDataUTC` em `src/config/curso.ts`.
- *
- * ⚠️ Tipo mantido à mão, como antes. O `c03` do plano o substitui pelos
- * tipos gerados do schema; até lá, a fonte continua sendo a disciplina de
- * manter isto em fase com o SQL.
  */
-export type Turma = {
-  id: string
-  nome: string
-  data_inicio_aulas: string
-  data_primeira_cobranca: string
-  valor_mensal: string
-  duracao_meses: number
-}
+export type Safra = Pick<
+  Tables<'safras'>,
+  | 'id'
+  | 'nome'
+  | 'data_inicio_aulas'
+  | 'data_primeira_cobranca'
+  | 'valor_mensal'
+  | 'duracao_meses'
+>
 
 /**
  * O cliente, criado uma vez por instância e reaproveitado.
@@ -113,17 +134,25 @@ export type Turma = {
  * virar `SupabaseNotConfiguredError` no ponto de uso, onde cada chamador
  * decide o que fazer — e não uma exceção na importação, que derrubaria o
  * build e o render de páginas que nem falam com o banco.
+ *
+ * O parâmetro `Database` é o que dá sentido ao arquivo gerado.
+ *
+ * Sem ele, `src/lib/database.types.ts` seria documentação: o SDK trataria
+ * toda tabela como `any` e `from('turmas')` — uma tabela que não existe
+ * desde a `005` — compilaria em silêncio. É exatamente a forma de estar
+ * errado que o `c18b` existe para acabar: o schema anda, a aplicação não,
+ * e nada reclama. Ver a nota do `c18b` em `docs/04-PLANO.md`.
  */
-let cliente: SupabaseClient | null = null
+let cliente: SupabaseClient<Database> | null = null
 
-function supabase(): SupabaseClient {
+function supabase(): SupabaseClient<Database> {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new SupabaseNotConfiguredError()
   }
 
   if (cliente) return cliente
 
-  cliente = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  cliente = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     // Este cliente não representa ninguém. Ele é a service_role, que
     // ignora RLS e não tem sessão para persistir, renovar ou detectar na
     // URL. Os três defaults do SDK são para o navegador com usuário
@@ -179,8 +208,12 @@ function supabase(): SupabaseClient {
  * rota, não esta função. O SDK devolve `{ data, error }` em vez de
  * lançar, então o `throw` passa a ser explícito aqui.
  */
-export async function buscarTurmaAtiva(): Promise<Turma | null> {
+export async function buscarTurmaAtiva(): Promise<Safra | null> {
   const { data, error } = await supabase()
+    // ⚠️ turmas → safras: a tabela foi renomeada pela migração 005 e a
+    // rota inteira é reescrita no c20. Silenciado aqui de propósito para
+    // o c18b poder compilar. REMOVER no c20.
+    // @ts-expect-error a tabela `turmas` não existe mais no schema gerado
     .from('turmas')
     .select('id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses')
     .is('inscricoes_abertas', true)
@@ -192,7 +225,18 @@ export async function buscarTurmaAtiva(): Promise<Turma | null> {
     throw new Error(`turmas: ${error.code ?? 'sem código'} — ${error.message}`)
   }
 
-  return ((data as Turma[] | null)?.[0]) ?? null
+  // O `as unknown` é a segunda metade do silenciamento acima, e some com
+  // ele no c20. O `@ts-expect-error` cala o `from('turmas')`, mas não
+  // conserta o que vem depois: sem tabela conhecida, o SDK resolve o
+  // encadeamento contra a união de todas as tabelas e `data` vira uma
+  // união de `SelectQueryError<...>`. Um `as Safra[]` direto é recusado
+  // por não haver sobreposição entre os dois tipos, e o `as unknown` no
+  // meio é o que o compilador pede.
+  //
+  // Ele é largo, e é largo de propósito: estreitar um cast sobre uma
+  // query que consulta tabela inexistente seria dar aparência de tipo a
+  // uma resposta que em runtime é erro do PostgREST, não linha.
+  return ((data as unknown as Safra[] | null)?.[0]) ?? null
 }
 
 /**
@@ -250,6 +294,20 @@ export async function insertWaitlistEntry(entry: {
   // Continua sendo o que queremos: não precisamos da linha gravada e não
   // há motivo para trafegar dado pessoal de volta. Encadear `.select()`
   // por reflexo — porque "é assim que se faz" — desfaria isso em silêncio.
+  //
+  // ⚠️ waitlist → pessoas + inscricoes: a tabela foi migrada pelas
+  // migrações 010/011 (o que sobrou virou `waitlist_legado`, que é
+  // arquivo morto e não recebe linha nova) e esta rota inteira é
+  // reescrita no c21. Silenciado aqui de propósito para o c18b poder
+  // compilar. REMOVER no c21.
+  //
+  // O `@ts-expect-error` cobre só a ausência da tabela. O corpo `entry`
+  // continua com a forma antiga — `name`/`phone`/`turma_id`/
+  // `payment_choice` —, e nenhum desses campos sobrevive ao modelo novo
+  // (`payment_choice` morre pela D-11, o resto se divide entre `pessoas`
+  // e `inscricoes`). Traduzir o payload aqui seria fazer o c21 pela
+  // metade e sem os testes do c26.
+  // @ts-expect-error a tabela `waitlist` não existe mais no schema gerado
   const { error, status } = await supabase().from('waitlist').insert(entry)
 
   if (!error) return { ok: true }
