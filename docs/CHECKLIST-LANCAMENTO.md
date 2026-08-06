@@ -140,7 +140,21 @@ espera** do começo ao fim. Se em algum ponto a tela falar em vaga reservada, li
 pagamento ou data de início, alguma safra está com `inscricoes_abertas = true` no banco:
 pare e vá ao bloco 6.
 
-- [ ] Abriu a modal, preencheu **todos** os campos e enviou pelo **"Quero ser avisada"**
+- [ ] Chegou até a modal pelo card de preço — o **"Garantir minha vaga"** de dentro do
+      card é o único botão da página que abre o formulário. Os "Lista de espera"
+      espalhados pela landing rolam até o card, não abrem nada (ver o bloco 7)
+- [ ] A pílula no topo da modal diz **"Lista de espera"**, não "Inscrição", e o título
+      abaixo dela é **"As inscrições estão fechadas no momento."**
+- [ ] Preencheu **todos** os campos e enviou pelo botão de envio **da modal**, que com as
+      inscrições fechadas diz **"Quero ser avisada"**
+
+      > ⚠️ Não confunda com o "Garantir minha vaga" da landing. São dois botões
+      > diferentes, e só um deles muda: o da landing é texto fixo em `Pricing.jsx` e diz
+      > sempre a mesma coisa; o de dentro da modal é o que acompanha `inscricoes_abertas`
+      > — "Garantir minha vaga" com a safra aberta, "Quero ser avisada" com ela fechada.
+      > **Depois do corte 2**, com uma safra aberta, este item passa a ser "Garantir minha
+      > vaga" nos dois lugares, e isso não é regressão.
+
 - [ ] O formulário **não pergunta nada sobre pagamento**. A pergunta "quer pagar agora ou
       depois?" foi removida (D-11): ela existia numa tela onde pagar era logicamente
       impossível, e os dois valores gravavam igual
@@ -303,21 +317,35 @@ compensa.
       commit para mexer no próprio preço, e é isso que o corte inteiro existia para acabar.
 - [ ] **Devolva o valor original** e confira que a landing volta em até 60s
 
-## 7. Todos os CTAs abrem a modal
+## 7. Os oito CTAs
 
-São **oito**. Clique nos oito:
+São **oito**, e eles **não fazem a mesma coisa**. Sete dizem **"Lista de espera"** e rolam
+até o card de preço; **só o do card**, que diz **"Garantir minha vaga"**, abre a modal.
 
-**Na landing (`/`):**
+> O fluxo é de duas etapas de propósito: quem clica no CTA do topo ainda não viu o preço, e
+> mandar a modal direto pularia justamente a informação de que a decisão precisa.
+
+Clique nos oito:
+
+**Na landing (`/`) — rolam até o card de preço, texto "Lista de espera":**
 - [ ] Navbar, botão do topo (desktop)
-- [ ] Navbar, botão dentro do menu hambúrguer (mobile)
+- [ ] Navbar, botão dentro do menu hambúrguer (mobile) — e o menu **fecha** ao clicar
 - [ ] Hero
 - [ ] PainPoints
 - [ ] Teacher
-- [ ] Pricing — e confira que o botão diz **"Garantir minha vaga"**, não "Adquirir"
 - [ ] FinalCta
 
-**Em `/conteudo-programatico`:**
-- [ ] Botão do fim da página
+**Em `/conteudo-programatico` — mesma coisa, texto "Lista de espera":**
+- [ ] Botão do fim da página. Ele sai da rota: leva para `/#planos` e a landing abre já no
+      card
+
+**No card de preço — o único que abre a modal:**
+- [ ] Pricing — e confira que o botão diz **"Garantir minha vaga"**, não "Adquirir"
+
+      > Este texto é fixo em `Pricing.jsx` e **não** acompanha `inscricoes_abertas`: ele é
+      > o convite para abrir o formulário, e quem decide o que o formulário promete é a
+      > modal, do lado de dentro. O botão que muda com a flag é o de **envio**, lá dentro —
+      > ver o bloco 1.
 
 ## 8. Navegação e teclado
 
