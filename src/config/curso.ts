@@ -63,10 +63,43 @@ export function formatarDataPorExtenso(data: Date): string {
   }).format(data)
 }
 
-/** Mensalidade formatada como moeda — "R$ 299,99". */
+/**
+ * Mensalidade formatada como moeda — "R$ 299,99".
+ *
+ * ⚠️ Esta função passou meses SEM NENHUM CHAMADOR, e isso era o sintoma
+ * da tensão 8.1 do `REPORT.md`: o banco era fonte de verdade, o
+ * transporte existia, e a página exibia `R$ 299,99` escrito à mão. A
+ * professora podia mudar o valor no Studio e o site continuava dizendo o
+ * número velho. O `c22` ligou o consumo — quem chama é `app/page.jsx`,
+ * pela `Pricing`.
+ *
+ * O parâmetro é `number` porque é o que o PostgREST devolve (medido:
+ * `299.99`, número JSON). ⚠️ Isto é FORMATAÇÃO PARA EXIBIR e nada mais.
+ * Aritmética de dinheiro não acontece em float: o Stripe cobra em
+ * centavo inteiro, e a conversão para inteiro é do corte 2, no ponto que
+ * monta a Checkout Session. Se um dia aparecer soma, desconto ou
+ * proporcional escrito sobre este valor, o erro está em quem somou.
+ */
 export function formatarValorMensal(valor: number): string {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   }).format(valor)
+}
+
+/**
+ * Duração em meses, com a concordância certa — "6 meses", "1 mês".
+ *
+ * Existe porque o literal que ela substitui era sempre "6 meses", e o
+ * plural estava embutido na frase. `duracao_meses` é uma coluna de
+ * `safras` (D-01: o calendário é da safra) e a Giovana pode publicar uma
+ * safra de um mês sem falar com ninguém — aí a página diria "1 meses".
+ *
+ * Devolve minúscula sempre. Onde a tela pede caixa alta (o chip do card
+ * de preço, "6 Meses"), quem resolve é `capitalize` no CSS: a variação é
+ * de apresentação e não merece uma segunda string para divergir da
+ * primeira.
+ */
+export function formatarDuracao(meses: number): string {
+  return `${meses} ${meses === 1 ? 'mês' : 'meses'}`
 }

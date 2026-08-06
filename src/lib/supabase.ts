@@ -156,12 +156,10 @@ export type SafraAtiva = Safra & {
 }
 
 /**
- * O cliente, criado uma vez por instância e reaproveitado.
+ * Os clientes, criados uma vez por instância e reaproveitados.
  *
- * Preguiçoso, e não no topo do módulo: a ausência de env var precisa
- * virar `SupabaseNotConfiguredError` no ponto de uso, onde cada chamador
- * decide o que fazer — e não uma exceção na importação, que derrubaria o
- * build e o render de páginas que nem falam com o banco.
+ * São DOIS e não um, e a única diferença entre eles é a política de
+ * cache do `fetch` — ver `supabase()` e `supabaseVitrine()` logo abaixo.
  *
  * O parâmetro `Database` é o que dá sentido ao arquivo gerado.
  *
@@ -172,7 +170,32 @@ export type SafraAtiva = Safra & {
  * e nada reclama. Ver a nota do `c18b` em `docs/04-PLANO.md`.
  */
 let cliente: SupabaseClient<Database> | null = null
+let clienteVitrine: SupabaseClient<Database> | null = null
 
+/**
+ * Opções comuns aos dois clientes. Só a política de cache os separa.
+ *
+ * Nenhum dos dois representa ninguém: são a service_role, que ignora RLS
+ * e não tem sessão para persistir, renovar ou detectar na URL. Os três
+ * defaults do SDK são para o navegador com usuário logado; deixá-los
+ * ligados aqui, num módulo de escopo compartilhado entre requisições,
+ * seria criar estado de autenticação que nada preenche e que nada
+ * deveria poder preencher.
+ */
+const AUTH_SEM_SESSAO = {
+  persistSession: false,
+  autoRefreshToken: false,
+  detectSessionInUrl: false,
+} as const
+
+/**
+ * O cliente de OPERAÇÃO — nunca cacheia.
+ *
+ * Preguiçoso, e não no topo do módulo: a ausência de env var precisa
+ * virar `SupabaseNotConfiguredError` no ponto de uso, onde cada chamador
+ * decide o que fazer — e não uma exceção na importação, que derrubaria o
+ * build e o render de páginas que nem falam com o banco.
+ */
 function supabase(): SupabaseClient<Database> {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new SupabaseNotConfiguredError()
@@ -181,33 +204,75 @@ function supabase(): SupabaseClient<Database> {
   if (cliente) return cliente
 
   cliente = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    // Este cliente não representa ninguém. Ele é a service_role, que
-    // ignora RLS e não tem sessão para persistir, renovar ou detectar na
-    // URL. Os três defaults do SDK são para o navegador com usuário
-    // logado; deixá-los ligados aqui, num módulo de escopo compartilhado
-    // entre requisições, seria criar estado de autenticação que nada
-    // preenche e que nada deveria poder preencher.
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
+    auth: AUTH_SEM_SESSAO,
     global: {
       // `no-store` explícito, e não confiança no default do Next.
       //
       // É a mesma exigência de sempre, agora um andar abaixo: fechar a
-      // turma no Studio precisa refletir no site imediatamente, e é esse
+      // turma no Studio precisa refletir na modal imediatamente, e é esse
       // imediatismo que torna o controle pelo banco melhor que o deploy
       // que ele substitui (REPORT D2). O SDK chama `fetch` por baixo, e
       // o Next envolve o `fetch` global com a própria camada de cache —
       // deixar a decisão para o default dela seria apostar o painel de
       // controle da professora numa configuração de framework que muda
       // entre versões maiores.
+      //
+      // Quem passa por aqui: `/api/safra-ativa` (a leitura da modal, que
+      // já é `force-dynamic`) e a escrita de `/api/inscricao`. Os dois
+      // decidem AGORA e não podem ler nada de cache.
       fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }),
     },
   })
 
   return cliente
+}
+
+/**
+ * O cliente de VITRINE — cacheável, e é isso que mantém a landing estática.
+ *
+ * ============================================================
+ * POR QUE DOIS CLIENTES, E NÃO UM COM UMA OPÇÃO A MAIS
+ * ============================================================
+ *
+ * O `fetch` do SDK é fixado na CRIAÇÃO do cliente: não há como pedir
+ * outra política de cache numa chamada específica. E as duas políticas
+ * são inconciliáveis de propósito, porque respondem a perguntas
+ * diferentes (D-13):
+ *
+ *   OPERAÇÃO ("dá para comprar agora?") — `no-store`. Uma resposta de
+ *     um minuto atrás pode estar errada, e agir sobre ela é prometer
+ *     vaga numa safra fechada.
+ *
+ *   VITRINE ("quanto custa e quanto dura?") — cacheável. Um minuto de
+ *     defasagem no preço é aceito, e em troca a landing é servida
+ *     estática, sem uma consulta ao banco por visita.
+ *
+ * ⚠️ `cache: 'force-cache'` e NENHUM `revalidate` aqui, de propósito. A
+ * janela é declarada UMA vez, no `export const revalidate` de
+ * `app/page.jsx`, e o Data Cache do Next herda dela. Declarar 60 nos dois
+ * lugares criaria dois números para a mesma decisão, e um dia eles
+ * discordam — o menor vence em silêncio e ninguém entende por quê.
+ *
+ * ⚠️ Isto NÃO desfaz a promessa de "sem deploy". A Giovana continua
+ * mudando o preço no Studio; o que muda é que a página acompanha em até
+ * um minuto em vez de instantaneamente. No `c36` o painel passa a
+ * disparar `revalidatePath` ao salvar e a defasagem some (D-13).
+ */
+function supabaseVitrine(): SupabaseClient<Database> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new SupabaseNotConfiguredError()
+  }
+
+  if (clienteVitrine) return clienteVitrine
+
+  clienteVitrine = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: AUTH_SEM_SESSAO,
+    global: {
+      fetch: (input, init) => fetch(input, { ...init, cache: 'force-cache' }),
+    },
+  })
+
+  return clienteVitrine
 }
 
 /**
@@ -328,6 +393,74 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   }
 
   return { ...safra, inscritas: count }
+}
+
+/**
+ * Só o que a VITRINE precisa: quanto custa e quanto dura.
+ *
+ * `null` quando não existe safra nenhuma no banco. Quem decide o que
+ * fazer com isso é a landing — e ela falha o build, porque não existe
+ * fallback honesto para "quanto custa" (ver `app/page.jsx`).
+ *
+ * ============================================================
+ * POR QUE NÃO É `buscarSafraAtiva` COM MENOS COLUNAS
+ * ============================================================
+ *
+ * Três diferenças, e cada uma sozinha já justificaria a separação:
+ *
+ *   1. CACHE. Esta usa o cliente de vitrine (`force-cache`), e é isso
+ *      que permite a landing ser prerenderizada. A outra usa `no-store`,
+ *      e uma página estática NÃO PODE conter um `fetch` `no-store` — o
+ *      Next recusa o prerender com `DYNAMIC_SERVER_USAGE` e a landing
+ *      viraria dinâmica, o que a D-13 proíbe.
+ *
+ *   2. A CONTAGEM DE INSCRITAS. `buscarSafraAtiva` faz uma segunda
+ *      consulta para contar vagas ocupadas. A landing não desenha
+ *      contador nenhum — pagar essa consulta a cada revalidação seria
+ *      trabalho para jogar fora, e cachear a contagem de vagas por 60
+ *      segundos é justamente o tipo de dado que não pode envelhecer.
+ *
+ *   3. AS COLUNAS. Aqui vêm duas. Nem `id`, nem `inscricoes_abertas`,
+ *      nem `vagas_total` — nada que a vitrine não imprima. É o corte de
+ *      fronteira do REPORT §9.6 feito na origem: o que não é selecionado
+ *      não vaza mais adiante por um spread distraído.
+ *
+ * ⚠️ O QUE AS DUAS COMPARTILHAM, E TEM QUE CONTINUAR IGUAL: a regra de
+ * QUAL safra é a safra — `order('data_inicio_aulas', desc).limit(1)`,
+ * sem filtrar por `inscricoes_abertas` (D-13). Se essa regra mudar, muda
+ * nas duas ou a modal e a landing passam a falar de safras diferentes na
+ * mesma tela. Está escrita duas vezes porque as consultas divergem em
+ * tudo o mais; este comentário é a amarra.
+ *
+ * ⚠️ SEM `data_inicio_aulas`. A data de início continua sendo texto
+ * literal na tela até o `c23`, que tem regra própria (D-14): a frase é
+ * "na semana de dd/mm/yyyy", nunca a data seca, porque cada grupo começa
+ * num dia diferente da mesma semana. Acrescentar a coluna aqui antes
+ * disso seria transportar um dado que ninguém pode exibir ainda.
+ */
+export type SafraVitrine = Pick<Tables<'safras'>, 'valor_mensal' | 'duracao_meses'>
+
+export async function buscarSafraDeVitrine(): Promise<SafraVitrine | null> {
+  const { data, error } = await supabaseVitrine()
+    .from('safras')
+    .select('valor_mensal,duracao_meses')
+    .order('data_inicio_aulas', { ascending: false })
+    .limit(1)
+
+  if (error) {
+    // A mensagem do PostgREST pode conter detalhe de schema; ela vai para
+    // o log do servidor e para lugar nenhum além disso.
+    //
+    // Lançar é o certo mesmo aqui: numa REVALIDAÇÃO, o Next mantém a
+    // página gerada por último e tenta de novo depois — o erro não chega
+    // a ninguém e a visitante continua vendo o último preço bom. Num
+    // BUILD, ele derruba o deploy, que é o desfecho desejado: uma landing
+    // que não sabe o preço não deve ser publicada, e a versão anterior
+    // segue no ar.
+    throw new Error(`safras(vitrine): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
 }
 
 /**

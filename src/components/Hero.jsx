@@ -2,6 +2,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowUpRight, Check } from './Icons.jsx'
 import LinkListaEspera from './LinkListaEspera.jsx'
+import { formatarDuracao } from '@/config/curso'
 
 const perks = [
   { label: 'Conteúdo especializado',       w: 'w-[96px]'  },
@@ -12,7 +13,12 @@ const perks = [
 
 const PORTRAIT = '/assets/hero.png'
 
-export default function Hero() {
+/**
+ * `duracaoMeses` é obrigatório e sem default — ver o porquê em
+ * `Pricing.jsx`: um default seria o literal voltando invisível, ativado
+ * justamente quando o dado real não chegasse.
+ */
+export default function Hero({ duracaoMeses }) {
   return (
     <section id="top" className="relative overflow-hidden pb-16 pt-28 lg:pt-[190px]">
       <div className="container-page grid grid-cols-1 items-start gap-12 lg:grid-cols-[minmax(0,1fr)_480px] lg:gap-0">
@@ -67,9 +73,16 @@ export default function Hero() {
               <span className="text-grad">Reprodução Humana.</span>
             </h1>
 
+            {/* A duração vem da safra, não da frase. Era "6 meses" escrito
+                aqui, e a mesma afirmação aparecia mais três vezes na
+                página — card de preço, chip e FAQ —, todas mantidas em
+                fase por disciplina. `duracao_meses` é coluna de `safras`
+                (D-01: o calendário é da safra), e a Giovana pode publicar
+                uma safra mais curta sem falar com ninguém. */}
             <p className="reveal text-[16px] leading-6 text-body" style={{ '--reveal-delay': '240ms' }}>
-              Um curso com duração de 6 meses desenvolvido por quem entende o cenário para quem quer estudar,
-              pesquisar e atuar com mais segurança em um mercado cada vez mais global.
+              Um curso com duração de {formatarDuracao(duracaoMeses)} desenvolvido por quem entende o
+              cenário para quem quer estudar, pesquisar e atuar com mais segurança em um mercado cada
+              vez mais global.
             </p>
 
             {/* CTA principal nunca passa de 500ms — a pessoa precisa poder agir logo */}
