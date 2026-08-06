@@ -62,13 +62,58 @@
 --
 -- Em STAGING ele vai disparar, porque a linha ④ do seed
 -- (`diana.staging@exemplo.invalid`) existe exatamente para provar que o
--- aborto funciona. Depois de conferir que disparou, escolha uma:
+-- aborto funciona. Depois de conferir que disparou, há duas saídas na
+-- mesa — e ⚠️ PARA ESTA LINHA SÓ UMA DELAS EXISTE DE VERDADE:
 --
+--   -- ⚠️ NÃO SE APLICA À LINHA ④. Ver a cadeia logo abaixo.
+--   -- Vale para uma linha a que falte SÓ o telefone.
 --   update public.waitlist set phone = '+5521999990004'
 --    where email = 'diana.staging@exemplo.invalid';
 --
+--   -- A ÚNICA saída aplicável à linha ④.
 --   delete from public.waitlist
 --    where email = 'diana.staging@exemplo.invalid';
+--
+-- ⚠️ POR QUE O UPDATE É INALCANÇÁVEL AQUI — a cadeia inteira, porque a
+-- conclusão sozinha não se sustenta na próxima vez que alguém ler:
+--
+--   1. A linha ④ do seed da `000` não tem só `phone` nulo. Ela tem o
+--      TRIO DE CONSENTIMENTO INTEIRO NULO (`consent`, `consent_at`,
+--      `consent_text`) e o perfil nulo — está lá no próprio seed, no
+--      comentário "LISTA DE ESPERA sem consentimento, e SEM TELEFONE".
+--
+--   2. O `update` acima resolve exatamente UMA coisa: o preflight da
+--      seção 2, que só olha `phone is null`. Preenchido o telefone, o
+--      preflight passa e a linha segue para os inserts.
+--
+--   3. Mas ela segue COM `consent` nulo. Nas seções 3 e 4 isso ainda
+--      passa — o trio vai como está, e é o desenho (zero backfill). O
+--      que a linha ④ não atravessa é a vida DEPOIS da migração: ela
+--      chega ao destino como uma inscrição sem nenhum registro
+--      probatório, que é precisamente o passivo que a seção 5 fecha
+--      para o futuro e não pode fechar para trás.
+--
+--   4. Fazer essa linha ficar íntegra exigiria preencher `consent`,
+--      `consent_at` e `consent_text` — BACKFILL DE CONSENTIMENTO, que
+--      é a regra não negociável do projeto: `null` significa "não
+--      sabemos" e permanece `null`; backfill aqui é falsificação de
+--      prova (LGPD art. 5º, XII — consentimento presumido não é
+--      consentimento). Também não vale placeholder no telefone, pela
+--      mesma razão em outra roupa (ver a `007`).
+--
+--   5. Logo: o `update` deixa a linha ④ num estado que passa no
+--      preflight e continua sendo o problema que o preflight existe
+--      para tornar visível. Ele não é a saída dela — é a saída de uma
+--      linha DIFERENTE, uma a que falte só o telefone e cujo
+--      consentimento esteja completo. Por isso o `update` fica escrito
+--      aqui: apagá-lo faria perder a distinção entre os dois casos, e
+--      é a distinção que ensina o que olhar antes de escolher.
+--
+-- Regra prática, e ela é o resumo do que está acima: antes de escolher,
+-- OLHE A LINHA INTEIRA, não só o campo que o preflight acusou. Se o que
+-- falta é só o telefone e ele pode ser OBTIDO (não inventado), `update`.
+-- Se falta consentimento também, a única saída honesta é o `delete` após
+-- revisão — porque a alternativa seria fabricar a prova.
 --
 -- ============================================================
 -- A ORDEM DESTE ARQUIVO É O ARQUIVO

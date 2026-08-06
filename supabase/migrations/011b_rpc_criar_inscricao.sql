@@ -76,6 +76,60 @@
 -- e-mail disparado. O `false` serve para NÃO disparar o e-mail de
 -- boas-vindas duas vezes, e para métrica no servidor. Nada além disso.
 --
+-- ============================================================
+-- ⚠️⚠️ `p_safra_id uuid default null` É CONTRATO, NÃO CONVENIÊNCIA
+-- ============================================================
+--
+-- O `default null` da última linha da assinatura parece açúcar — "quem
+-- não passa safra não precisa escrever `null`". NÃO É. Ele é a metade
+-- SQL de um contrato com a aplicação, e a outra metade já depende dele:
+--
+--   `src/lib/supabase.ts` manda `p_safra_id: dados.safra_id ?? undefined`.
+--   `undefined` some no `JSON.stringify`, o PostgREST recebe um corpo SEM
+--   a chave, e aplica O DEFAULT DESTE ARQUIVO. É assim — e SÓ assim — que
+--   uma inscrição de lista de espera chega aqui com `p_safra_id` null.
+--
+-- (Por que a aplicação omite em vez de mandar `null`: os tipos gerados
+-- trazem `p_safra_id?: string`, opcional e não anulável — `supabase gen
+-- types` não expressa nulidade de ARGUMENTO de função, só de coluna. O
+-- raciocínio completo está no comentário daquela linha em `supabase.ts`.)
+--
+-- ⚠️ O QUE QUEBRA SE ESTE DEFAULT VIRAR UM UUID:
+--
+--   `safra_id` preenchido significa INSCRIÇÃO EM SAFRA. `safra_id` null
+--   significa LISTA DE ESPERA. Não é convenção deste arquivo: é o CHECK
+--   `inscricoes_safra_status_coerentes_check` da `009`, e é o que o
+--   `case` da seção 2.2 lê para derivar o `status`.
+--
+--   Com um default não-nulo, TODA chamada que omite o argumento — ou
+--   seja, TODA a lista de espera — passa a nascer `pendente_pagamento`
+--   naquela safra. E NADA RECLAMA. Não há erro do PostgREST: o argumento
+--   é opcional. Não há erro de tipo: o TypeScript nunca viu esse valor.
+--   Não há violação de constraint: como o `status` é derivado do PRÓPRIO
+--   parâmetro, o par (safra_id, status) sai COERENTE e o CHECK da `009`
+--   aprova. A reclassificação é silenciosa, em massa e retroativa a
+--   partir do deploy — gente que só pediu para ser avisada aparece no
+--   painel como aluna esperando pagar.
+--
+-- ⚠️ HÁ TESTE, E ELE NÃO DISPENSA ESTE AVISO.
+--
+--   `tests/inscricao-rpc.test.ts` lê ESTE ARQUIVO como texto e afirma,
+--   no bloco `describe('a lista de espera OMITE o argumento')`:
+--
+--     it('o default de `p_safra_id` na migração é `null`, e tem que
+--         continuar sendo')      → expect(decl).toBe('p_safra_id uuid default null')
+--     it('nenhum outro parâmetro tem default')
+--                                → expect(comDefault).toEqual(['p_safra_id uuid default null'])
+--
+--   Ou seja: a asserção é sobre a STRING da declaração. Mudar o default
+--   aqui reprova a suíte.
+--
+--   Só que quem edita SQL não necessariamente roda a suíte de TypeScript
+--   antes — abre-se o SQL Editor do Supabase, ajusta-se a assinatura, e
+--   o vermelho só aparece depois, em CI, para outra pessoa, se aparecer.
+--   O teste é a rede; este comentário é o aviso NO LUGAR ONDE A MUDANÇA
+--   SERIA FEITA. Os dois existem porque protegem em momentos diferentes.
+--
 -- Rode no SQL Editor do Supabase. É idempotente: pode rodar de novo.
 -- ============================================================
 
