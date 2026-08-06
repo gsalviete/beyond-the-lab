@@ -27,3 +27,4 @@ render_*.png
 # tocado no repositório, e o ruído é o problema: um working tree que sempre
 # tem uma linha suja treina a gente a ignorar `git status`.
 .DS_Store
+supabase/.temp/
