@@ -284,25 +284,33 @@ export default function InscricaoModal({ onFechar }) {
     const email = String(dados.get('email') ?? '').trim()
     const website = String(dados.get('website') ?? '')
 
-    // ⚠️ ESTE CAMPO ESTÁ MORTO E AINDA VIAJA — some no `c25` (D-11).
+    // ------------------------------------------------------------
+    // ⚠️ AQUI HAVIA `const escolha = inscricaoAberta ? 'agora' : 'depois'`,
+    // O ÚLTIMO RESTO DA PERGUNTA `payment_choice`. Ela não volta (D-11).
     //
-    // A coluna `payment_choice` não existe mais: ela não foi migrada para
-    // o modelo novo, e `/api/inscricao` a descarta no corte de fronteira
-    // do payload. Nada do que for enviado aqui chega ao banco por caminho
-    // nenhum.
+    // O formulário chegou a oferecer a escolha na tela — "quer pagar agora
+    // ou depois?" —, e depois passou a derivá-la do estado da safra sem
+    // perguntar nada, porque a resposta nunca mudou o que era gravado. As
+    // duas versões tinham o mesmo defeito: pagar era logicamente
+    // impossível nesta tela. Não havia checkout, então "quero pagar agora"
+    // não cobrava nada de ninguém. Era preferência coletada e descartada —
+    // dado pessoal sem finalidade, o oposto do que a LGPD pede.
     //
-    // Ele continua no corpo por um motivo só: o Zod da rota ainda o exige
-    // (`src/config/schemas.ts`), e removê-lo daqui antes de lá faria todo
-    // POST ser recusado com 400. Os dois saem juntos no `c25`, junto com a
-    // pergunta na tela e o rótulo em `email.ts`.
+    // A partir do `c35` quem paga é quem passa pelo checkout: a intenção
+    // deixa de ser declarada e passa a ser exercida (D-02). Quem decide o
+    // caminho é o servidor, relendo a safra no ato da escrita — nunca o
+    // corpo do POST (REPORT §9.1).
     //
-    // O valor continua sendo derivado do estado da safra — 'agora' com
-    // inscrições abertas, 'depois' sem — porque enquanto o campo existir
-    // ele tem que dizer a verdade sobre o que a pessoa podia escolher. Sem
-    // safra aberta não havia escolha de pagamento a fazer: não existia
-    // cobrança para adiantar. Era o modelo avisando que a etapa não
-    // existia, que é exatamente o diagnóstico da D-11.
-    const escolha = inscricaoAberta ? 'agora' : 'depois'
+    // ⚠️ NÃO REINTRODUZA A PERGUNTA COMO "MELHORIA DE UX". Ela só faz
+    // sentido no dia em que o sistema honrar as duas respostas; enquanto a
+    // resposta não mudar nada a jusante, perguntar é fazer a pessoa
+    // trabalhar para alimentar um campo que ninguém lê.
+    //
+    // O que a modal ainda deriva de `inscricaoAberta` é o RÓTULO do botão
+    // ("Garantir minha vaga" / "Quero ser avisada") e o aviso de cobrança
+    // logo abaixo dele. Isso é texto de tela e continua certo: descreve o
+    // que vai acontecer, não coleta resposta.
+    // ------------------------------------------------------------
 
     // Validação client-side: só para retorno imediato. A que vale é a do
     // servidor, que roda mesmo com o JS desligado ou adulterado.
@@ -363,7 +371,6 @@ export default function InscricaoModal({ onFechar }) {
           name,
           email,
           phone: paraE164(telefone),
-          payment_choice: escolha,
           nivel_ingles: nivel,
           curso: cursoFinal,
           periodo: periodoFinal,
@@ -404,12 +411,19 @@ export default function InscricaoModal({ onFechar }) {
       }
 
       if (res.ok && body?.ok) {
-        // TODO: Prompt B2 — 'agora' redireciona para o Stripe Checkout.
-        // A ramificação é exatamente aqui: com `escolha === 'agora'` E
-        // turma aberta, em vez de mostrar a tela de sucesso, o servidor
-        // devolve a URL da sessão de Checkout e este ponto faz
-        // `window.location.assign(body.url)`. 'depois' e lista de espera
-        // continuam caindo na tela de sucesso como agora.
+        // TODO: `c35` — o redirecionamento para o Stripe Checkout entra
+        // exatamente aqui.
+        //
+        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é mais "a pessoa
+        // escolheu pagar agora" — essa pergunta morreu (D-11). É o
+        // servidor que, tendo relido a safra no ato da escrita, devolve
+        // `{ modo: 'checkout', url }`; este ponto só obedece, com
+        // `window.location.assign(body.url)`. `{ modo: 'lista_espera' }`
+        // continua caindo na tela de sucesso como agora.
+        //
+        // A ramificação vive no servidor porque entre o GET que desenhou
+        // esta modal e este POST a Giovana pode ter fechado a safra
+        // (Fluxo 1). Um `if` daqui decidiria com informação velha.
         setStatus('success')
         return
       }

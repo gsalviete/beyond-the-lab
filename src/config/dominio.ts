@@ -246,11 +246,13 @@ export const LISTA_SQL = {
 // O QUE NÃO ESTÁ AQUI, E POR QUÊ
 //
 // `payment_choice` ('agora' / 'depois') era o quinto domínio deste
-// formulário e não migra para cá — ele morre no `c25` (D-11). O campo
-// perguntava "quer pagar agora?" numa tela onde pagar era logicamente
-// impossível, e os dois valores gravavam igual. Trazer os rótulos dele
-// para a fonte única seria dar sobrevida a um domínio que a refatoração
-// existe para remover.
+// formulário e nunca migrou para cá — a pergunta morreu no `c25` (D-11).
+// O campo perguntava "quer pagar agora?" numa tela onde pagar era
+// logicamente impossível, e os dois valores gravavam igual. Trazer os
+// rótulos dele para a fonte única teria dado sobrevida a um domínio que a
+// refatoração existe para remover, e a espera provou o ponto: o Zod, a
+// modal e os dois formatos do e-mail perderam o campo sem que nada aqui
+// precisasse mudar.
 //
 // `status` da inscrição também não está aqui. Ele não é vocabulário de
 // formulário: é máquina de estados, o cliente nunca o escolhe, e quem o

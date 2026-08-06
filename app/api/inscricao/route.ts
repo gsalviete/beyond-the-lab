@@ -164,16 +164,25 @@ export async function POST(req: Request) {
   // Só estes campos são desestruturados, e a lista é a fronteira: nada do
   // corpo do POST chega ao banco sem passar por um nome escrito aqui.
   //
-  // ⚠️ `payment_choice` NÃO ESTÁ NA LISTA (D-11), e não é esquecimento.
-  // O schema ainda o aceita e a modal ainda o envia — os dois só saem no
-  // `c25`, junto com a pergunta na tela —, mas a coluna não existe mais e
-  // `criar_inscricao` não tem parâmetro para ele. Ele morre exatamente
-  // aqui: é lido do corpo por ninguém e não chega ao banco por caminho
-  // nenhum. O campo perguntava "quer pagar agora?" numa tela onde pagar
-  // era logicamente impossível, e os dois valores gravavam igual — não
-  // era bug de implementação, era o modelo avisando que a etapa não
-  // existia. A partir do `c35` a ramificação passa a ser
-  // `safra aberta ? checkout : lista de espera`, decidida no servidor.
+  // ⚠️ `payment_choice` NÃO APARECE MAIS AQUI PORQUE NÃO EXISTE MAIS EM
+  // LUGAR NENHUM DO FLUXO (D-11). O corte que o descartava saiu junto.
+  //
+  // Enquanto o Zod ainda exigia o campo, esta lista era o ponto exato onde
+  // ele morria — chegava no corpo, era desestruturado por ninguém e não
+  // seguia adiante. Agora ele não chega: o schema (`src/config/schemas.ts`)
+  // deixou de aceitá-lo e a modal deixou de enviá-lo. Descartar aqui
+  // sugeriria que ainda há algo a descartar.
+  //
+  // O porquê da remoção fica registrado no `schemas.ts`, no lugar de onde
+  // a pergunta saiu — em resumo: a escolha era oferecida numa tela sem
+  // checkout, os dois valores gravavam igual, e a intenção passa a ser
+  // exercida no pagamento em vez de declarada num formulário (D-02).
+  //
+  // ⚠️ UM POST ANTIGO QUE AINDA MANDE O CAMPO NÃO É RECUSADO. Este
+  // `z.object` não tem `.passthrough()`, então a chave desconhecida é
+  // descartada no parse e nunca chega até aqui. A aba aberta há meia hora
+  // com o bundle velho continua conseguindo se inscrever, que é o que o
+  // "nenhum passo derruba o formulário" exige.
   //
   // ⚠️ `consent_at` e `consent_text` também não estão, e por um motivo
   // mais forte: eles NASCEM NO SERVIDOR. Se um POST forjado os mandar, o
@@ -381,14 +390,16 @@ export async function POST(req: Request) {
       curso,
       periodo,
       disponibilidade,
-      // ⚠️ `payment_choice` ainda é exigido por `InscricaoEmail` e some
-      // no `c25`, junto com a pergunta na modal e o rótulo em
-      // `email.ts`. Aqui ele é uma CONSTANTE derivada do estado da
-      // safra, não o que o cliente mandou: o valor do payload foi
-      // descartado no corte de fronteira lá em cima, e o e-mail da
-      // Giovana continua imprimindo a linha "Pagamento" enquanto o campo
-      // existir. Nada disto chega ao banco por caminho nenhum (D-11).
-      payment_choice: (safraAberta ? 'agora' : 'depois') as 'agora' | 'depois',
+      // ⚠️ AQUI HAVIA `payment_choice`, uma constante derivada de
+      // `safraAberta` que existia só para satisfazer `InscricaoEmail` e
+      // alimentar a linha "Pagamento" do e-mail da Giovana. As duas
+      // saíram (D-11): o tipo não tem mais o campo e o e-mail não tem
+      // mais a linha, em nenhum dos dois formatos.
+      //
+      // A linha não virou "—" nem "(não perguntado)". O e-mail é
+      // operacional e a linha "Turma" já diz o que a Giovana precisa
+      // saber — safra com vaga ou lista de espera. Ver o bloco no lugar
+      // do antigo `ROTULO_PAGAMENTO`, em `src/lib/email.ts`.
     }
 
     after(async () => {

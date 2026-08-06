@@ -44,7 +44,6 @@ const VALIDO = {
   name: 'Maria Silva',
   email: 'maria@exemplo.com',
   phone: '+5521987654321',
-  payment_choice: 'depois',
   nivel_ingles: 'basico',
   curso: 'Biomedicina',
   periodo: '1º ao 3º',
@@ -232,6 +231,34 @@ describe('honeypot', () => {
   })
 })
 
+describe('payment_choice — a pergunta que morreu (D-11)', () => {
+  // Este bloco substituiu o caso `['payment_choice', { payment_choice:
+  // 'talvez' }]` da tabela de mensagens genéricas, que só fazia sentido
+  // enquanto o schema EXIGIA o campo e um valor fora do enum reprovava.
+  //
+  // O que precisa ser garantido agora é o oposto, e são duas coisas
+  // distintas — por isso duas asserções e não uma:
+  //
+  //   1. Um payload SEM o campo passa. É o que a modal manda desde o
+  //      `c25`; se o Zod voltasse a exigi-lo, todo POST daria 400.
+  //   2. Um payload COM o campo passa E o valor não atravessa. É a aba
+  //      aberta há meia hora com o bundle velho: ela continua conseguindo
+  //      se inscrever, e o campo morto não chega ao outro lado do parse.
+  //
+  // A segunda depende de o `z.object` não ter `.passthrough()`. Se alguém
+  // acrescentar um, este teste é quem avisa — e o que estaria vazando não
+  // é só este campo, é qualquer chave que um POST forjado inventar.
+  it('não é exigido — o payload válido não o tem', () => {
+    expect(inscricaoSchema.safeParse(VALIDO).success).toBe(true)
+  })
+
+  it('não é aceito — se vier, é descartado no parse', () => {
+    const r = com({ payment_choice: 'agora' })
+    expect(r.success).toBe(true)
+    expect(r.success && 'payment_choice' in r.data).toBe(false)
+  })
+})
+
 // ============================================================
 // 4. A MENSAGEM DE ERRO — genérica por segurança
 //
@@ -260,7 +287,6 @@ describe('mensagem de erro', () => {
     ['curso', { curso: '' }],
     ['periodo', { periodo: '' }],
     ['nivel_ingles', { nivel_ingles: 'z' }],
-    ['payment_choice', { payment_choice: 'talvez' }],
   ])('genérica para %s — formato não é coisa que se revele', (_c, patch) => {
     expect(msg(patch)).toBe(ERRO_GENERICO)
   })
