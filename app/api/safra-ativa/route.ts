@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  * a contagem crua de inscritas.
  *
  * O `id` existe no objeto que `buscarSafraAtiva` devolve, porque
- * `/api/waitlist` precisa dele para gravar a FK — mas é um identificador
+ * `/api/inscricao` precisa dele para gravar a FK — mas é um identificador
  * interno, e não há uma única coisa que a modal faça com ele. As
  * `inscritas` existem lá porque o painel da Giovana vai precisar delas
  * (`c36`), e são operação: quantas pessoas já entraram é conta dela, não
@@ -50,7 +50,7 @@ type SafraPublica = {
    * inscrição; `false` = lista de espera. Quem lê este campo para
    * decidir o que desenhar está certo; quem o ler para decidir o que
    * GRAVAR está errado — essa pergunta é refeita ao banco no POST, ver
-   * `app/api/waitlist/route.ts`.
+   * `app/api/inscricao/route.ts`.
    */
   inscricoes_abertas: boolean
   /**

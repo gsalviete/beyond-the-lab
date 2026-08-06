@@ -15,7 +15,7 @@
 // importam:
 //
 //   - `src/components/InscricaoModal.jsx` (client) — EXIBE
-//   - `app/api/waitlist/route.ts`         (server) — GRAVA
+//   - `app/api/inscricao/route.ts`        (server) — GRAVA
 //
 // Não é `src/config/curso.ts` porque aquilo é dado do curso, que varia
 // por safra; isto é texto legal, que varia por revisão jurídica. E não é

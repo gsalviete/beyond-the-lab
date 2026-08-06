@@ -43,9 +43,9 @@ const REMETENTE_NOME = 'Beyond The Lab'
 /**
  * Os dados da inscrição que os e-mails precisam ver.
  *
- * É de propósito um tipo próprio, e não o parâmetro de `insertWaitlistEntry`:
- * o e-mail não tem nada que fazer com `consent_text`, `consent_at` ou
- * `turma_id`. O que não é preciso para escrever a mensagem não entra aqui.
+ * É de propósito um tipo próprio, e não o parâmetro de `criarInscricao`: o
+ * e-mail não tem nada que fazer com `consent_text`, `consent_at` ou
+ * `safra_id`. O que não é preciso para escrever a mensagem não entra aqui.
  */
 export type InscricaoEmail = {
   name: string

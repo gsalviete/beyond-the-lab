@@ -258,7 +258,21 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      criar_inscricao: {
+        Args: {
+          p_consent_at: string
+          p_consent_text: string
+          p_curso: string
+          p_disponibilidade: string[]
+          p_email: string
+          p_nivel_ingles: string
+          p_nome: string
+          p_periodo: string
+          p_safra_id?: string
+          p_telefone: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

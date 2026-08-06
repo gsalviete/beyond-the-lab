@@ -5,8 +5,8 @@ import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
 import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
 // A frase do consentimento saiu daqui para um módulo próprio. Não foi
-// arrumação: `/api/waitlist` grava esta mesma constante em
-// `waitlist.consent_text`, e duas cópias divergiriam sem ninguém notar —
+// arrumação: `/api/inscricao` grava esta mesma constante em
+// `inscricoes.consent_text`, e duas cópias divergiriam sem ninguém notar —
 // a partir dali o banco guardaria a prova de um texto que a tela não
 // mostra mais. Ver o cabeçalho de `src/config/consentimento.ts`.
 import { CONSENT_SEGMENTS } from '@/config/consentimento'
@@ -284,13 +284,24 @@ export default function InscricaoModal({ onFechar }) {
     const email = String(dados.get('email') ?? '').trim()
     const website = String(dados.get('website') ?? '')
 
-    // Sem turma aberta não há escolha de pagamento para fazer — não existe
-    // cobrança a adiantar. O servidor descarta este campo nesse caso de
-    // qualquer jeito; mandamos 'depois' para o corpo dizer a verdade.
+    // ⚠️ ESTE CAMPO ESTÁ MORTO E AINDA VIAJA — some no `c25` (D-11).
     //
-    // Com turma aberta sobrou um botão só, então é sempre 'agora'. O campo
-    // continua no corpo porque a coluna `payment_choice` existe, o schema da
-    // rota a exige, e é ela que o B2 lê para ordenar a fila de cobrança.
+    // A coluna `payment_choice` não existe mais: ela não foi migrada para
+    // o modelo novo, e `/api/inscricao` a descarta no corte de fronteira
+    // do payload. Nada do que for enviado aqui chega ao banco por caminho
+    // nenhum.
+    //
+    // Ele continua no corpo por um motivo só: o Zod da rota ainda o exige
+    // (`src/config/schemas.ts`), e removê-lo daqui antes de lá faria todo
+    // POST ser recusado com 400. Os dois saem juntos no `c25`, junto com a
+    // pergunta na tela e o rótulo em `email.ts`.
+    //
+    // O valor continua sendo derivado do estado da safra — 'agora' com
+    // inscrições abertas, 'depois' sem — porque enquanto o campo existir
+    // ele tem que dizer a verdade sobre o que a pessoa podia escolher. Sem
+    // safra aberta não havia escolha de pagamento a fazer: não existia
+    // cobrança para adiantar. Era o modelo avisando que a etapa não
+    // existia, que é exatamente o diagnóstico da D-11.
     const escolha = inscricaoAberta ? 'agora' : 'depois'
 
     // Validação client-side: só para retorno imediato. A que vale é a do
@@ -345,7 +356,7 @@ export default function InscricaoModal({ onFechar }) {
     setErro('')
 
     try {
-      const res = await fetch('/api/waitlist', {
+      const res = await fetch('/api/inscricao', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -362,6 +373,35 @@ export default function InscricaoModal({ onFechar }) {
         }),
       })
       const body = await res.json().catch(() => null)
+
+      // ------------------------------------------------------------
+      // DUPLICATA — 200, `ok: true`, e mesmo assim NÃO é a tela de sucesso.
+      //
+      // ⚠️ Esta ramificação tem que vir ANTES do sucesso, e a ordem é o
+      // comportamento inteiro: `duplicada` chega junto com `ok: true`
+      // (a pessoa está cadastrada, ninguém errou nada), então um
+      // `if (body?.ok)` sozinho a mandaria para "Inscrição confirmada!".
+      //
+      // E é justamente essa tela que não pode aparecer. Ela promete
+      // "sua vaga está reservada" e, quando houver checkout, promete
+      // preço e desconto junto — para alguém que se cadastrou de novo
+      // achando que estava garantindo alguma coisa. A resposta de
+      // duplicata deixou de ser idêntica à de sucesso exatamente para
+      // que esta tela não minta. O raciocínio inteiro, com o que foi
+      // aceito em troca, está no bloco DUPLICATA de
+      // `app/api/inscricao/route.ts`.
+      //
+      // A mensagem vai no mesmo `aria-live` das mensagens de validação,
+      // e o formulário continua preenchido e utilizável — quem digitou
+      // o e-mail errado corrige uma letra e reenvia, sem redigitar tudo.
+      // Ela vem do servidor e não é montada aqui: o texto que a pessoa
+      // lê é o mesmo que a rota decidiu poder dizer.
+      // ------------------------------------------------------------
+      if (res.ok && body?.duplicada) {
+        setStatus('idle')
+        setErro(body.message ?? 'Este e-mail já tem cadastro.')
+        return
+      }
 
       if (res.ok && body?.ok) {
         // TODO: Prompt B2 — 'agora' redireciona para o Stripe Checkout.

@@ -41,14 +41,32 @@ import type { Database, Tables } from '@/lib/database.types'
 const SUPABASE_URL = process.env.SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-/**
- * Código de erro do Postgres para violação de constraint unique.
- *
- * Antes era lido do corpo JSON que o PostgREST devolvia; agora vem em
- * `error.code`. É o mesmo código do banco pelos dois caminhos — e é ele
- * que produz o caminho de duplicata da rota de inscrição.
- */
-export const UNIQUE_VIOLATION = '23505'
+// ============================================================
+// O `23505` SAIU DAQUI, E O QUE ELE SIGNIFICAVA MIGROU PARA A RPC
+// ============================================================
+//
+// Havia aqui uma constante `UNIQUE_VIOLATION = '23505'` — o código de
+// erro do Postgres para violação de unique — com a nota de que ela era
+// "o que produz o caminho de duplicata da rota de inscrição". Era
+// verdade: o insert em `waitlist` esbarrava em `waitlist_email_lower_key`,
+// o SDK devolvia `error.code = '23505'`, e a rota traduzia isso em
+// "duplicata".
+//
+// ⚠️ ESSE CÓDIGO NÃO CHEGA MAIS AQUI, E A AUSÊNCIA DELE É DESENHO, NÃO
+// PERDA. A `criar_inscricao` (migração `011b`) trata o conflito DENTRO da
+// transação, com `on conflict do nothing`. O `23505` nem chega a ser
+// levantado: o comando absorve o conflito e a função devolve `false`.
+//
+// A diferença que importa: antes, "duplicata" era um ERRO reconhecido
+// pelo código; agora é um VALOR DE RETORNO. Um erro tinha que ser
+// distinguido de todos os outros erros por um número mágico, e qualquer
+// outra unique que aparecesse no futuro passaria a ser lida como
+// duplicata sem ninguém decidir isso. Um booleano não tem essa ambiguidade.
+//
+// Se um `23505` voltar a aparecer nesta camada, ele NÃO é duplicata: é
+// alguma outra constraint sendo violada, e o lugar de descobrir qual é o
+// log — não um `if` que o transforme em sucesso.
+// ============================================================
 
 export class SupabaseNotConfiguredError extends Error {
   constructor() {
@@ -56,11 +74,6 @@ export class SupabaseNotConfiguredError extends Error {
     this.name = 'SupabaseNotConfiguredError'
   }
 }
-
-export type InsertResult =
-  | { ok: true }
-  | { ok: false; duplicate: true }
-  | { ok: false; duplicate: false; status: number; detail: string }
 
 /**
  * Domínio da inscrição — reexportado, não redeclarado.
@@ -318,85 +331,179 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
 }
 
 /**
- * Insere uma linha na `waitlist`.
+ * O que a escrita da inscrição devolve.
  *
- * A service_role key ignora RLS — é justamente por isso que a tabela pode
- * ficar sem nenhuma policy. Ver o comentário no SQL do schema.
+ * `criada` é o booleano da RPC: `true` = inscrição nova, `false` = essa
+ * pessoa já tem inscrição nesta safra.
+ *
+ * ⚠️ `criada: false` NÃO É FALHA, e é por isso que ele mora dentro do
+ * ramo `ok: true`. A união anterior tinha `{ ok: false; duplicate: true }`
+ * — duplicata como uma espécie de erro —, e aquilo era herança de o
+ * mecanismo ser uma unique violation. Com a RPC, "já existia" é uma
+ * resposta que a função dá de propósito, e colapsá-la de novo em erro
+ * faria a rota degradar (e responder 500) para alguém cujo cadastro está
+ * perfeitamente gravado no banco.
  */
-export async function insertWaitlistEntry(entry: {
-  name: string
+export type ResultadoInscricao =
+  | { ok: true; criada: boolean }
+  | { ok: false; status: number; detail: string }
+
+/**
+ * Cria a inscrição: pessoa + inscrição, numa transação só.
+ *
+ * ============================================================
+ * POR QUE UMA RPC E NÃO DOIS `.insert()`
+ * ============================================================
+ *
+ * O consentimento mora em `inscricoes`; `pessoas` guarda só contato. Um
+ * insert de `pessoas` que passa seguido de um insert de `inscricoes` que
+ * falha deixaria nome, e-mail e telefone de gente real gravados COM ZERO
+ * REGISTRO DE CONSENTIMENTO — sob LGPD não é linha órfã, é o requisito
+ * probatório quebrado.
+ *
+ * E não há como costurar isso daqui: o PostgREST expõe uma requisição
+ * HTTP por comando, duas requisições são duas transações, e não existe
+ * `begin` do lado do SDK. A transação só pode existir dentro do banco. O
+ * raciocínio inteiro, com os contraexemplos, está no cabeçalho de
+ * `supabase/migrations/011b_rpc_criar_inscricao.sql` — este comentário é
+ * o ponteiro, aquele arquivo é a fonte.
+ *
+ * ============================================================
+ * ⚠️ `.rpc()` CASA PARÂMETRO POR NOME
+ * ============================================================
+ *
+ * Os dez nomes abaixo são a assinatura da função no banco, não uma
+ * convenção nossa. Errar um deles é erro em tempo de execução — o
+ * PostgREST responde "function not found" porque a assinatura não bate —,
+ * e é o tipo de erro que só aparece quando alguém real se inscreve.
+ * Renomear um parâmetro no SQL é mudar este objeto junto, no mesmo commit.
+ *
+ * ============================================================
+ * O QUE **NÃO** É PARÂMETRO, E NÃO É ESQUECIMENTO
+ * ============================================================
+ *
+ *   `status`  — DERIVADO de `p_safra_id` dentro da função. O CHECK da
+ *     `009` amarra `safra_id is null` ⟺ `status = 'lista_espera'`, e um
+ *     par incoerente é recusado pelo banco de qualquer jeito. Mandar
+ *     `status` daqui só criaria uma forma de a chamada estar errada. Não
+ *     existe `aprovada` nem `rejeitada` (D-02).
+ *
+ *   `consent` — a função grava `true` fixo. Ela não aceita um parâmetro
+ *     capaz de pedir `false`, que seria "a pessoa recusou e entrou assim
+ *     mesmo". `consent_at` e `consent_text` SÃO parâmetros porque nascem
+ *     no servidor um passo antes — ver o comentário deles abaixo.
+ *
+ *   `grupo_id` — alocação é ato da Giovana no painel, ortogonal ao status
+ *     (D-03). Uma inscrição nasce sem horário, sempre.
+ *
+ *   `payment_choice` — morreu (D-11). Não é parâmetro, não tem coluna, e
+ *     não chega aqui: quem o corta é a rota, na fronteira.
+ *
+ * ============================================================
+ * O QUE ELA DEVOLVE: UM BOOLEANO. SÓ.
+ * ============================================================
+ *
+ * Nenhum dado pessoal atravessa de volta — nem id de pessoa, nem id de
+ * inscrição, nem nome, nem status, nem contagem. É o mesmo corte de
+ * fronteira do resto do projeto (REPORT §9.6), aplicado à RPC.
+ *
+ * É também o que o `Prefer: return=minimal` fazia no insert que existia
+ * aqui antes, e vale registrar como o mecanismo mudou: aquele efeito não
+ * vinha de um cabeçalho nosso, vinha do **default do PostgREST** para um
+ * POST sem `Prefer` — bastava encadear `.select()` para a linha inteira
+ * voltar. Encadear por reflexo, "porque é assim que se faz", desfazia o
+ * corte em silêncio. Agora o corte está do lado de lá, escrito no
+ * `returns boolean` da função, e nem um `.select()` distraído o desfaz.
+ *
+ * A service_role key ignora RLS — é por isso que `pessoas` e `inscricoes`
+ * podem ficar com RLS ligada e ZERO policies, e é por isso que a função
+ * é `security invoker` com `execute` revogado de `anon`: as duas trancas
+ * estão documentadas na seção 4 da `011b`.
+ */
+export async function criarInscricao(dados: {
+  nome: string
   email: string
   /** E.164, já normalizado pela rota — ver `src/lib/telefone.ts`. */
-  phone: string
-  payment_choice: 'agora' | 'depois'
-  /**
-   * Turma da inscrição, ou `null` para lista de espera. Anda sempre em
-   * par com o `status` abaixo — quem monta o par é a rota, olhando o
-   * banco e não o que o cliente afirmou.
-   */
-  turma_id: string | null
-  /**
-   * `pendente` = inscrita numa turma aberta.
-   * `lista_espera` = cadastro feito sem turma aberta.
-   * Os outros estados do CHECK são do Stripe, no corte 2.
-   */
-  status: 'pendente' | 'lista_espera'
+  telefone: string
   nivel_ingles: NivelIngles
   curso: string
   periodo: string
   disponibilidade: DiaDaSemana[]
   /**
-   * Registro probatório do consentimento — os três andam juntos e não
-   * fazem sentido separados. Ver `supabase/migrations/003_consentimento.sql`.
+   * Registro probatório do consentimento. Os dois andam juntos com o
+   * `consent = true` que a função grava, e não fazem sentido separados —
+   * o CHECK `inscricoes_consentimento_obrigatorio_check` (migração `010`)
+   * recusa a linha se algum faltar.
    *
-   * `consent_text` é a constante do servidor, não o que o cliente
-   * enviou: quem monta este objeto é `/api/waitlist`, que importa
-   * `CONSENT_TEXT` de `src/config/consentimento.ts`. O corpo do POST
-   * não tem voz sobre este campo.
+   * ⚠️ NENHUM DOS DOIS VEM DO CLIENTE, e a assimetria é o ponto: o
+   * navegador é a única fonte possível para o ATO de marcar a caixa, e é
+   * a pior fonte imaginável para a hora do relógio e para a redação
+   * exibida. Um POST forjado poderia declarar que aceitou um texto que
+   * nunca existiu, com data conveniente. Quem monta este objeto é
+   * `/api/inscricao`, que carimba a hora e importa `CONSENT_TEXT` de
+   * `src/config/consentimento.ts` — o mesmo módulo que a modal usa para
+   * exibir a frase (REPORT §9.7). O corpo do POST não tem voz aqui.
    */
-  consent: boolean
-  /** ISO 8601 gerado no servidor no momento em que o consentimento foi validado. */
   consent_at: string
   consent_text: string
-}): Promise<InsertResult> {
-  // `.insert(...)` SEM `.select()` encadeado ocupa o lugar do
-  // `Prefer: return=minimal` que estava escrito à mão aqui antes.
-  //
-  // Mecanismo diferente, efeito idêntico, e a diferença vale registrar:
-  // o SDK não manda `Prefer` nenhum nesse caso — quem não devolve a linha
-  // é o **default do PostgREST** para um POST sem esse cabeçalho.
-  // Verificado com um `fetch` espião: a requisição sai sem `Prefer`, e
-  // basta encadear `.select()` para ela virar `Prefer: return=representation`
-  // e o corpo voltar com a linha inteira.
-  //
-  // Continua sendo o que queremos: não precisamos da linha gravada e não
-  // há motivo para trafegar dado pessoal de volta. Encadear `.select()`
-  // por reflexo — porque "é assim que se faz" — desfaria isso em silêncio.
-  //
-  // ⚠️ waitlist → pessoas + inscricoes: a tabela foi migrada pelas
-  // migrações 010/011 (o que sobrou virou `waitlist_legado`, que é
-  // arquivo morto e não recebe linha nova) e esta rota inteira é
-  // reescrita no c21. Silenciado aqui de propósito para o c18b poder
-  // compilar. REMOVER no c21.
-  //
-  // O `@ts-expect-error` cobre só a ausência da tabela. O corpo `entry`
-  // continua com a forma antiga — `name`/`phone`/`turma_id`/
-  // `payment_choice` —, e nenhum desses campos sobrevive ao modelo novo
-  // (`payment_choice` morre pela D-11, o resto se divide entre `pessoas`
-  // e `inscricoes`). Traduzir o payload aqui seria fazer o c21 pela
-  // metade e sem os testes do c26.
-  // @ts-expect-error a tabela `waitlist` não existe mais no schema gerado
-  const { error, status } = await supabase().from('waitlist').insert(entry)
+  /**
+   * Safra da inscrição, ou `null` para lista de espera.
+   *
+   * Quem decide é a rota, olhando o banco e não o que o cliente afirmou —
+   * e a decisão é `inscricoes_abertas`, não "veio safra". Pela D-13
+   * `buscarSafraAtiva` devolve a safra de vitrine SEMPRE, aberta ou não,
+   * então "veio safra" deixou de significar "dá para comprar".
+   *
+   * `null` aqui é o que faz a função escrever `lista_espera`. Os dois
+   * andam juntos ou o insert é recusado pelo CHECK da `009`.
+   */
+  safra_id: string | null
+}): Promise<ResultadoInscricao> {
+  const { data, error, status } = await supabase().rpc('criar_inscricao', {
+    p_nome: dados.nome,
+    p_email: dados.email,
+    p_telefone: dados.telefone,
+    p_nivel_ingles: dados.nivel_ingles,
+    p_curso: dados.curso,
+    p_periodo: dados.periodo,
+    p_disponibilidade: dados.disponibilidade,
+    p_consent_at: dados.consent_at,
+    p_consent_text: dados.consent_text,
+    p_safra_id: dados.safra_id,
+  })
 
-  if (!error) return { ok: true }
+  if (error) {
+    // `detail` só existe para o log do servidor. Ele não é ecoado ao
+    // cliente em nenhum caminho — a rota responde mensagem genérica.
+    const detail = [error.code, error.message, error.details, error.hint]
+      .filter(Boolean)
+      .join(' · ')
 
-  if (error.code === UNIQUE_VIOLATION) return { ok: false, duplicate: true }
+    return { ok: false, status, detail }
+  }
 
-  // `detail` só existe para o log do servidor. Ele não é ecoado ao
-  // cliente em nenhum caminho — a rota responde mensagem genérica.
-  const detail = [error.code, error.message, error.details, error.hint]
-    .filter(Boolean)
-    .join(' · ')
+  // ⚠️ `data` não-booleano é FALHA, e não "provavelmente deu certo".
+  //
+  // A função declara `returns boolean` e sempre devolve um. Um `null`
+  // aqui significa que a resposta não tem a forma que a assinatura
+  // promete — schema divergente, função substituída, PostgREST devolvendo
+  // outra coisa — e é exatamente a classe de incidente da migração `004`:
+  // o banco andou, a aplicação não, e nada reclamou.
+  //
+  // Assumir `true` faria a rota mandar e-mail de confirmação por uma
+  // inscrição que talvez não exista. Assumir `false` diria "você já está
+  // cadastrada" para quem não está. As duas mentem; só o erro não mente.
+  //
+  // Se a linha TIVER sido gravada, o custo é a pessoa ver "tente de novo"
+  // e tentar — e a segunda tentativa cai no caminho de duplicata, que
+  // responde a verdade. É o desfecho menos ruim dos três.
+  if (typeof data !== 'boolean') {
+    return {
+      ok: false,
+      status,
+      detail: `criar_inscricao devolveu ${data === null ? 'null' : typeof data}, esperado boolean`,
+    }
+  }
 
-  return { ok: false, duplicate: false, status, detail }
+  return { ok: true, criada: data }
 }

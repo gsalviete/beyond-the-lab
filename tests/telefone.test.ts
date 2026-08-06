@@ -4,7 +4,7 @@
 // Este é o teste de maior retorno do corte, e o motivo está na D7 do
 // `REPORT.md`: `src/lib/telefone.ts` é o único módulo do projeto que roda
 // no navegador E no servidor, a partir do mesmo arquivo. A modal mascara
-// com ele; `/api/waitlist` valida com ele.
+// com ele; `/api/inscricao` valida com ele.
 //
 // O que a D7 protege é concreto: **se a máscara aceitar o que o servidor
 // recusa, a pessoa preenche o formulário inteiro e só descobre no fim.**
