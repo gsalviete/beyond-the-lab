@@ -24,6 +24,39 @@ errado.
 
 # Corte 1 — Fundação
 
+## ⛔ PRÉ-REQUISITO DO `c17`: staging de DADOS
+
+**O `c17` não roda sem um segundo projeto Supabase, com o dump de
+produção restaurado nele.** Não é recomendação. É condição de partida, e
+sem ela o passo não começa.
+
+O que **não** conta como staging de dados:
+
+- branch `staging` no git;
+- deploy de Preview na Vercel.
+
+Os dois isolam **código**. O `README.md` manda marcar `SUPABASE_URL` e
+`SUPABASE_SERVICE_ROLE_KEY` para *Production, Preview e Development* — o
+mesmo banco nos três. Com essa configuração, uma Preview da `staging`
+escreve na tabela onde estão as pessoas reais da lista de espera, e
+"rodei em staging primeiro" não significa nada.
+
+Checklist, todo ele antes do `c17`:
+
+1. Dump de produção feito e guardado **fora do repositório**.
+2. Segundo projeto Supabase criado, com o dump restaurado.
+3. Variáveis de *Preview* na Vercel apontando para o projeto novo, e
+   **conferidas** — não basta ter criado, tem que estar apontando.
+4. `005`–`009` rodadas lá primeiro, inclusive as aditivas.
+
+*Por que também as aditivas:* um `ALTER` do qual se precise voltar atrás
+é mais barato de descobrir no banco de mentira. `add column` é fácil de
+reverter; `rename` de tabela com FK apontando para ela, menos.
+
+*Por que isto está escrito aqui e não numa conversa:* daqui a três
+semanas ninguém lembra da conversa, e o `c17` continua sendo o passo que
+lê e reescreve dado de gente real.
+
 ### Preparação
 ```
 c01  chore(docs): adiciona docs/ com decisões e modelo da refatoração
@@ -61,12 +94,89 @@ c11  test(consentimento): CONSENT_TEXT deriva dos segmentos
 
 ### Schema novo
 ```
+c11b feat(db): 000 — schema inicial extraído de produção + seed de staging
+```
+> `c11b` fecha a 8.3 do REPORT no objeto onde ela mais doía: **a tabela
+> `waitlist` nunca foi criada por arquivo nenhum.** O `001` já a encontra
+> existindo e só acrescenta colunas. Ficaram meses em produção sem SQL
+> versionado: `id`, `email`, `name`, `created_at`, `waitlist_pkey`,
+> `waitlist_created_at_idx` e — o que mais importa —
+> `waitlist_email_lower_key`, um **unique funcional sobre `lower(email)`**.
+> É a constraint que levanta o `23505` de onde nasce a resposta de
+> duplicata, o comportamento mais deliberado do sistema, e ela não estava
+> escrita em lugar nenhum.
+>
+> **Não houve drift no `waitlist_status_check`.** O `001` lista cinco
+> valores e o `002` faz `drop constraint` e recria com os seis, incluindo
+> `lista_espera`. Repositório e banco concordam.
+>
+> **O seed vem ANTES dos três `NOT VALID` da `004`,** e é a mesma pegada
+> do `c16` um nível acima: as linhas que reproduzem o passivo real
+> (`consent` nulo, perfil nulo, par turma/status incoerente) violam esses
+> CHECKs, e `NOT VALID` só dispensa linha existente — nunca `INSERT`
+> novo. Seed antes, constraint depois. Se staging entrar limpo, o `c17`
+> passa lá e falha em produção.
+>
+> O arquivo **nunca roda em produção**, e isso é mecânico: a seção 0
+> aborta a transação se `waitlist` já tiver qualquer linha.
+```
 c12  feat(db): 005 — renomeia turmas → safras, adiciona
                      vagas_total, stripe_price_id
 c13  feat(db): 006 — cria grupos
 c14  feat(db): 007 — cria pessoas
 c15  feat(db): 008 — cria inscricoes (sem dados)
 c16  feat(db): 009 — CHECKs NOT VALID + trigger grupo/safra coerentes
+```
+> **⚠️ Guarda de PL/pgSQL sobre tabela que pode não existir precisa de
+> `execute`.** A forma direta parece certa e quebra:
+>
+> ```sql
+> -- ERRO 42P01 num banco vazio, apesar do to_regclass e do curto-circuito
+> if to_regclass('public.x') is not null and exists (select 1 from public.x)
+> ```
+>
+> O PL/pgSQL prepara a condição do `if` como **um único comando SQL**, e
+> o parser resolve todos os nomes de relação antes de a expressão começar
+> a ser avaliada — o `and` nunca chega a curto-circuitar. `execute`
+> adia o parse para dentro do ramo que já confirmou a existência.
+>
+> Condição sobre catálogo (`pg_constraint`, `pg_class`) é sempre segura.
+> Auditado nas `000`–`009`: só a `000` tinha o caso. A `010` vai ter
+> vários — ela lê `waitlist` e escreve em três tabelas.
+>
+> No mesmo passe: guarda de índice usa `to_regclass('public.nome')`, não
+> `conname` solto. **`conname` não é único no banco** — nomes de
+> constraint são únicos por tabela.
+
+> **⚠️ Dois CHECKs saem do `c16` e entram no `c17`.** O de consentimento
+> tudo-ou-nada e o de perfil obrigatório. No `c16` eles fariam o `c17`
+> **falhar inteiro**.
+>
+> A intuição sobre `NOT VALID` erra exatamente aqui: ele dispensa a
+> varredura das linhas que **já estão** na tabela no instante do `ALTER`,
+> e não dispensa nada de um `INSERT` futuro. A base atual tem linhas com
+> `consent` nulo e ao menos uma com o perfil inteiro nulo — a do
+> incidente da `004` —, e o `c17` precisa trazê-las como estão.
+>
+> Ordem certa, dentro da transação única do `c17`:
+>
+> 1. `INSERT` das linhas herdadas — passam, sem CHECK no caminho;
+> 2. `ALTER TABLE ... ADD CONSTRAINT ... NOT VALID` — as recém-inseridas
+>    viram "linhas que já estavam" e são dispensadas;
+> 3. daí em diante, toda escrita nova é verificada.
+>
+> É a forma da `004` — obrigar sem falsificar o passado —, só que aqui o
+> "passado" nasce dentro da própria transação. A `009` verifica que os
+> dois CHECKs **não** estão presentes antes de o `c17` rodar.
+
+> **Teste que lê `.sql` como texto tira os comentários antes de
+> comparar.** As migrações deste projeto documentam **contraexemplos em
+> prosa** — o `002` termina com testes de barreira comentados
+> (`-- update ... set disponibilidade = array['sab']`) que mostram o que
+> o CHECK deve recusar. Um teste que varre o arquivo inteiro lê o
+> contraexemplo como se fosse regra. Descoberto no `c10`, e o `c16` cria
+> seis CHECKs novos — é onde volta a morder.
+```
 c17  feat(db): 010 — migra waitlist → pessoas + inscricoes (transacional)
 c18  feat(db): 011 — renomeia waitlist → waitlist_legado
 c18b refactor(supabase): tipos gerados do schema, remove tipos manuais

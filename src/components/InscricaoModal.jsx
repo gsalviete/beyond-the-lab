@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
-import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
+import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
 // A frase do consentimento saiu daqui para um módulo próprio. Não foi
-// arrumação: `/api/waitlist` grava esta mesma constante em
-// `waitlist.consent_text`, e duas cópias divergiriam sem ninguém notar —
+// arrumação: `/api/inscricao` grava esta mesma constante em
+// `inscricoes.consent_text`, e duas cópias divergiriam sem ninguém notar —
 // a partir dali o banco guardaria a prova de um texto que a tela não
 // mostra mais. Ver o cabeçalho de `src/config/consentimento.ts`.
 import { CONSENT_SEGMENTS } from '@/config/consentimento'
@@ -101,10 +101,18 @@ export default function InscricaoModal({ onFechar }) {
   const [status, setStatus] = useState('carregando')
   const [erro, setErro] = useState('')
 
-  // A turma aberta, ou null para lista de espera. É o que decide o MODO da
-  // modal, e é ortogonal ao `status` acima — continua valendo durante o
-  // envio e na tela de sucesso, que precisa da data de início das aulas.
-  const [turma, setTurma] = useState(null)
+  // A safra mais recente, ou null se não houver nenhuma. É ortogonal ao
+  // `status` acima — continua valendo durante o envio e na tela de
+  // sucesso, que precisa da data de início das aulas.
+  //
+  // ⚠️ NÃO é mais "a turma aberta". A rota passou a devolver a safra de
+  // vitrine sempre, aberta ou não (D-13), porque fechar as inscrições não
+  // pode apagar preço e data do site. Quem decide o MODO da modal agora é
+  // o campo `inscricoes_abertas`, logo abaixo — trocar `safra !== null`
+  // por ele foi obrigatório no c20: sem a troca, com as inscrições
+  // fechadas a modal prometeria "sua vaga está reservada" para todo
+  // mundo, que é a pior mentira que esta tela pode contar.
+  const [safra, setSafra] = useState(null)
 
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
@@ -136,7 +144,11 @@ export default function InscricaoModal({ onFechar }) {
   const carregando = status === 'carregando'
   const submitting = status === 'submitting'
   const sucesso = status === 'success'
-  const inscricaoAberta = turma !== null
+  // `=== true` e não coerção: `safra` pode ser null, e um corpo de
+  // resposta inesperado (ou uma versão antiga da rota em cache) não deve
+  // conseguir abrir o formulário de inscrição por acidente. Só o booleano
+  // verdadeiro, vindo do servidor, abre.
+  const inscricaoAberta = safra?.inscricoes_abertas === true
 
   // `onFechar` numa ref para o efeito de teclado poder rodar uma única vez
   // (array de dependências vazio) sem capturar uma versão velha da função.
@@ -148,7 +160,7 @@ export default function InscricaoModal({ onFechar }) {
   const pedirFechamento = useCallback(() => onFecharRef.current(), [])
 
   // ------------------------------------------------------------
-  // QUAL TURMA ESTÁ ABERTA
+  // QUAL É A SAFRA, E SE ELA ESTÁ ABERTA
   //
   // A modal só é montada quando abre (ver InscricaoProvider), então este
   // efeito de montagem É o "ao abrir" — não precisa de gatilho próprio.
@@ -165,16 +177,16 @@ export default function InscricaoModal({ onFechar }) {
   useEffect(() => {
     let cancelado = false
 
-    fetch('/api/turma-ativa', { cache: 'no-store' })
+    fetch('/api/safra-ativa', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((body) => {
         if (cancelado) return
-        setTurma(body?.turma ?? null)
+        setSafra(body?.safra ?? null)
         setStatus('idle')
       })
       .catch(() => {
         if (cancelado) return
-        setTurma(null)
+        setSafra(null)
         setStatus('idle')
       })
 
@@ -272,14 +284,33 @@ export default function InscricaoModal({ onFechar }) {
     const email = String(dados.get('email') ?? '').trim()
     const website = String(dados.get('website') ?? '')
 
-    // Sem turma aberta não há escolha de pagamento para fazer — não existe
-    // cobrança a adiantar. O servidor descarta este campo nesse caso de
-    // qualquer jeito; mandamos 'depois' para o corpo dizer a verdade.
+    // ------------------------------------------------------------
+    // ⚠️ AQUI HAVIA `const escolha = inscricaoAberta ? 'agora' : 'depois'`,
+    // O ÚLTIMO RESTO DA PERGUNTA `payment_choice`. Ela não volta (D-11).
     //
-    // Com turma aberta sobrou um botão só, então é sempre 'agora'. O campo
-    // continua no corpo porque a coluna `payment_choice` existe, o schema da
-    // rota a exige, e é ela que o B2 lê para ordenar a fila de cobrança.
-    const escolha = inscricaoAberta ? 'agora' : 'depois'
+    // O formulário chegou a oferecer a escolha na tela — "quer pagar agora
+    // ou depois?" —, e depois passou a derivá-la do estado da safra sem
+    // perguntar nada, porque a resposta nunca mudou o que era gravado. As
+    // duas versões tinham o mesmo defeito: pagar era logicamente
+    // impossível nesta tela. Não havia checkout, então "quero pagar agora"
+    // não cobrava nada de ninguém. Era preferência coletada e descartada —
+    // dado pessoal sem finalidade, o oposto do que a LGPD pede.
+    //
+    // A partir do `c35` quem paga é quem passa pelo checkout: a intenção
+    // deixa de ser declarada e passa a ser exercida (D-02). Quem decide o
+    // caminho é o servidor, relendo a safra no ato da escrita — nunca o
+    // corpo do POST (REPORT §9.1).
+    //
+    // ⚠️ NÃO REINTRODUZA A PERGUNTA COMO "MELHORIA DE UX". Ela só faz
+    // sentido no dia em que o sistema honrar as duas respostas; enquanto a
+    // resposta não mudar nada a jusante, perguntar é fazer a pessoa
+    // trabalhar para alimentar um campo que ninguém lê.
+    //
+    // O que a modal ainda deriva de `inscricaoAberta` é o RÓTULO do botão
+    // ("Garantir minha vaga" / "Quero ser avisada") e o aviso de cobrança
+    // logo abaixo dele. Isso é texto de tela e continua certo: descreve o
+    // que vai acontecer, não coleta resposta.
+    // ------------------------------------------------------------
 
     // Validação client-side: só para retorno imediato. A que vale é a do
     // servidor, que roda mesmo com o JS desligado ou adulterado.
@@ -333,14 +364,13 @@ export default function InscricaoModal({ onFechar }) {
     setErro('')
 
     try {
-      const res = await fetch('/api/waitlist', {
+      const res = await fetch('/api/inscricao', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
           email,
           phone: paraE164(telefone),
-          payment_choice: escolha,
           nivel_ingles: nivel,
           curso: cursoFinal,
           periodo: periodoFinal,
@@ -351,13 +381,49 @@ export default function InscricaoModal({ onFechar }) {
       })
       const body = await res.json().catch(() => null)
 
+      // ------------------------------------------------------------
+      // DUPLICATA — 200, `ok: true`, e mesmo assim NÃO é a tela de sucesso.
+      //
+      // ⚠️ Esta ramificação tem que vir ANTES do sucesso, e a ordem é o
+      // comportamento inteiro: `duplicada` chega junto com `ok: true`
+      // (a pessoa está cadastrada, ninguém errou nada), então um
+      // `if (body?.ok)` sozinho a mandaria para "Inscrição confirmada!".
+      //
+      // E é justamente essa tela que não pode aparecer. Ela promete
+      // "sua vaga está reservada" e, quando houver checkout, promete
+      // preço e desconto junto — para alguém que se cadastrou de novo
+      // achando que estava garantindo alguma coisa. A resposta de
+      // duplicata deixou de ser idêntica à de sucesso exatamente para
+      // que esta tela não minta. O raciocínio inteiro, com o que foi
+      // aceito em troca, está no bloco DUPLICATA de
+      // `app/api/inscricao/route.ts`.
+      //
+      // A mensagem vai no mesmo `aria-live` das mensagens de validação,
+      // e o formulário continua preenchido e utilizável — quem digitou
+      // o e-mail errado corrige uma letra e reenvia, sem redigitar tudo.
+      // Ela vem do servidor e não é montada aqui: o texto que a pessoa
+      // lê é o mesmo que a rota decidiu poder dizer.
+      // ------------------------------------------------------------
+      if (res.ok && body?.duplicada) {
+        setStatus('idle')
+        setErro(body.message ?? 'Este e-mail já tem cadastro.')
+        return
+      }
+
       if (res.ok && body?.ok) {
-        // TODO: Prompt B2 — 'agora' redireciona para o Stripe Checkout.
-        // A ramificação é exatamente aqui: com `escolha === 'agora'` E
-        // turma aberta, em vez de mostrar a tela de sucesso, o servidor
-        // devolve a URL da sessão de Checkout e este ponto faz
-        // `window.location.assign(body.url)`. 'depois' e lista de espera
-        // continuam caindo na tela de sucesso como agora.
+        // TODO: `c35` — o redirecionamento para o Stripe Checkout entra
+        // exatamente aqui.
+        //
+        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é mais "a pessoa
+        // escolheu pagar agora" — essa pergunta morreu (D-11). É o
+        // servidor que, tendo relido a safra no ato da escrita, devolve
+        // `{ modo: 'checkout', url }`; este ponto só obedece, com
+        // `window.location.assign(body.url)`. `{ modo: 'lista_espera' }`
+        // continua caindo na tela de sucesso como agora.
+        //
+        // A ramificação vive no servidor porque entre o GET que desenhou
+        // esta modal e este POST a Giovana pode ter fechado a safra
+        // (Fluxo 1). Um `if` daqui decidiria com informação velha.
         setStatus('success')
         return
       }
@@ -437,7 +503,13 @@ export default function InscricaoModal({ onFechar }) {
           <TelaDeSucesso
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
-            turma={turma}
+            inscricaoAberta={inscricaoAberta}
+            /* Sem `??` e sem default: `inscricaoAberta` só é `true` quando
+               `safra` existe (é `safra?.inscricoes_abertas === true`), e é
+               só nesse ramo que a tela de sucesso imprime a data. O `?.`
+               aqui existe para o ramo de lista de espera, onde `safra`
+               pode ser null e a data não é lida. */
+            dataInicioAulas={safra?.data_inicio_aulas}
             onFechar={pedirFechamento}
           />
         ) : (
@@ -902,12 +974,24 @@ function TelaDeCarregamento({ tituloId }) {
 // ============================================================
 // TELA DE SUCESSO — substitui o conteúdo, sem fechar a modal
 //
-// `turma` é null quando o cadastro foi para a lista de espera. Não é
-// detalhe de estilo: com turma há vaga reservada e data de início para
-// prometer; sem turma há só o compromisso de avisar. Prometer errado
-// aqui é a pior coisa que esta tela pode fazer.
+// `inscricaoAberta` é false quando o cadastro foi para a lista de espera.
+// Não é detalhe de estilo: com inscrição aberta há vaga reservada e data
+// de início para prometer; sem ela há só o compromisso de avisar.
+// Prometer errado aqui é a pior coisa que esta tela pode fazer.
+//
+// Antes esta tela recebia o objeto da turma e ramificava na existência
+// dele. Não dá mais: depois do c20 a safra existe mesmo com as inscrições
+// fechadas (D-13), e ramificar na existência colocaria "sua vaga está
+// reservada" na frente de quem entrou na lista de espera. A pergunta que
+// esta tela faz sempre foi booleana; agora ela recebe o booleano.
 // ============================================================
-function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
+//
+// `dataInicioAulas` é 'YYYY-MM-DD' cru, e só é lido no ramo de inscrição
+// aberta — ver a nota no call site. Sem default, pelo mesmo motivo do
+// `Hero`: um `'2026-09-01'` de reserva aqui seria o literal que este
+// passo remove, voltando invisível e ativado justo quando o dado real
+// faltasse.
+function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, onFechar }) {
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -922,11 +1006,11 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
         tabIndex={-1}
         className="mt-5 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]"
       >
-        {turma ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
+        {inscricaoAberta ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
       </h2>
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
-        {turma ? (
+        {inscricaoAberta ? (
           /* Três frases, três acontecimentos, nesta ordem: o que já é
              verdade, o que chega por e-mail e quando, e o que chega
              depois. O texto anterior dizia "enviamos os próximos passos"
@@ -945,15 +1029,26 @@ function TelaDeSucesso({ tituloId, tituloRef, turma, onFechar }) {
           <>
             Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
             início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
-            começam na{' '}
-            {/* ⚠️ Texto literal, não mais `turma.data_inicio_aulas`: a turma
-                começa na primeira semana de setembro, com o dia escolhido pela
-                aluna, e uma coluna `date` não representa isso. Mesma troca em
-                `email.ts`, para as duas superfícies dizerem a mesma coisa.
-                O import de `formatarDataPorExtenso`/`paraDataUTC` fica: volta a
-                ser usado quando a migração do campo por extenso for feita. */}
+            começam{' '}
+            {/* ⚠️ VOLTOU A SAIR DA `data_inicio_aulas`, e desta vez sem mentir.
+                O texto era o literal "primeira semana de setembro de 2026", e o
+                comentário que estava aqui explicava por quê: a turma começa num
+                dia escolhido pela aluna, e uma coluna `date` exibida seca não
+                representa isso. O diagnóstico estava certo — a solução é que
+                congelou a informação fora do banco, e virou a tensão 8.1 do
+                `REPORT.md`: a coluna dizia uma coisa e a tela dizia outra, para
+                sempre.
+
+                `formatarSemanaDeInicio` mantém o diagnóstico e desfaz o
+                congelamento (D-14): devolve "na primeira semana de setembro" a
+                partir da própria data, sem nunca imprimir o dia. O que era um
+                literal por falta de formatação virou uma formatação.
+
+                ⚠️ O `email.ts` ainda tem a frase literal, e é o `c24` que a
+                pega — as duas superfícies precisam dizer a mesma coisa, e a
+                função que garante isso é esta. */}
             <strong className="font-semibold text-ink">
-              primeira semana de setembro de 2026
+              {formatarSemanaDeInicio(dataInicioAulas)}
             </strong>
             , e é perto do início que você recebe o convite do grupo da turma no WhatsApp.
           </>

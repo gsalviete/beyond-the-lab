@@ -15,7 +15,7 @@
 // importam:
 //
 //   - `src/components/InscricaoModal.jsx` (client) — EXIBE
-//   - `app/api/waitlist/route.ts`         (server) — GRAVA
+//   - `app/api/inscricao/route.ts`        (server) — GRAVA
 //
 // Não é `src/config/curso.ts` porque aquilo é dado do curso, que varia
 // por safra; isto é texto legal, que varia por revisão jurídica. E não é
@@ -69,7 +69,7 @@ export const CONSENT_SEGMENTS: readonly SegmentoConsentimento[] = [
 /**
  * A frase exata ao lado da caixa de consentimento, em texto corrido.
  *
- * O servidor grava esta constante em `waitlist.consent_text` — e não o
+ * O servidor grava esta constante em `inscricoes.consent_text` — e não o
  * que o cliente enviar no corpo do POST. Um cliente pode afirmar
  * qualquer coisa; o que tem valor de prova é o texto que o servidor
  * sabe ter servido.

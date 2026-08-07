@@ -36,9 +36,36 @@ export const inscricaoSchema = z.object({
   // DDD e o nono dígito — a mesma função que a máscara usa, para os dois
   // lados não discordarem sobre o que é um celular válido.
   phone: z.string().trim().regex(E164_BR_REGEX).refine(e164EhValido),
-  // Morre no `c25` (D-11). Continua aqui porque a coluna existe e o
-  // insert a exige enquanto o schema do banco não muda.
-  payment_choice: z.enum(['agora', 'depois']),
+
+  // ------------------------------------------------------------
+  // ⚠️ AQUI HAVIA `payment_choice: z.enum(['agora', 'depois'])`, E ELE NÃO
+  // VOLTA (D-11).
+  //
+  // A pergunta era "quer pagar agora ou depois?", feita numa tela onde
+  // pagar era logicamente impossível: não havia checkout, e os dois
+  // valores gravavam exatamente a mesma linha. Quem respondia "quero pagar
+  // agora" não pagava nada. Era uma preferência coletada e descartada —
+  // dado pessoal guardado sem finalidade, que é precisamente o que a LGPD
+  // (art. 6º, I e III) manda não fazer. Não era bug de implementação: era
+  // o modelo avisando que a etapa de pagamento não existia.
+  //
+  // A partir do `c35` quem paga é quem passa pelo checkout, e a intenção
+  // deixa de ser DECLARADA para ser EXERCIDA — pagar é o que faz alguém
+  // entrar (D-02). A ramificação vira `safra aberta ? checkout : lista de
+  // espera`, decidida no servidor lendo o banco, e não uma resposta de
+  // formulário que o cliente escolhe (REPORT §9.1).
+  //
+  // ⚠️ REINTRODUZIR ISTO COMO "MELHORIA DE UX" É O ERRO PREVISTO. Uma
+  // pergunta de intenção de pagamento só se justifica quando o sistema
+  // HONRA as duas respostas. Enquanto a resposta não mudar nada a jusante,
+  // perguntar é coletar dado que não se usa — e a versão que existia
+  // custou uma coluna, um domínio, um rótulo de e-mail e um enum aqui.
+  //
+  // Sem `.passthrough()` — que este `z.object` não tem —, um POST antigo
+  // que ainda mande o campo não é recusado: a chave é simplesmente
+  // descartada na saída do parse e nunca chega à rota. É o que mantém a
+  // remoção compatível com uma aba aberta há meia hora com o bundle velho.
+  // ------------------------------------------------------------
 
   // ------------------------------------------------------------
   // PERFIL — obrigatórios AQUI, nullable no banco.

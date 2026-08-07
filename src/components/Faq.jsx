@@ -2,8 +2,16 @@
 
 import { useId, useState } from 'react'
 import { Plus } from './Icons.jsx'
+// Módulo NEUTRO — não é client nem server, e é por isso que este
+// componente `'use client'` pode importá-lo. Mesma porta pela qual
+// `consentimento.ts` e `dominio.ts` já entram aqui.
+import { formatarDuracao } from '@/config/curso'
 
-const faqs = [
+// Virou função por causa de UMA resposta: "Quanto tempo dura?" dizia
+// "6 meses" escrito à mão. É a pergunta cuja resposta o banco conhece, e
+// a única do array que muda de safra para safra — as outras seis
+// descrevem o formato do curso, que não tem coluna e não deve ter.
+const montarFaqs = (duracaoMeses) => [
   {
     q: 'Preciso ter inglês avançado?',
     a: 'Não. O curso separa as turmas por nível, então você começa exatamente de onde está.',
@@ -18,7 +26,7 @@ const faqs = [
   },
   {
     q: 'Quanto tempo dura?',
-    a: 'O programa tem duração de 6 meses, com encontros ao vivo e materiais de apoio.',
+    a: `O programa tem duração de ${formatarDuracao(duracaoMeses)}, com encontros ao vivo e materiais de apoio.`,
   },
   {
     q: 'Tem certificado no final do curso?',
@@ -86,7 +94,20 @@ function Item({ q, a, delay = 0, className = '' }) {
   )
 }
 
-export default function Faq() {
+/**
+ * `duracaoMeses` é obrigatório e sem default — ver o porquê em
+ * `Pricing.jsx`.
+ *
+ * A prop atravessa a fronteira servidor → cliente, o que quer dizer que
+ * ela vai no payload de hidratação em texto claro. É um número que já
+ * está impresso no HTML em outros três lugares da mesma página, então não
+ * há nada a proteger aqui — e é exatamente por isso que o corte de
+ * `app/page.jsx` manda só ele, e não a `SafraAtiva` inteira, que carrega
+ * `id` e a contagem de inscritas.
+ */
+export default function Faq({ duracaoMeses }) {
+  const faqs = montarFaqs(duracaoMeses)
+
   return (
     <section id="faq" className="py-16">
       <div className="container-page">

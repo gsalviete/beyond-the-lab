@@ -18,7 +18,14 @@
 // ============================================================
 import 'server-only'
 
-import { INSTAGRAM_URL, formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
+// `src/config/curso.ts` é um módulo NEUTRO — sem `'use client'`, sem JSX,
+// sem hook, sem nada de `window`: só `Intl` e aritmética sobre string. É o
+// mesmo módulo que `InscricaoModal.jsx` importa no navegador e que este
+// arquivo `server-only` importa aqui. Essa neutralidade é o que permite a
+// tela de sucesso e o e-mail dizerem a MESMA frase a partir da MESMA
+// função, em vez de duas cópias que divergem na primeira edição — é o
+// padrão que `consentimento.ts` e `dominio.ts` já provaram no repositório.
+import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
 // Os rótulos vêm do domínio, não de uma cópia local. Ver o bloco RÓTULOS
 // mais abaixo para o que isso desfaz.
 import {
@@ -27,7 +34,7 @@ import {
   type DiaDaSemana,
   type NivelIngles,
 } from '@/config/dominio'
-import type { Turma } from '@/lib/supabase'
+import type { Safra } from '@/lib/supabase'
 
 // Nenhuma com prefixo NEXT_PUBLIC_, de propósito: o Next só expõe ao cliente
 // as variáveis com esse prefixo. Sem ele, elas nunca saem do servidor.
@@ -43,9 +50,9 @@ const REMETENTE_NOME = 'Beyond The Lab'
 /**
  * Os dados da inscrição que os e-mails precisam ver.
  *
- * É de propósito um tipo próprio, e não o parâmetro de `insertWaitlistEntry`:
- * o e-mail não tem nada que fazer com `consent_text`, `consent_at` ou
- * `turma_id`. O que não é preciso para escrever a mensagem não entra aqui.
+ * É de propósito um tipo próprio, e não o parâmetro de `criarInscricao`: o
+ * e-mail não tem nada que fazer com `consent_text`, `consent_at` ou
+ * `safra_id`. O que não é preciso para escrever a mensagem não entra aqui.
  */
 export type InscricaoEmail = {
   name: string
@@ -56,7 +63,6 @@ export type InscricaoEmail = {
   curso: string
   periodo: string
   disponibilidade: DiaDaSemana[]
-  payment_choice: 'agora' | 'depois'
 }
 
 // ============================================================
@@ -94,14 +100,23 @@ export type InscricaoEmail = {
 // abstração nossa remove.
 // ============================================================
 
-// Este continua local, e é o único que fica. `payment_choice` morre no
-// `c25` (D-11) — levar os rótulos dele para o domínio seria dar sobrevida
-// a um campo que a refatoração existe para remover. Ele sai daqui junto
-// com a coluna.
-const ROTULO_PAGAMENTO: Record<'agora' | 'depois', string> = {
-  agora: 'Quer pagar agora',
-  depois: 'Prefere pagar depois',
-}
+// ⚠️ AQUI HAVIA `ROTULO_PAGAMENTO` — 'Quer pagar agora' / 'Prefere pagar
+// depois' —, o único mapa de rótulos que este arquivo ainda mantinha
+// local. Ele saiu com a pergunta (D-11), e não volta.
+//
+// Nunca foi levado para o `dominio.ts` de propósito: trazer os rótulos de
+// um campo condenado para a fonte única seria dar sobrevida a um domínio
+// que a refatoração existe para remover. O campo perguntava "quer pagar
+// agora?" numa tela sem checkout, e os dois valores gravavam igual —
+// preferência coletada e descartada.
+//
+// A LINHA "PAGAMENTO" DO E-MAIL DA GIOVANA SUMIU JUNTO, nos dois formatos,
+// e isso é decisão de negócio, não limpeza de código. Ela não virou "—",
+// não virou "(não perguntado)" e não vira nenhuma outra coisa: este e-mail
+// é OPERACIONAL, existe para a Giovana saber com quem falar e o que fazer
+// em seguida. A linha "Turma" já diz o que importa sobre dinheiro — quem
+// tem vaga numa safra e quem está em lista de espera. Um campo que não
+// muda nenhuma ação dela é ruído numa mensagem que ela lê no celular.
 
 // ============================================================
 // CORES — derivadas de `tailwind.config.js`, não de design/SPEC.md.
@@ -152,10 +167,49 @@ function linkWhatsApp(e164: string): string {
   return `https://wa.me/${e164.replace(/\D/g, '')}`
 }
 
-/** Data de início da turma por extenso, ou null na lista de espera. */
-function inicioPorExtenso(turma: Turma | null): string | null {
-  if (!turma) return null
-  return formatarDataPorExtenso(paraDataUTC(turma.data_inicio_aulas))
+/**
+ * Em que semana as aulas começam — "na primeira semana de setembro" —, ou
+ * `null` quando não há safra.
+ *
+ * ⚠️ AQUI HAVIA `inicioPorExtenso()`, que devolvia "1 de setembro de 2026"
+ * a partir de `formatarDataPorExtenso(paraDataUTC(...))`. Ela saiu por dois
+ * motivos, e o segundo é o que importa:
+ *
+ *   1. O valor que ela produzia NÃO ERA IMPRESSO em lugar nenhum. Desde que
+ *      a frase virou literal, ela era usada só como booleano "existe safra?"
+ *      — uma data formatada com todo o cuidado de fuso para ser jogada fora.
+ *
+ *   2. A data por extenso é justamente o que a D-14 proíbe no e-mail. Pela
+ *      D-01 a safra tem calendário e o grupo é só um horário dentro dela:
+ *      quem cai no grupo de quarta não começa na segunda. "1 de setembro de
+ *      2026" seria uma promessa que o produto não faz para a maior parte
+ *      das inscritas — e é exatamente o diagnóstico que pôs o literal no
+ *      código. `formatarSemanaDeInicio` mantém o diagnóstico e desfaz o
+ *      congelamento: a frase volta a sair de `data_inicio_aulas` sem nunca
+ *      imprimir o dia.
+ *
+ * `null` continua sendo o sinal de "não há safra", e continua decidindo
+ * assunto, título e abertura do e-mail da inscrita. Ver `montarInscrita`.
+ *
+ * ⚠️ SOBRE A REGRA "NENHUMA FUNÇÃO DAQUI LANÇA" (topo do arquivo). Esta
+ * chamada é a primeira formatação de data do arquivo que pode levantar:
+ * `formatarSemanaDeInicio` parte a string em componentes e a entrega ao
+ * `Intl`, e um `data_inicio_aulas` corrompido produziria `Invalid Date`,
+ * que o `Intl` recusa com `RangeError`. O tipo `Safra` diz `string` e a
+ * coluna é `date not null`, então o caso é improvável — mas "improvável"
+ * não é "impossível", e a rede já existe: `confirmarInscricao` envolve a
+ * MONTAGEM inteira num try/catch, exatamente para isto. O comportamento
+ * externo continua idêntico ao de antes deste commit — log no servidor,
+ * `Promise<void>` resolvida, inscrição gravada intacta.
+ *
+ * Não há guarda a mais aqui de propósito. Trocar a falha por um fallback
+ * silencioso faria o e-mail cair no texto de LISTA DE ESPERA para quem
+ * acabou de se inscrever numa safra aberta — dizer "não há turma" a quem
+ * tem vaga é pior que não mandar e-mail nenhum e ver o erro no log.
+ */
+function semanaDeInicioDaSafra(safra: Safra | null): string | null {
+  if (!safra) return null
+  return formatarSemanaDeInicio(safra.data_inicio_aulas)
 }
 
 /**
@@ -283,16 +337,15 @@ function linhaDado(rotulo: string, valorHtml: string): string {
 // ------------------------------------------------------------
 // E-MAIL 1 — para a Giovanna. Operacional: densidade acima de enfeite.
 // ------------------------------------------------------------
-function montarAdmin(inscricao: InscricaoEmail, turma: Turma | null) {
+function montarAdmin(inscricao: InscricaoEmail, turma: Safra | null) {
   const {
-    name, email, phone, nivel_ingles, curso, periodo, disponibilidade, payment_choice,
+    name, email, phone, nivel_ingles, curso, periodo, disponibilidade,
   } = inscricao
 
   const wa = linkWhatsApp(phone)
   const telefone = telefoneLegivel(phone)
   const dias = listarDias(disponibilidade)
   const nivel = ROTULO_NIVEL_INGLES[nivel_ingles]
-  const pagamento = ROTULO_PAGAMENTO[payment_choice]
   const turmaTexto = turma ? turma.nome : 'Lista de espera (nenhuma turma aberta)'
   // Hora do servidor, em São Paulo. `dateStyle`/`timeStyle` curtos porque
   // isto é um carimbo de chegada, não uma data por extenso.
@@ -319,7 +372,6 @@ ${linhaDado('Nível de inglês', esc(nivel))}
 ${linhaDado('Curso', esc(curso))}
 ${linhaDado('Período', esc(periodo))}
 ${linhaDado('Disponibilidade', esc(dias))}
-${linhaDado('Pagamento', esc(pagamento))}
 ${linhaDado('Turma', esc(turmaTexto))}
 ${linhaDado('Data e hora', esc(quando))}
 </table>
@@ -338,7 +390,6 @@ Nível de inglês: ${nivel}
 Curso: ${curso}
 Período: ${periodo}
 Disponibilidade: ${dias}
-Pagamento: ${pagamento}
 Turma: ${turmaTexto}
 Data e hora: ${quando}
 `
@@ -353,16 +404,21 @@ Data e hora: ${quando}
 // na lista de espera não existe data de início nem vaga garantida, e
 // prometer qualquer uma das duas seria mentira.
 // ------------------------------------------------------------
-function montarInscrita(inscricao: InscricaoEmail, turma: Turma | null) {
+function montarInscrita(inscricao: InscricaoEmail, turma: Safra | null) {
   const { name, email, phone, nivel_ingles, curso, periodo, disponibilidade } = inscricao
 
-  const inicio = inicioPorExtenso(turma)
+  // Uma coisa só, e continua sendo duas: o TEXTO da semana de início e o
+  // sinal de "existe safra?". Voltar a imprimir o valor que já governava a
+  // condicional é o que impede as duas de discordarem — um e-mail com o
+  // título "deu certo!" e nenhuma data, ou com data e o texto de lista de
+  // espera, precisariam de duas fontes divergindo, e agora não há duas.
+  const semanaDeInicio = semanaDeInicioDaSafra(turma)
   const primeiroNome = name.trim().split(/\s+/)[0]
   const dias = listarDias(disponibilidade)
   const nivel = ROTULO_NIVEL_INGLES[nivel_ingles]
   const telefone = telefoneLegivel(phone)
 
-  const assunto = inicio
+  const assunto = semanaDeInicio
     ? 'Inscrição recebida — Beyond The Lab'
     : 'Você está na lista de espera — Beyond The Lab'
 
@@ -373,32 +429,56 @@ function montarInscrita(inscricao: InscricaoEmail, turma: Turma | null) {
   // O título muda junto com o resto de propósito: "deu certo!" sobre uma
   // entrada em lista de espera soaria como vaga confirmada, que é
   // exatamente o que este modo não pode prometer.
-  const titulo = inicio
+  const titulo = semanaDeInicio
     ? `${primeiroNome}, deu certo!`
     : `${primeiroNome}, recebemos seu cadastro`
 
-  const abertura = inicio
+  const abertura = semanaDeInicio
     ? `Recebemos sua inscrição no Beyond The Lab. Deu tudo certo — agora é com a gente.`
     : `Recebemos seu cadastro no Beyond The Lab. No momento não há turma com inscrições abertas, então você entrou na lista de espera.`
 
-  // ⚠️ A data de início voltou a ser TEXTO LITERAL aqui, e só aqui. A turma
-  // começa na primeira semana de setembro, com o dia escolhido pela aluna —
-  // algo que uma coluna `date` não consegue representar. Enquanto a migração
-  // que cria o campo por extenso não acontece, o banco segue com 2026-09-01
-  // (provisória, como o seed já registra) e estas duas frases deixam de lê-la.
+  // ⚠️ A DATA DE INÍCIO VOLTOU A SAIR DO BANCO, e esta é a última das
+  // quatro superfícies da tensão 8.1 do `REPORT.md` a fechar.
   //
-  // O que NÃO mudou, de propósito: `inicio` continua vindo de
-  // `inicioPorExtenso()` e continua decidindo assunto, título e abertura. Ela
-  // é o booleano "existe turma aberta?", e trocar isso por texto faria toda
-  // inscrição cair no modo lista-de-espera — o e-mail diria a quem acabou de
-  // se inscrever que não há turma. Por isso a condicional fica intacta e só
-  // o corpo do ramo verdadeiro passa a não interpolar a data.
-  const proximos = inicio
-    ? `As aulas começam na <strong style="color:${COR.ink};">primeira semana de setembro de 2026</strong>. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+  // O texto era o literal "primeira semana de setembro de 2026", e o
+  // comentário que ocupava este lugar explicava por quê: a turma começa num
+  // dia escolhido pela aluna, e uma coluna `date` exibida seca não
+  // representa isso. O diagnóstico estava certo — a solução é que congelou a
+  // informação fora do banco. Enquanto `data_inicio_aulas` avançasse para
+  // janeiro, a caixa de entrada de quem acabou de se inscrever continuaria
+  // dizendo setembro de 2026, para sempre e sem ninguém perceber. Era a
+  // única forma da 8.1 que chega à pessoa DEPOIS que ela já decidiu.
+  //
+  // `formatarSemanaDeInicio` (D-14) mantém o diagnóstico e desfaz o
+  // congelamento: devolve "na primeira semana de setembro" a partir da
+  // própria data, sem nunca imprimir o dia. O que era um literal por falta
+  // de formatação virou uma formatação — e é a MESMA função que a tela de
+  // sucesso da modal chama, então as duas superfícies não têm como divergir.
+  //
+  // ⚠️ E QUANDO NÃO HÁ SAFRA, O E-MAIL NÃO FALA EM DATA. Nenhuma.
+  //
+  // Este era o pior efeito do literal, e ele era silencioso: a frase estava
+  // no ramo verdadeiro de uma condicional que a `route.ts` só toma quando a
+  // safra existe E está aberta — mas a landing e o e-mail antigos afirmavam
+  // setembro de 2026 sem consultar nada, então bastava a safra do banco ter
+  // outra data para o e-mail mentir. Agora não há literal para mentir: sem
+  // safra, o ramo de lista de espera diz o que sempre disse ("assim que a
+  // próxima turma abrir, você recebe um e-mail nosso") e nada mais. Sem
+  // fallback, sem data inventada, sem `undefined` impresso. É a mesma regra
+  // da landing — nunca afirmar o que não se sabe.
+  //
+  // ⚠️ VALOR E DURAÇÃO NÃO ENTRAM AQUI, e a ausência é deliberada: não
+  // havia literal de preço nem de prazo neste arquivo para substituir, e
+  // acrescentar "R$ X/mês por N meses" ao e-mail seria escrever promessa
+  // nova de dinheiro, não desfazer um congelamento. A frase que este e-mail
+  // faz sobre pagamento continua sendo a mesma do rodapé do formulário e da
+  // tela de sucesso, palavra por palavra — uma promessa por evento.
+  const proximos = semanaDeInicio
+    ? `As aulas começam <strong style="color:${COR.ink};">${esc(semanaDeInicio)}</strong>. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
-  const proximosTexto = inicio
-    ? `As aulas começam na primeira semana de setembro de 2026. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+  const proximosTexto = semanaDeInicio
+    ? `As aulas começam ${semanaDeInicio}. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
   const html = moldura(`
@@ -486,7 +566,7 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 /** Avisa a Giovanna de uma inscrição nova. Não lança. */
 export async function notificarAdmin(
   inscricao: InscricaoEmail,
-  turma: Turma | null,
+  turma: Safra | null,
 ): Promise<void> {
   try {
     if (!EMAIL_ADMIN) {
@@ -506,7 +586,7 @@ export async function notificarAdmin(
 /** Confirma para quem se inscreveu. Não lança. */
 export async function confirmarInscricao(
   inscricao: InscricaoEmail,
-  turma: Turma | null,
+  turma: Safra | null,
 ): Promise<void> {
   try {
     const { assunto, html, texto } = montarInscrita(inscricao, turma)

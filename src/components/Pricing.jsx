@@ -2,18 +2,30 @@ import Image from 'next/image'
 import { ArrowUpRight, ChevronRight, Shield, Trophy, Lock } from './Icons.jsx'
 import CtaInscricao from './CtaInscricao.jsx'
 import { ID_CARD_COMPRA } from './LinkListaEspera.jsx'
+import { formatarValorMensal, formatarDuracao } from '@/config/curso'
 const ghostCard = '/assets/ghost-card.png'
 const microscope = '/assets/microscope-pink.svg'
 const dna = '/assets/dna.svg'
 
-const features = [
+// A lista virou função porque o último item deixou de ser constante: ele
+// dizia "Duração de 6 meses" escrito à mão, ao lado de um `R$ 299,99`
+// também escrito à mão, num card cujo botão leva a uma compra. Eram as
+// duas afirmações mais caras da página e as duas únicas que o banco já
+// sabia responder — a tensão 8.1 do `REPORT.md` inteira, em quinze
+// linhas de distância uma da outra.
+//
+// Os outros seis continuam literais e devem continuar: "Certificado de
+// conclusão" não varia por safra e não tem coluna. O critério é o mesmo
+// do topo de `src/config/curso.ts` — o que muda de safra para safra
+// pertence ao banco; o que não muda, não.
+const montarFeatures = (duracaoMeses) => [
   'Turmas reduzidas, com aulas ao vivo',
   'Material complementar e glossário técnico',
   'Avaliação mensal',
   'Comunidade exclusiva de alunos',
   'Avaliação de nível incluída',
   'Certificado de conclusão',
-  'Duração de 6 meses',
+  `Duração de ${formatarDuracao(duracaoMeses)}`,
 ]
 
 const guarantees = [
@@ -22,7 +34,22 @@ const guarantees = [
   { icon: Lock, label: 'Privacidade Garantida' },
 ]
 
-export default function Pricing() {
+/**
+ * ⚠️ `valorMensal` e `duracaoMeses` são OBRIGATÓRIOS e não têm default.
+ *
+ * Um default aqui — `valorMensal = 299.99` — seria o literal voltando
+ * pela porta dos fundos, e pior do que o que saiu: invisível na tela,
+ * ativado só quando o dado de verdade não chegasse, e sem ninguém para
+ * notar que a página passou a exibir um número inventado. Se a prop não
+ * vier, o certo é quebrar. Quem garante que ela vem é `app/page.jsx`,
+ * que falha antes de renderizar quando não há safra.
+ *
+ * Os dois chegam do banco, de UMA leitura feita na página (D-13), e
+ * descrevem o que o curso custa HOJE. Não é o que uma aluna paga: quem
+ * já assinou tem valor e duração travados na assinatura (D-06).
+ */
+export default function Pricing({ valorMensal, duracaoMeses }) {
+  const features = montarFeatures(duracaoMeses)
   return (
     // `#preco` segue na seção para não quebrar link já compartilhado, mas o
     // destino dos CTAs é o card lá dentro (`#planos`) — parar na seção
@@ -141,7 +168,15 @@ export default function Pricing() {
                            md:text-[52px] md:leading-[70px]
                            lg:text-[64.776px] lg:leading-[87.448px]"
               >
-                R$ 299,99
+                {/* Era `R$ 299,99` escrito à mão — o literal mais caro do
+                    repositório, e a prova viva da tensão 8.1: a coluna
+                    `valor_mensal` existia, a rota devolvia, e a página
+                    ignorava. Mudar o preço no Studio não mudava isto.
+                    `formatarValorMensal` já existia em `config/curso.ts`
+                    e não tinha um único chamador; agora tem. A moeda é
+                    formatada lá, uma vez, e não com `toFixed` mais
+                    `'R$ '` concatenado aqui. */}
+                {formatarValorMensal(valorMensal)}
               </span>
               {/* ⚠️ derivado: ancoragem absoluta — pai sem auto-layout confirmado */}
               <span
@@ -180,12 +215,18 @@ export default function Pricing() {
                 mobile — as pills passam a poder encolher abaixo de lg */}
             <div className="flex w-full max-w-[248.69px] items-center gap-3 lg:w-[248.69px]">
               {/* 84px = 248.69 − 152.69 − 12 (derivado por subtração) */}
+              {/* `capitalize` no lugar de uma segunda string: a fonte é a
+                  mesma `formatarDuracao` da lista de features, que devolve
+                  minúscula ("6 meses"), e a caixa alta do chip é
+                  apresentação. Duas strings para o mesmo número seriam
+                  duas chances de divergir. O CSS não toca no "6" — não há
+                  letra — e transforma só o "m". */}
               <span
                 className="flex h-[33.19px] w-[84px] shrink items-center justify-center
                            rounded-full bg-[#FDEEF2] font-display text-[12px] font-semibold
-                           leading-[19.2px] text-[#FF487A] lg:shrink-0"
+                           capitalize leading-[19.2px] text-[#FF487A] lg:shrink-0"
               >
-                6 Meses
+                {formatarDuracao(duracaoMeses)}
               </span>
               <span
                 className="flex h-[33.19px] w-[152.69px] shrink items-center justify-center

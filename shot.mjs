@@ -8,9 +8,28 @@ import os from 'os'
 const PORT = 3000
 const BASE = `http://localhost:${PORT}`
 const server = spawn('npx', ['next', 'dev', '-p', String(PORT)], { stdio: 'ignore' })
+// A landing passou a LER O BANCO: `app/page.jsx` consulta a safra de vitrine e
+// lança se não houver nenhuma — a D-13 proíbe literal de preço ou duração
+// inclusive como fallback, então "sem safra" não tem página. Isso criou um modo
+// de falha que este laço não sabia distinguir: sem as env do Supabase, ou contra
+// um banco sem safra, "/" responde 500, o `.ok` nunca fica true, o laço gasta os
+// 60s inteiros — e o script seguia adiante fotografando 24 PNGs da tela de erro
+// do Next. Erro de ambiente disfarçado de render é pior que render nenhum:
+// alguém compara layout contra um stack trace e conclui que a seção quebrou.
+// Parar aqui, com o status na mão, é o que impede isso.
+let resposta
 for (let i = 0; i < 120; i++) {
-  try { if ((await fetch(BASE)).ok) break } catch {}
+  try { resposta = await fetch(BASE); if (resposta.ok) break } catch { resposta = undefined }
   await new Promise((r) => setTimeout(r, 500))
+}
+if (!resposta?.ok) {
+  server.kill()
+  throw new Error(
+    resposta
+      ? `dev server respondeu ${resposta.status} em ${BASE}. Confira SUPABASE_URL e ` +
+          `SUPABASE_SERVICE_ROLE_KEY no ambiente, e se existe linha em public.safras.`
+      : `dev server não respondeu em ${BASE} depois de 60s.`,
+  )
 }
 
 const shellDir='/sessions/trusting-upbeat-faraday/.cache/ms-playwright/chromium_headless_shell-1228'
@@ -94,7 +113,7 @@ for (const { prefixo, width, height } of alvos) {
   await ctaModal.click()
   await pg.waitForSelector('[role="dialog"]', { state: 'visible' })
   // A modal abre em estado de carregamento e só decide o que mostrar depois
-  // de perguntar a `/api/turma-ativa` se há turma aberta. Esperar no relógio
+  // de perguntar a `/api/safra-ativa` qual é a safra e se ela está aberta. Esperar no relógio
   // fotografava o spinner — em dev a primeira chamada ainda paga a compilação
   // da rota. `aria-busy="false"` é a condição de verdade, e é o mesmo atributo
   // que o leitor de tela usa.

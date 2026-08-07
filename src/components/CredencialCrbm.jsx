@@ -9,8 +9,8 @@ import { Shield } from './Icons.jsx'
 // autoridade. Aqui ele vira um selo.
 //
 // Nada de cor, raio, sombra ou tipografia é inventado:
-//   - fundo: `bg-badge-grad`, o mesmo token do badge "Setembro" do hero e do
-//     chip da bandeira (tailwind.config.js) — é o azul institucional que a
+//   - fundo: `bg-badge-grad`, o mesmo token do badge "Primeira turma" do hero
+//     e do chip da bandeira (tailwind.config.js) — é o azul institucional que a
 //     página já usa para marcar autoridade, em oposição ao rosa de ação;
 //   - sombra: `shadow-badge`, token existente;
 //   - ícone: `Shield`, o mesmo já usado em "Compra segura" no card de preço;
