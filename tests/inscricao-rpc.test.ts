@@ -32,6 +32,14 @@
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// ⚠️ Import de TIPO, e é por isso que ele pode existir aqui em cima
+// enquanto o de `@/lib/supabase` precisa ser dinâmico lá embaixo: `import
+// type` é apagado na compilação e não carrega módulo nenhum em runtime.
+// `@/config/dominio` é neutro (não toca `server-only` nem env var), mas o
+// que garante que este import não interfere na ordem de carga do arquivo
+// é a palavra `type`, não a neutralidade do módulo.
+import type { DiaDaSemana } from '@/config/dominio'
+
 // `@/lib/supabase` é `server-only`, e o pacote `server-only` LANÇA quando
 // importado fora de um Server Component — em Node puro, sempre. O dublê
 // vazio é o que permite testar o módulo sem afrouxar a proteção: o
@@ -103,7 +111,19 @@ const DADOS = {
   nivel_ingles: 'basico' as const,
   curso: 'Fonoaudiologia',
   periodo: '6º semestre',
-  disponibilidade: ['seg', 'qua'] as const,
+  // ⚠️ `as DiaDaSemana[]` e NÃO `as const`, e a diferença derrubava o
+  // build. `as const` congela o literal como `readonly ['seg', 'qua']`, e
+  // `readonly` não é atribuível ao `DiaDaSemana[]` mutável que
+  // `criarInscricao` declara — 12 erros de `tsc`, um por chamada. O
+  // vitest não typechecka, então os testes ficavam verdes enquanto o
+  // `next build` (que roda `tsc` sobre o `include`, e o `include` pega
+  // `tests/`) falhava. Verde no runner não é prova de que compila.
+  //
+  // O cast preserva o que o `as const` dava de útil aqui: os elementos
+  // continuam sendo do domínio, então trocar 'qua' por 'sáb' segue sendo
+  // erro de tipo. O que ele solta é só a imutabilidade, que nunca foi o
+  // ponto — este objeto não é mutado por ninguém.
+  disponibilidade: ['seg', 'qua'] as DiaDaSemana[],
   consent_at: '2026-08-06T12:00:00.000Z',
   consent_text: 'Texto do consentimento, gravado como prova.',
   safra_id: null,
