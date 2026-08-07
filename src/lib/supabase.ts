@@ -228,6 +228,24 @@ function supabase(): SupabaseClient<Database> {
 }
 
 /**
+ * A janela de defasagem da vitrine, em segundos.
+ *
+ * ⚠️ ESTE NÚMERO EXISTE EM DOIS LUGARES, e a duplicação é forçada pelo
+ * Next, não escolhida. `export const revalidate` em `app/page.jsx`
+ * precisa ser um LITERAL — o Next lê esse valor por análise estática do
+ * arquivo, antes de executar qualquer coisa, e um identificador
+ * importado não é lido de forma confiável. Então lá está `60` escrito, e
+ * aqui está a constante.
+ *
+ * Duas declarações do mesmo número é exatamente o que o comentário
+ * anterior temia, e o medo era justo. O que ele não tinha era o
+ * mecanismo: `tests/vitrine-cache.test.ts` lê os DOIS arquivos como
+ * texto e falha se os números divergirem. Disciplina substituída por
+ * mecanismo, que é a 8.3 do `REPORT.md` aplicada a um número.
+ */
+export const JANELA_VITRINE_SEGUNDOS = 60
+
+/**
  * O cliente de VITRINE — cacheável, e é isso que mantém a landing estática.
  *
  * ============================================================
@@ -247,11 +265,41 @@ function supabase(): SupabaseClient<Database> {
  *     defasagem no preço é aceito, e em troca a landing é servida
  *     estática, sem uma consulta ao banco por visita.
  *
- * ⚠️ `cache: 'force-cache'` e NENHUM `revalidate` aqui, de propósito. A
- * janela é declarada UMA vez, no `export const revalidate` de
- * `app/page.jsx`, e o Data Cache do Next herda dela. Declarar 60 nos dois
- * lugares criaria dois números para a mesma decisão, e um dia eles
- * discordam — o menor vence em silêncio e ninguém entende por quê.
+ * ============================================================
+ * ⚠️ AQUI HAVIA `cache: 'force-cache'` SEM `revalidate`, E ISSO CONGELAVA
+ *    O PREÇO PARA SEMPRE. O comentário que justificava aquilo está
+ *    preservado abaixo, porque entender por que ele CONVENCIA é o que
+ *    impede a linha de voltar.
+ * ============================================================
+ *
+ * O texto dizia: *"`cache: 'force-cache'` e NENHUM `revalidate` aqui, de
+ * propósito. A janela é declarada UMA vez, no `export const revalidate`
+ * de `app/page.jsx`, e o Data Cache do Next herda dela. Declarar 60 nos
+ * dois lugares criaria dois números para a mesma decisão, e um dia eles
+ * discordam — o menor vence em silêncio e ninguém entende por quê."*
+ *
+ * A PREOCUPAÇÃO estava certa e continua valendo — ver
+ * `JANELA_VITRINE_SEGUNDOS` logo acima. **A HERANÇA não existe.**
+ *
+ * `export const revalidate = 60` governa de quanto em quanto tempo o Next
+ * REGENERA a página. Não governa o Data Cache, que é outra camada. Um
+ * `fetch` marcado `cache: 'force-cache'` **sem** `next.revalidate` entra
+ * no Data Cache SEM PRAZO NENHUM: ele não expira sozinho, nunca. O
+ * resultado é uma regeneração que acontece pontualmente a cada 60
+ * segundos, relê o mesmo corpo cacheado e produz HTML byte a byte
+ * idêntico. A página revalida direitinho — e o número na tela não muda.
+ *
+ * O sintoma é cruel justamente por parecer o oposto de um bug de cache:
+ * o preço não fica "atrasado um minuto", ele fica **preso no valor do
+ * build**. A Giovana muda `valor_mensal` no Studio, espera, recarrega,
+ * limpa o cache do navegador, e o site continua no número velho até
+ * alguém fazer um deploy — que é EXATAMENTE a dependência que o corte 1
+ * inteiro existiu para acabar. Foi assim que a D-13 apareceu cumprida em
+ * revisão de código e reprovou no aceite manual.
+ *
+ * A correção é dizer a janela ao `fetch` em vez de esperar que ele a
+ * adivinhe. Sem `cache:` junto: `cache` e `next.revalidate` são duas
+ * formas de declarar a mesma coisa, e o Next recusa as duas juntas.
  *
  * ⚠️ Isto NÃO desfaz a promessa de "sem deploy". A Giovana continua
  * mudando o preço no Studio; o que muda é que a página acompanha em até
@@ -268,7 +316,8 @@ function supabaseVitrine(): SupabaseClient<Database> {
   clienteVitrine = createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: AUTH_SEM_SESSAO,
     global: {
-      fetch: (input, init) => fetch(input, { ...init, cache: 'force-cache' }),
+      fetch: (input, init) =>
+        fetch(input, { ...init, next: { revalidate: JANELA_VITRINE_SEGUNDOS } }),
     },
   })
 
