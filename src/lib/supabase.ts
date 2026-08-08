@@ -775,3 +775,325 @@ export async function salvarStripePriceId(safraId: string, priceId: string): Pro
     throw new Error(`safras(stripe_price_id): ${error.code ?? 'sem código'} — ${error.message}`)
   }
 }
+
+// ============================================================
+// O LADO DO BANCO DO WEBHOOK
+// ============================================================
+//
+// Tudo daqui para baixo é escrito por `app/api/stripe/webhook/route.ts` e
+// por mais ninguém. Nenhuma destas funções é alcançável pelo formulário
+// público.
+
+/**
+ * Os sete estados de uma inscrição, direto do CHECK da `009`.
+ *
+ * Escrito à mão e não derivado dos tipos gerados de propósito: o
+ * `supabase gen types` traz `status: string`, porque um CHECK de coluna
+ * não vira enum de TypeScript. Sem esta união, `mudarStatusInscricao(id,
+ * 'aprovda')` compilaria e falharia no banco, em produção, no meio de um
+ * webhook — que é o pior lugar para descobrir um erro de digitação.
+ *
+ * ⚠️ NÃO EXISTE 'aprovada' NEM 'rejeitada' (D-02). Não há entrevista,
+ * análise ou triagem: quem conclui o checkout está dentro.
+ */
+export type StatusInscricao =
+  | 'lista_espera'
+  | 'pendente_pagamento'
+  | 'confirmada'
+  | 'ativa'
+  | 'inadimplente'
+  | 'concluida'
+  | 'cancelada'
+
+/** O código do Postgres para violação de unique. Ver o uso abaixo. */
+const UNIQUE_VIOLATION = '23505'
+
+/**
+ * Reserva o evento. `true` = é nosso, processe. `false` = já processado.
+ *
+ * ============================================================
+ * ⚠️ O INSERT **É** O TESTE — não há `select` antes
+ * ============================================================
+ *
+ * O Stripe reentrega: se o endpoint demorar, cair, devolver 500, ou se a
+ * resposta se perder no caminho de volta, o mesmo evento chega de novo — e
+ * pode chegar várias vezes, em qualquer ordem, dias depois. Duas entregas
+ * do mesmo evento podem chegar SIMULTANEAMENTE, em duas instâncias
+ * serverless diferentes.
+ *
+ * Um `select` seguido de `insert` tem uma janela entre os dois comandos, e
+ * nessa janela as duas leem "não existe" e as duas processam. A janela é
+ * de milissegundos e é exatamente onde a reentrega cai, porque reentrega
+ * em rajada é o caso normal quando o endpoint fica lento. Com a PK, a
+ * segunda requisição recebe `23505`, que aqui significa, sem ambiguidade
+ * nenhuma, "outra instância já pegou este evento". Ver o cabeçalho da
+ * `014`.
+ *
+ * ⚠️ QUALQUER OUTRO CÓDIGO DE ERRO É FALHA, e não "provavelmente
+ * duplicata". `23505` só pode vir da PK — é a única unique da tabela.
+ */
+export async function reservarEventoStripe(evento: {
+  id: string
+  tipo: string
+  payload: unknown
+}): Promise<boolean> {
+  const { error } = await supabase().from('eventos_stripe').insert({
+    stripe_event_id: evento.id,
+    tipo: evento.tipo,
+    // ⚠️ O payload guarda o evento inteiro, cru, e ele CONTÉM DADO
+    // PESSOAL — e-mail, nome, últimos quatro dígitos do cartão. É dado
+    // pessoal sob LGPD como qualquer outro (ver a `014`). Ele existe para
+    // permitir reprocessar um evento à mão quando um handler tiver bug,
+    // sem depender de o Stripe ainda ter aquele evento na fila de
+    // reentrega — a janela dele é de dias.
+    payload: evento.payload as never,
+  })
+
+  if (!error) return true
+  if (error.code === UNIQUE_VIOLATION) return false
+
+  throw new Error(`eventos_stripe: ${error.code ?? 'sem código'} — ${error.message}`)
+}
+
+/**
+ * Devolve o evento para a fila, apagando a reserva.
+ *
+ * ============================================================
+ * ⚠️ ESTA FUNÇÃO EXISTE POR CAUSA DE UMA ARMADILHA REAL, E ELA É A
+ *    CONSEQUÊNCIA DIRETA DE "O INSERT VEM PRIMEIRO"
+ * ============================================================
+ *
+ * A `014` manda gravar o evento ANTES de qualquer efeito, e a razão é a
+ * corrida descrita acima. Só que as duas regras — "grava antes" e
+ * "reentrega não conta duas vezes" — juntas produzem um terceiro
+ * comportamento que ninguém pediu:
+ *
+ *   evento gravado → efeito falha → devolvemos 500 → o Stripe reentrega
+ *   → a reserva encontra o evento JÁ GRAVADO → nós pulamos o
+ *   processamento → **o efeito nunca acontece.**
+ *
+ * Uma cobrança confirmada que não vira `ativa`, para sempre, sem erro
+ * nenhum aparecendo em lugar nenhum depois da primeira tentativa. É o pior
+ * tipo de falha que este projeto pode ter: silenciosa, financeira, e
+ * indistinguível de sucesso.
+ *
+ * A saída é a reserva ser CANCELÁVEL. Quem processa apaga a linha antes de
+ * devolver 500, e a reentrega volta a ser um evento novo. O intervalo em
+ * que a linha existe sem efeito correspondente é o intervalo de uma
+ * requisição — e ele é exatamente o que impede a outra instância de
+ * processar em paralelo, que é para o que ele foi criado.
+ *
+ * ⚠️ NÃO ENGOLIR O ERRO DAQUI seria pior do que engoli-lo: se o delete
+ * falhar, o 500 já vai ser devolvido de qualquer forma, e trocar a causa
+ * real (o handler quebrou) por uma consequência (o delete quebrou) faz o
+ * log apontar para o lugar errado. Quem chama registra as duas coisas.
+ */
+export async function liberarEventoStripe(eventoId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('eventos_stripe')
+    .delete()
+    .eq('stripe_event_id', eventoId)
+
+  if (error) {
+    throw new Error(`eventos_stripe(delete): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Cria ou atualiza a assinatura espelhada. Idempotente pelo
+ * `stripe_subscription_id`.
+ *
+ * ⚠️ `upsert` COM `onConflict` NO ID DO STRIPE, e não `insert`. O mesmo
+ * evento pode ser processado depois de uma liberação (ver acima), e o
+ * `c43` chama isto de novo a cada fatura paga para manter `status_stripe`
+ * fresco. Um `insert` puro falharia com `23505` na segunda vez e
+ * transformaria uma reentrega normal num 500 eterno.
+ *
+ * ⚠️ `ciclos_pagos` NÃO ESTÁ AQUI, e a ausência é a decisão. Ele "só anda
+ * por `invoice.paid`" (`012`), e um upsert que o incluísse o
+ * SOBRESCREVERIA com o valor que o chamador supõe — zerando a contagem de
+ * quem já pagou três meses toda vez que o status da assinatura mudasse.
+ * Quem o move é `contarCicloPago`, e só ele.
+ */
+export async function registrarAssinatura(dados: {
+  inscricaoId: string
+  stripeCustomerId: string
+  stripeSubscriptionId: string
+  stripeCheckoutSessionId: string | null
+  statusStripe: string
+  trialEnd: string | null
+  cancelAt: string | null
+  cupomId: string | null
+}): Promise<void> {
+  const { error } = await supabase()
+    .from('assinaturas')
+    .upsert(
+      {
+        inscricao_id: dados.inscricaoId,
+        stripe_customer_id: dados.stripeCustomerId,
+        stripe_subscription_id: dados.stripeSubscriptionId,
+        stripe_checkout_session_id: dados.stripeCheckoutSessionId,
+        status_stripe: dados.statusStripe,
+        trial_end: dados.trialEnd,
+        cancel_at: dados.cancelAt,
+        cupom_id: dados.cupomId,
+        atualizado_em: new Date().toISOString(),
+      },
+      { onConflict: 'stripe_subscription_id' },
+    )
+
+  if (error) {
+    throw new Error(`assinaturas(upsert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/** O recorte de `assinaturas` que os handlers do webhook precisam. */
+export type AssinaturaEspelhada = Pick<
+  Tables<'assinaturas'>,
+  'id' | 'inscricao_id' | 'ciclos_pagos' | 'cancel_at'
+>
+
+/**
+ * A assinatura, pelo id do Stripe. `null` quando não conhecemos.
+ *
+ * ⚠️ `null` É UM CASO REAL E NÃO É ERRO: `invoice.paid` pode chegar ANTES
+ * de `checkout.session.completed` — o Stripe não garante ordem de
+ * entrega, e as duas coisas acontecem no mesmo segundo do lado de lá.
+ * Quem trata é o handler, devolvendo 500 para o evento ser reentregue
+ * depois, quando a linha já existir. Tratar como erro fatal ou como "não
+ * faz nada" resolveria a mesma coisa de duas formas erradas: a primeira
+ * enche o log de falha que se resolve sozinha, a segunda perde a fatura.
+ */
+export async function buscarAssinaturaPorSubscription(
+  stripeSubscriptionId: string,
+): Promise<AssinaturaEspelhada | null> {
+  const { data, error } = await supabase()
+    .from('assinaturas')
+    .select('id,inscricao_id,ciclos_pagos,cancel_at')
+    .eq('stripe_subscription_id', stripeSubscriptionId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`assinaturas(select): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * Soma um ciclo pago. Devolve `false` quando alguém somou antes.
+ *
+ * ============================================================
+ * ⚠️ COMPARE-AND-SWAP, E NÃO `ciclos_pagos = ciclos_pagos + 1`
+ * ============================================================
+ *
+ * O PostgREST não sabe expressar um `update` relativo a uma coluna: tudo
+ * que atravessa é um valor literal. Ler e escrever em seguida abre a
+ * corrida clássica — duas instâncias leem 3, as duas escrevem 4, e um mês
+ * de curso desaparece da contagem.
+ *
+ * O `.eq('ciclos_pagos', cicloLido)` no `update` é o que fecha a janela: o
+ * Postgres avalia a condição no momento da escrita, então só UMA das duas
+ * encontra a linha com o valor que leu. A outra atualiza zero linhas e
+ * descobre isso pelo `count`, sem erro nenhum. É a mesma ideia da unique
+ * do evento — a barreira é o próprio comando, não uma verificação antes
+ * dele.
+ *
+ * ⚠️ E O `false` NÃO É FALHA. Quem chama já sabe que o efeito foi
+ * aplicado por outra tentativa; refazer seria contar duas vezes o mesmo
+ * mês, que é exatamente o que a `014` existe para impedir. Devolver erro
+ * aqui faria o webhook responder 500 e o Stripe reentregar um evento que
+ * já produziu todo o efeito que tinha para produzir.
+ *
+ * A idempotência da `014` já torna isto raro; ele é a segunda tranca, para
+ * o caso de uma reserva liberada e reprocessada em paralelo.
+ */
+export async function contarCicloPago(
+  assinaturaId: string,
+  ciclosLidos: number,
+): Promise<boolean> {
+  const { count, error } = await supabase()
+    .from('assinaturas')
+    .update(
+      { ciclos_pagos: ciclosLidos + 1, atualizado_em: new Date().toISOString() },
+      { count: 'exact' },
+    )
+    .eq('id', assinaturaId)
+    .eq('ciclos_pagos', ciclosLidos)
+
+  if (error) {
+    throw new Error(`assinaturas(ciclos_pagos): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return count === 1
+}
+
+/** O contrato travado de uma inscrição, do jeito que o banco o guarda. */
+export type TravadosDaInscricao = Pick<
+  Tables<'inscricoes'>,
+  'valor_mensal_travado' | 'duracao_meses_travada' | 'data_primeira_cobranca_travada'
+>
+
+/**
+ * Os três travados de uma inscrição. `null` quando a inscrição não existe.
+ *
+ * ⚠️ QUEM PRECISA DISTO É O WEBHOOK, e a razão é a D-05 no lugar onde ela
+ * de fato acontece. `cancel_at` = `data_primeira_cobranca + duracao_meses`,
+ * e as duas parcelas dessa conta têm que sair da INSCRIÇÃO, nunca da
+ * safra: entre o checkout e o webhook a Giovanna pode ter mudado o preço
+ * ou a duração da safra, e a assinatura que está sendo criada é a do
+ * contrato que a pessoa aceitou (D-06). Ler da safra aqui faria uma
+ * assinatura terminar num mês que ninguém combinou com ninguém.
+ *
+ * Os três podem vir nulos numa linha legítima — lista de espera nunca tem
+ * travado (CHECK da `015`) —, e por isso quem chama precisa tratar o caso.
+ * No caminho do webhook, travado nulo significa que a inscrição chegou a
+ * `confirmada` sem contrato, que é estado impossível pelo próprio CHECK: é
+ * falha, não ausência.
+ */
+export async function buscarTravadosDaInscricao(
+  inscricaoId: string,
+): Promise<TravadosDaInscricao | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('valor_mensal_travado,duracao_meses_travada,data_primeira_cobranca_travada')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(travados): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * Move o estado da inscrição. É a única escrita de `status` do sistema
+ * fora da criação.
+ *
+ * ⚠️ NENHUMA VALIDAÇÃO DE TRANSIÇÃO AQUI, e a ausência é decisão. Uma
+ * máquina de estados escrita nesta camada seria a segunda cópia de uma
+ * regra que o banco já tem em parte (o CHECK da `009` amarra o par
+ * safra/status) e que a ordem de entrega do Stripe não respeita: uma
+ * `invoice.paid` pode chegar antes de `checkout.session.completed`, e um
+ * guarda que recusasse `pendente_pagamento → ativa` bloquearia um
+ * pagamento verdadeiro por causa da ordem em que dois pacotes chegaram
+ * pela rede.
+ *
+ * O que protege contra escrita torta é o par (evento verificado,
+ * idempotência) — não uma tabela de transições permitidas que teria que
+ * prever toda ordem possível de entrega.
+ */
+export async function mudarStatusInscricao(
+  inscricaoId: string,
+  status: StatusInscricao,
+): Promise<void> {
+  const { error } = await supabase()
+    .from('inscricoes')
+    .update({ status })
+    .eq('id', inscricaoId)
+
+  if (error) {
+    throw new Error(`inscricoes(status): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
