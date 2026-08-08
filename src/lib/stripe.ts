@@ -164,3 +164,251 @@ export function paraCentavos(reais: number): number {
 export function paraEpoch(isoDate: string): number {
   return Math.floor(paraDataUTC(isoDate).getTime() / 1000)
 }
+
+// ============================================================
+// O `price` DA SAFRA (D-07: nasce no nosso banco, é espelhado no Stripe)
+// ============================================================
+//
+// A direção é uma só, e nunca a inversa: a safra existe no Postgres, e
+// esta camada garante que exista no Stripe um `price` que a represente.
+// `price` criado à mão no Dashboard não existe para o sistema.
+//
+// ⚠️ A DURAÇÃO **NÃO** ENTRA NO PRICE, e é o erro mais natural de
+// cometer aqui. Não existe "preço de 6 meses" no Stripe: o `price` é
+// mensal e recorrente, e o que faz a assinatura terminar no 6º mês é o
+// `cancel_at` posto na criação da assinatura (D-05). Modelar a duração
+// como `interval_count: 6` cobraria seis mensalidades de uma vez, e
+// modelá-la como um `price` de valor sextuplicado cobraria tudo à vista.
+// As duas leituras estão erradas pelo mesmo motivo: `duracao_meses` é
+// prazo de contrato, não unidade de cobrança.
+// ============================================================
+
+/** A moeda é fixa, e o produto é vendido só no Brasil. */
+const MOEDA = 'brl'
+
+/**
+ * O que esta camada precisa saber de uma safra para espelhá-la.
+ *
+ * Recorte deliberado, e não `Tables<'safras'>` inteiro: `valor_mensal` é
+ * o único número que atravessa para o Stripe, e nem `duracao_meses` nem
+ * as datas têm o que fazer num `price` (ver o cabeçalho). Um tipo largo
+ * aqui convidaria a mandar mais do que o necessário para fora.
+ */
+export type SafraParaPrice = {
+  id: string
+  nome: string
+  valor_mensal: number
+  stripe_price_id: string | null
+}
+
+export type ResultadoPrice = {
+  /** O `price` a usar na Checkout Session. */
+  priceId: string
+  /**
+   * `true` quando um `price` NOVO foi criado e a coluna
+   * `safras.stripe_price_id` está desatualizada. Quem persiste é o
+   * chamador — ver `salvarStripePriceId` em `src/lib/supabase.ts`.
+   */
+  criado: boolean
+}
+
+/**
+ * O `product` da safra, com id DETERMINÍSTICO.
+ *
+ * ⚠️ `products.create({ id })` É A ÚNICA FORMA IDEMPOTENTE AQUI, e as
+ * alternativas todas falham de um jeito silencioso:
+ *
+ *   - `products.search({ query: "metadata['safra_id']:'...'" })` parece
+ *     a resposta certa e tem CONSISTÊNCIA EVENTUAL: o índice de busca do
+ *     Stripe leva cerca de um minuto para enxergar um objeto recém-criado.
+ *     Duas inscrições no mesmo minuto criariam dois `product` para a
+ *     mesma safra, e nada reclamaria;
+ *   - guardar o id do produto numa coluna nova exigiria migração, e a
+ *     coluna seria uma segunda fonte de verdade para algo que o próprio
+ *     id já expressa;
+ *   - `price.product_data` (criar produto junto do preço) cria um
+ *     produto NOVO a cada mudança de valor, e o Dashboard vira uma lista
+ *     de produtos homônimos.
+ *
+ * O id derivado do uuid da safra é estritamente consistente: `retrieve`
+ * ou acha, ou devolve `resource_missing`. Não há janela.
+ */
+async function produtoDaSafra(safra: SafraParaPrice): Promise<string> {
+  const produtoId = `safra_${safra.id}`
+
+  try {
+    await stripe().products.retrieve(produtoId)
+    return produtoId
+  } catch (err) {
+    // ⚠️ Só `resource_missing` vira "então crie". Qualquer outro erro —
+    // chave inválida, rede, rate limit — TEM que subir: tratá-lo como
+    // "não existe" faria uma falha de autenticação virar uma tentativa
+    // de criar um produto que já existe, e o erro real desapareceria
+    // atrás de um segundo erro sem relação nenhuma com a causa.
+    if (!(err instanceof Stripe.errors.StripeInvalidRequestError) || err.code !== 'resource_missing') {
+      throw err
+    }
+  }
+
+  await stripe().products.create({
+    id: produtoId,
+    name: safra.nome,
+    // O uuid da safra também vai para metadata, e não só para o id. O id
+    // é nosso e legível; o metadata é o que uma consulta futura no
+    // Stripe (relatório, conciliação) usa sem ter que fatiar string.
+    metadata: { safra_id: safra.id },
+  })
+
+  return produtoId
+}
+
+/**
+ * Garante que existe no Stripe um `price` mensal que representa esta
+ * safra, e devolve o id a usar.
+ *
+ * ============================================================
+ * ⚠️ `price` DO STRIPE É IMUTÁVEL. MUDAR O VALOR CRIA OUTRO.
+ * ============================================================
+ *
+ * Não existe "atualizar o preço": `unit_amount` não é editável, por
+ * desenho do Stripe. Quando a Giovana muda `valor_mensal` no painel,
+ * esta função cria um `price` novo e o chamador grava o id.
+ *
+ * ⚠️ E ISSO É EXATAMENTE O QUE A D-06 QUER. O `price` antigo continua
+ * existindo e continua sendo o que as assinaturas já criadas cobram —
+ * quem assinou por R$ 299,99 segue pagando R$ 299,99 depois de a safra
+ * passar a valer R$ 349,99. A imutabilidade do Stripe não é obstáculo
+ * aqui: é a mesma garantia que `valor_mensal_travado` dá do nosso lado,
+ * vinda de graça do outro.
+ *
+ * ⚠️ POR ISSO O `price` ANTIGO NÃO É APAGADO NEM ARQUIVADO. Ele é o
+ * contrato de quem já paga. Arquivar não cancela assinatura nenhuma, mas
+ * é a única operação deste arquivo que chega perto de tocar em quem já
+ * comprou — e não há nada a ganhar com ela. Preço velho fica.
+ *
+ * A comparação é feita contra o `price` REAL no Stripe, e não contra o
+ * que a nossa coluna diz que ele é: a coluna pode estar apontando para
+ * um `price` de outro valor se alguém editou algo pelo Dashboard, e o
+ * único jeito de descobrir isso é perguntando.
+ */
+export async function precoDaSafra(safra: SafraParaPrice): Promise<ResultadoPrice> {
+  const centavos = paraCentavos(safra.valor_mensal)
+
+  if (safra.stripe_price_id) {
+    try {
+      const atual = await stripe().prices.retrieve(safra.stripe_price_id)
+
+      const confere =
+        atual.active &&
+        atual.unit_amount === centavos &&
+        atual.currency === MOEDA &&
+        atual.recurring?.interval === 'month' &&
+        atual.recurring?.interval_count === 1
+
+      if (confere) return { priceId: atual.id, criado: false }
+    } catch (err) {
+      // Mesma regra do `produtoDaSafra`: só "sumiu" justifica seguir e
+      // criar outro. O resto sobe.
+      if (
+        !(err instanceof Stripe.errors.StripeInvalidRequestError) ||
+        err.code !== 'resource_missing'
+      ) {
+        throw err
+      }
+    }
+  }
+
+  const price = await stripe().prices.create({
+    product: await produtoDaSafra(safra),
+    currency: MOEDA,
+    unit_amount: centavos,
+    // Mensal e recorrente. A duração do curso NÃO mora aqui — ver o
+    // cabeçalho desta seção.
+    recurring: { interval: 'month', interval_count: 1 },
+    metadata: { safra_id: safra.id },
+  })
+
+  return { priceId: price.id, criado: true }
+}
+
+// ============================================================
+// A CONTA DO PRAZO — 6 débitos, não 7
+// ============================================================
+//
+// É a conta que evita a reclamação de julho, e o `04-PLANO.md` reserva um
+// teste só para ela (`c47`). Escrita por extenso, com T = a data da
+// primeira cobrança:
+//
+//   trial termina em T   →  fatura 1 em T
+//                           fatura 2 em T + 1 mês
+//                           ...
+//                           fatura 6 em T + 5 meses  (cobre até T + 6)
+//
+//   logo:  cancel_at = T + 6 meses
+//
+// O erro natural é `T + 5`, por contar os intervalos em vez das faturas,
+// e ele cobraria cinco meses de um curso de seis. O erro oposto —
+// `T + 7`, por somar um mês "de folga" — é o que produz a sétima
+// cobrança, que é a que gera reclamação e pedido de reembolso.
+//
+// ⚠️ `cancel_at` é posto na CRIAÇÃO da assinatura (D-05) e o Stripe
+// cumpre sozinho. Não existe job nosso encerrando assinatura: job uma
+// hora não roda, e uma aluna é cobrada no 7º mês.
+
+/**
+ * Soma meses a uma data `'YYYY-MM-DD'` do Postgres, em UTC.
+ *
+ * ⚠️ NÃO EXISTE `setMonth` SEGURO SEM TRATAR O ESTOURO DE DIA, e este é
+ * o bug clássico de aritmética de calendário:
+ *
+ *   31/01 + 1 mês  →  `setMonth` produz 31/02, que o JavaScript
+ *                     "corrige" para 03/03. Um mês inteiro a mais.
+ *
+ * Para uma `data_primeira_cobranca` isso significaria a assinatura
+ * terminando um mês depois do combinado — a sétima cobrança, chegando
+ * pela porta dos fundos. Aqui o dia é GRAMPEADO no último dia do mês de
+ * destino: 31/01 + 1 mês = 28/02 (ou 29/02 em ano bissexto).
+ *
+ * ⚠️ A data entra como string e sai como string, sem nunca virar `Date`
+ * local. `new Date('2026-09-01')` lido no fuso do Brasil é 31/08 — ver
+ * `paraDataUTC` em `src/config/curso.ts`. Um dia a menos aqui é uma
+ * cobrança um dia adiantada na fatura de alguém.
+ */
+export function somarMeses(iso: string, meses: number): string {
+  const [ano, mes, dia] = iso.split('-').map(Number)
+
+  // Mês 0-indexado para a conta, e de volta para 1-indexado no fim.
+  const totalDeMeses = (mes - 1) + meses
+  const anoDestino = ano + Math.floor(totalDeMeses / 12)
+  const mesDestino = ((totalDeMeses % 12) + 12) % 12
+
+  // Dia 0 do mês SEGUINTE é o último dia do mês de destino — a forma
+  // idiomática de perguntar "quantos dias tem este mês?" sem tabela nem
+  // regra de ano bissexto escrita à mão.
+  const ultimoDia = new Date(Date.UTC(anoDestino, mesDestino + 1, 0)).getUTCDate()
+
+  const diaDestino = Math.min(dia, ultimoDia)
+
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${anoDestino}-${pad(mesDestino + 1)}-${pad(diaDestino)}`
+}
+
+/**
+ * As duas âncoras temporais da assinatura, em epoch, prontas para o
+ * Stripe.
+ *
+ * Separada da montagem da sessão de propósito: é a única parte deste
+ * arquivo que dá para testar sem rede, e é onde está o risco real. A
+ * montagem da sessão é encanamento; esta conta é dinheiro.
+ */
+export function ancorasDaAssinatura(safra: {
+  data_primeira_cobranca: string
+  duracao_meses: number
+}): { trialEnd: number; cancelAt: number } {
+  return {
+    // D-04: a aluna confirma o cartão hoje e não é debitada até aqui.
+    trialEnd: paraEpoch(safra.data_primeira_cobranca),
+    // D-05: a assinatura morre sozinha. Ver a conta acima.
+    cancelAt: paraEpoch(somarMeses(safra.data_primeira_cobranca, safra.duracao_meses)),
+  }
+}

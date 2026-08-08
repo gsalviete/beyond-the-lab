@@ -730,3 +730,48 @@ export async function criarInscricao(dados: {
 
   return { ok: true, criada: data }
 }
+
+/**
+ * Grava em `safras.stripe_price_id` o `price` recém-criado no Stripe.
+ *
+ * ============================================================
+ * ⚠️ ESTA ESCRITA PODE FALHAR DEPOIS DE O `price` JÁ EXISTIR LÁ,
+ *    E ISSO É ACEITO — porque a alternativa é pior.
+ * ============================================================
+ *
+ * Não há transação entre o Stripe e o Postgres, e não existe forma de
+ * haver: são dois sistemas, duas requisições, dois destinos. A janela é
+ * real — criar o `price` pode dar certo e este `update` falhar logo em
+ * seguida.
+ *
+ * O estado resultante é um `price` órfão no Stripe: um objeto que existe
+ * lá e que a nossa coluna não conhece. Ele **não cobra ninguém** —
+ * `price` sozinho não é assinatura, não tem cliente e não move um
+ * centavo. É lixo, e lixo silencioso é o pior desfecho que este caminho
+ * produz.
+ *
+ * A próxima chamada de `precoDaSafra` cria outro `price` idêntico e
+ * tenta gravar de novo. Repetir isso muitas vezes acumularia `price`
+ * inertes no Dashboard — feio, e barato perto das alternativas:
+ *
+ *   - reverter no Stripe (`price` não se apaga; só se arquiva) exigiria
+ *     tratar a falha do arquivamento, que tem a mesma janela;
+ *   - guardar a intenção antes de chamar o Stripe transformaria toda
+ *     inscrição em duas escritas no banco para cobrir um caso que não
+ *     cobra ninguém quando acontece.
+ *
+ * ⚠️ NÃO ENGOLIR O ERRO. Quem chama precisa saber que a coluna não
+ * acompanhou, para decidir — no fluxo de checkout, o `priceId` devolvido
+ * pelo Stripe continua válido e a sessão PODE ser aberta com ele mesmo
+ * sem a coluna atualizada. Quem decide isso é a rota, não este módulo.
+ */
+export async function salvarStripePriceId(safraId: string, priceId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('safras')
+    .update({ stripe_price_id: priceId })
+    .eq('id', safraId)
+
+  if (error) {
+    throw new Error(`safras(stripe_price_id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
