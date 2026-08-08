@@ -1,7 +1,19 @@
-# Briefing — sessão de implementação (cortes 2 e 3)
+# Briefing — sessão de implementação
 
 > Substitui o `05-BRIEFING-CLAUDE-CODE.md`, que descrevia o corte 1.
 > Cole o bloco abaixo como primeira mensagem de uma sessão na raiz do projeto.
+
+## O plano de sessões
+
+| Sessão | Escopo | Termina quando |
+|---|---|---|
+| **agora** | **corte 2 inteiro** — pagamento, do `016` ao `c57` | inscrição completa em modo teste, do formulário ao webhook |
+| depois de um `/clear` | corte 3 — painel da Giovanna (`c58`–`c79`) | painel autogerenciável |
+
+Uma sessão por corte, e **o corte 3 não começa nesta**. O motivo é o mesmo que
+justificou o `ESTADO.md`: contexto acumulado custa caro, e o painel não depende
+de nada do checkout estar fresco na cabeça — depende só do banco e das decisões,
+que estão escritos.
 
 ---
 
@@ -23,9 +35,13 @@ O conhecimento real deste projeto está em COMENTÁRIO DE CÓDIGO. Ao mexer
 num arquivo, leia os comentários dele antes. Eles explicam POR QUE NÃO, e
 são o ativo mais valioso do repositório.
 
-ESCOPO DESTA SESSÃO
-Corte 2 inteiro e, se sobrar sessão, corte 3. Vá o mais longe que
-conseguir. A ordem está na seção 4 do ESTADO.md.
+ESCOPO DESTA SESSÃO: O CORTE 2 INTEIRO, E SÓ ELE
+Do 016 ao c57 — pagamento funcionando de ponta a ponta. A ordem está na
+seção 4 do ESTADO.md.
+
+⛔ NÃO COMECE O CORTE 3 (painel /admin, c58 em diante). Ele tem sessão
+própria, depois de um /clear. Se sobrar tempo, use para teste e para o
+fecho descrito lá embaixo — não para adiantar o painel.
 
 RITMO — ISTO SUBSTITUI A REGRA DE "UM PASSO POR VEZ" DO CLAUDE.md
 Encadeie os passos sem parar para reportar cada um. Pare e me chame
@@ -35,8 +51,7 @@ apenas quando:
   b) você precisar que eu rode um .sql, regenere tipos, ou mexa no
      Stripe/Vercel;
   c) o passo seguinte contradisser uma decisão D-01..D-16.
-Fora isso, siga. Ao fim, reporte em bloco: o que entrou, como validou, e
-os comandos de commit na ordem.
+Fora isso, siga.
 
 O QUE NÃO SE REDISCUTE (já decidido, está no ESTADO.md §2)
   - A sessão de checkout é criada DENTRO de /api/inscricao, e não numa
@@ -48,16 +63,12 @@ O QUE NÃO SE REDISCUTE (já decidido, está no ESTADO.md §2)
   - Os CHECKs dos valores travados já estão na 015 e estão certos.
     Não os altere.
 
-DUAS PERGUNTAS ABERTAS — NÃO BLOQUEIE POR ELAS
-  1. D-16 não tem data de corte da "primeira semana". Até eu decidir, use
-     o critério provisório escrito na própria D-16: toda inscrição
-     lista_espera migrada pela 010. Deixe o valor numa constante única,
-     com o raciocínio ao lado.
-  2. /admin não tem Figma, e design/SPEC.md cobre só a landing. FICA
-     CONCEDIDA A EXCEÇÃO: construa /admin com os tokens que já existem no
-     SPEC.md e no tailwind.config.js, priorizando função sobre acabamento.
-     Todo valor visual que você inventar leva `// ⚠️ derivado` inline.
-     A regra "nenhum número visual estimado" continua valendo na landing.
+PERGUNTA ABERTA — NÃO BLOQUEIE POR ELA
+D-16 não tem data de corte da "primeira semana". Até eu decidir, use o
+critério provisório escrito na própria D-16: toda inscrição lista_espera
+migrada pela 010. Deixe o valor numa constante única, com o raciocínio
+ao lado. Isso afeta o cupom de desconto (c48-c50); o resto da D-16 é do
+corte 3 e não é seu problema nesta sessão.
 
 REGRAS QUE NÃO AFROUXAM
   1. NÃO COMMITE. Nunca git commit/add/push. Deixe no working tree.
@@ -78,7 +89,22 @@ REGRAS QUE NÃO AFROUXAM
 
 COMECE POR
 A migração 016 (ESTADO.md §4). Depois c35→c39, c40→c47, c48→c50,
-c51→c55, c56→c57. Só então o corte 3.
+c51→c55, c56→c57.
+
+⚠️ ANTES DE TERMINAR A SESSÃO, FAÇA AS DUAS COISAS ABAIXO
+Elas não são burocracia: sem elas a próxima sessão recomeça cega, e o
+ESTADO.md perde a razão de existir.
+
+  1. ATUALIZE docs/ESTADO.md — o que rodou, o que ficou commitado, o que
+     ficou no working tree, e qualquer fato operacional novo que só você
+     saiba (a seção 3 existe para isso). Se uma contradição nova
+     aparecer, resolva e registre na seção 2.
+  2. REESCREVA docs/BRIEFING.md para a sessão do PAINEL (corte 3,
+     c58-c79), no mesmo formato deste. Inclua nele a decisão pendente do
+     Figma: /admin não tem design, e design/SPEC.md cobre só a landing —
+     ou o dono fornece uma fonte, ou concede exceção explícita para
+     construir com os tokens existentes. Deixe a pergunta escrita; não
+     decida por ele.
 
 Antes de começar, me devolva em até 8 linhas: o que você entendeu do
 escopo e qual a primeira coisa que vai escrever. Não espere minha
@@ -89,12 +115,10 @@ resposta para seguir — se estiver claro, siga.
 
 ## Nota para o dono, fora do bloco
 
-Duas coisas antes de colar:
+**Corte 2 são ~25 commits.** Cabe numa sessão longa, mas não é garantido. A
+ordem no briefing é de prioridade: se acabar no meio, o que ficou pronto é o
+que mais importa — o dinheiro antes do resto.
 
-1. **A exceção do `/admin` está concedida no texto acima.** Se você
-   preferir esperar por um Figma, apague esse parágrafo — mas aí o corte 3
-   não sai nesta sessão.
-2. **Corte 2 + corte 3 são ~45 commits.** Terminar os dois numa sessão é
-   improvável. A ordem no briefing é de prioridade: se a sessão acabar no
-   meio, o que ficou pronto é o que mais importa, e o `ESTADO.md` precisa
-   ser atualizado antes do próximo `/clear`.
+**O checkpoint do `c35` é seu e não se delega:** em modo teste, confirmar que o
+cartão foi salvo, que **não houve débito imediato**, e que `trial_end` está na
+data certa.
