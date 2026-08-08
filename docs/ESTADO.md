@@ -14,6 +14,8 @@ contradizem em pontos que a implementação atravessa.
 | `docs/00-DECISOES.md` | **operativo e intacto.** D-01…D-16 |
 | o código | onde o conhecimento realmente mora |
 
+O prompt de entrada para uma sessão nova está em **`docs/BRIEFING.md`**.
+
 **Os demais (`01`…`05`, `CHECKLIST-LANCAMENTO.md`, `REPORT.md`) são
 históricos.** Consulte para entender *por que* algo é como é; não os use como
 especificação. Onde divergirem deste arquivo, **este vence**.
