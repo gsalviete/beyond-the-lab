@@ -412,3 +412,393 @@ export function ancorasDaAssinatura(safra: {
     cancelAt: paraEpoch(somarMeses(safra.data_primeira_cobranca, safra.duracao_meses)),
   }
 }
+
+/**
+ * O Stripe exige que `trial_end` esteja pelo menos 48 horas no futuro.
+ *
+ * ============================================================
+ * ⚠️ NÃO É DETALHE DE VALIDAÇÃO: É UM CASO DE NEGÓCIO REAL
+ * ============================================================
+ *
+ * A regra está escrita no próprio SDK ("Has to be at least 48 hours in the
+ * future"), e ela morde num caso que vai acontecer: a safra começa a
+ * cobrar na sexta e alguém se inscreve na quinta. Mandar o `trial_end`
+ * assim mesmo faz o Stripe RECUSAR a criação da sessão — a pessoa clica
+ * em "pagar" e não acontece nada, no dia em que ela finalmente decidiu
+ * comprar.
+ *
+ * A alternativa escolhida é omitir o `trial_end` e deixar a cobrança
+ * acontecer na hora. ⚠️ E isso É um débito imediato, o que a D-04
+ * evita — então vale dizer exatamente por que aqui não a contradiz: a
+ * D-04 existe para que quem se inscreve DOIS MESES ANTES não seja
+ * debitada dois meses antes. Quem se inscreve a menos de 48 horas da
+ * data de cobrança está sendo debitada, no máximo, dois dias antes do
+ * que estava combinado — e a alternativa não é "debitar depois", é "não
+ * vender".
+ *
+ * ⚠️ O QUE NÃO SE PODE FAZER É EMPURRAR A DATA. Um `trial_end = agora +
+ * 48h` faria a primeira cobrança cair num dia que não é o da safra, e a
+ * partir dali TODO o ciclo daquela assinatura ficaria deslocado — as
+ * seis faturas em datas diferentes das de todo mundo, e a conta de
+ * `cancel_at` (que sai de `data_primeira_cobranca`, não do que o Stripe
+ * fez) apontando para o lugar errado. Melhor cobrar dois dias antes na
+ * data certa do que na hora certa por seis meses errados.
+ *
+ * A margem é de 48 horas exatas, sem folga somada: quem inventa uma
+ * folga "por segurança" está escolhendo, sem dizer, cobrar imediatamente
+ * pessoas que o Stripe teria aceitado agendar.
+ */
+const HORAS_MINIMAS_DE_TRIAL = 48
+const SEGUNDOS_POR_HORA = 3600
+
+export function trialEhAceitavel(trialEnd: number, agoraEmSegundos: number): boolean {
+  return trialEnd - agoraEmSegundos >= HORAS_MINIMAS_DE_TRIAL * SEGUNDOS_POR_HORA
+}
+
+// ============================================================
+// A CHECKOUT SESSION
+// ============================================================
+//
+// ⚠️⚠️ `cancel_at` NÃO EXISTE EM `subscription_data`, E A D-05 PRECISA
+// SABER DISSO.
+//
+// A D-05 diz: "`cancel_at` na assinatura = `data_primeira_cobranca +
+// duracao_meses`, **definido no momento da criação**". A intenção está
+// inteira — nada de job nosso encerrando assinatura, porque job uma hora
+// não roda e uma aluna é cobrada no 7º mês. O que não é possível é a
+// LETRA: a API de Checkout Session não aceita `cancel_at` dentro de
+// `subscription_data` (conferido no SDK instalado, `stripe@22.4.0`), e a
+// assinatura é criada pelo Stripe, do lado de lá, quando a pessoa termina
+// o pagamento. Não existe "o momento da criação" na nossa chamada.
+//
+// Onde ele é posto, então: no handler de `checkout.session.completed`
+// (`c42`), que é o primeiro instante em que a assinatura existe e tem id.
+// Uma chamada `subscriptions.update({ cancel_at })`, declarativa, uma vez
+// só, e o Stripe cumpre sozinho a partir dali.
+//
+// ⚠️ ISSO NÃO É UM JOB, e a distinção é a decisão inteira. O que a D-05
+// proíbe é código NOSSO AGENDADO — algo que precisa rodar em julho para
+// que a assinatura pare em julho. Aqui o nosso código roda uma vez, em
+// março, e depois disso o encerramento é obrigação do Stripe. A janela
+// existe (entre a assinatura nascer e o webhook ser processado) e ela é
+// de segundos, dentro do trial, sem cobrança nenhuma no meio.
+//
+// ⚠️ E É POR ISSO QUE O `c43` (`invoice.paid`) RECONFERE `cancel_at`. Se
+// o webhook de `completed` falhar todas as reentregas — o único jeito de
+// a assinatura ficar sem prazo —, a primeira fatura paga é a segunda
+// chance de declarar o fim. Sem essa rede, a falha some por seis meses e
+// reaparece como a sétima cobrança, que é exatamente a reclamação que a
+// D-05 existe para evitar.
+//
+// O fallback nomeado pela própria D-05 (subscription schedule com
+// `end_behavior: 'cancel'`) continua disponível e não foi usado porque
+// não precisou: `cancel_at` dá conta, só não no lugar onde se imaginava
+// que daria.
+
+/** O que a sessão precisa saber, e nada além disso. */
+export type SessaoDeCheckout = {
+  /** `client_reference_id` — a linha de `inscricoes` que este pagamento paga. */
+  inscricaoId: string
+  /** O `price` da safra, já garantido por `precoDaSafra`. */
+  priceId: string
+  /** Para onde o Stripe manda a pessoa depois. Absolutas, montadas pela rota. */
+  sucessoUrl: string
+  canceladoUrl: string
+  /**
+   * E-mail da inscrita. Vai como `customer_email` para que ela não digite
+   * de novo o que acabou de digitar — e para que a fatura chegue no
+   * endereço que está na inscrição, e não num que ela invente na tela do
+   * Stripe.
+   */
+  email: string
+  /** Epoch de `ancorasDaAssinatura`. Omitido quando não passa no `trialEhAceitavel`. */
+  trialEnd: number | null
+  /** `coupons.id` do Stripe, quando há cupom aplicado. Ver `cupomNoStripe`. */
+  stripeCouponId?: string | null
+  /** Só para rastrear no Dashboard e conciliar depois. */
+  safraId: string
+}
+
+/**
+ * Cria a sessão hospedada e devolve a URL para a qual o navegador navega.
+ *
+ * ⚠️ `mode: 'subscription'` COM TRIAL É O QUE SALVA O CARTÃO SEM COBRAR
+ * (D-04). Não é `mode: 'setup'` — aquilo salva o cartão e não cria
+ * assinatura nenhuma, e alguém teria que criar a assinatura depois, o que
+ * é código nosso agendado por outro nome. Aqui a assinatura nasce agora,
+ * com a primeira fatura marcada para a data da safra.
+ *
+ * ⚠️ `payment_method_collection: 'always'` EXPLÍCITO, e não o default.
+ * Com trial, o Stripe permite `'if_required'` — que pula a coleta do
+ * cartão e cria a assinatura sem meio de pagamento. A tela ficaria mais
+ * curta, a conversão subiria, e em setembro a primeira fatura falharia
+ * para todo mundo de uma vez, sem cartão para tentar. O produto inteiro
+ * depende de o cartão estar salvo HOJE.
+ *
+ * ⚠️ `allow_promotion_codes` FICA FORA, de propósito. Ele abre um campo
+ * "código promocional" na tela do Stripe, e ali a pessoa pode digitar
+ * qualquer promotion code que exista na conta — inclusive um que a
+ * Giovanna criou para outra safra, ou um que vazou. Pela D-07 o cupom
+ * nasce no nosso banco, é validado por nós (`c49`) e chega aqui já
+ * resolvido em `discounts`. Um segundo caminho de desconto seria um
+ * desconto que o painel não sabe explicar.
+ *
+ * ⚠️ SEM `idempotencyKey` DERIVADA DA INSCRIÇÃO, e a ausência é decisão.
+ * Ela parece a resposta óbvia para "duplo clique cria duas sessões" — e
+ * criaria um problema pior: a chave de idempotência do Stripe vive 24
+ * horas, e a sessão também expira. Quem voltar no dia seguinte pelo link
+ * de pagamento pendente (D-15) receberia de volta a sessão VELHA, já
+ * expirada, e ficaria olhando para uma página do Stripe dizendo que o
+ * link não vale mais — sem nenhuma forma de pedir outra. Duas sessões
+ * abertas para a mesma inscrição não cobram duas vezes: a segunda que
+ * for concluída encontra a assinatura já criada, e o webhook é
+ * idempotente por construção (`014`).
+ */
+export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<string> {
+  const sessao = await stripe().checkout.sessions.create({
+    mode: 'subscription',
+    line_items: [{ price: dados.priceId, quantity: 1 }],
+
+    // ⚠️ ESTE É O FIO QUE LIGA O PAGAMENTO À INSCRIÇÃO. O webhook não
+    // recebe nada nosso além do que puséssemos aqui: sem
+    // `client_reference_id`, `checkout.session.completed` chega com um id
+    // de sessão do Stripe e nenhuma forma de saber qual linha confirmar.
+    // Casar por e-mail seria a alternativa, e é frágil pelo motivo de
+    // sempre — a pessoa pode ter duas inscrições (safras diferentes), e o
+    // e-mail não distingue qual delas foi paga.
+    client_reference_id: dados.inscricaoId,
+    customer_email: dados.email,
+
+    success_url: dados.sucessoUrl,
+    cancel_url: dados.canceladoUrl,
+
+    // A tela do Stripe em português. Não é cosmético: é a única tela do
+    // fluxo que não é nossa, e ela em inglês faz a pessoa achar que saiu
+    // do site certo bem na hora de digitar o cartão.
+    locale: 'pt-BR',
+
+    payment_method_collection: 'always',
+
+    subscription_data: {
+      // Omitido quando falta menos de 48h — ver `trialEhAceitavel`.
+      ...(dados.trialEnd !== null ? { trial_end: dados.trialEnd } : {}),
+      // O mesmo par de metadados na assinatura, porque o webhook de
+      // `invoice.paid` NÃO carrega `client_reference_id`: ele fala de
+      // fatura e assinatura, não de sessão. Sem isto, o `c43` teria que
+      // reconsultar a sessão para descobrir a inscrição.
+      metadata: {
+        inscricao_id: dados.inscricaoId,
+        safra_id: dados.safraId,
+      },
+    },
+
+    // `discounts` e não `allow_promotion_codes` — ver acima. Ausente
+    // quando não há cupom: mandar `discounts: []` é diferente de não
+    // mandar, e o Stripe trata a lista vazia como "remova todo desconto".
+    ...(dados.stripeCouponId ? { discounts: [{ coupon: dados.stripeCouponId }] } : {}),
+
+    metadata: {
+      inscricao_id: dados.inscricaoId,
+      safra_id: dados.safraId,
+    },
+  })
+
+  // ⚠️ `url` é `string | null` na tipagem, e o `null` acontece de verdade
+  // — em sessões de `ui_mode: 'embedded'`, que não é o nosso caso. Tratar
+  // como erro em vez de `!` porque um `null` aqui significaria que a
+  // sessão foi criada e não tem para onde mandar a pessoa: a inscrição
+  // ficaria em `pendente_pagamento` sem que ninguém soubesse por quê.
+  if (!sessao.url) {
+    throw new Error(`checkout.session ${sessao.id} criada sem url`)
+  }
+
+  return sessao.url
+}
+
+/**
+ * Declara o fim da assinatura (D-05). Chamada uma vez, pelo webhook.
+ *
+ * ⚠️ IDEMPOTENTE POR CONSTRUÇÃO: mandar o mesmo `cancel_at` de novo é um
+ * `update` com o valor que já está lá. É o que permite o `c43`
+ * reconferir sem precisar perguntar antes se já foi posto — e perguntar
+ * antes seria uma leitura a mais para decidir uma escrita que não custa
+ * nada repetir.
+ *
+ * ⚠️ NÃO USE `cancel_at_period_end`. Ele encerra no fim do ciclo ATUAL —
+ * ou seja, no mês que vem —, e não na data do fim do curso. Os dois
+ * nomes se parecem e fazem coisas muito diferentes: um cancela em
+ * outubro, o outro em fevereiro.
+ */
+export async function declararFimDaAssinatura(
+  subscriptionId: string,
+  cancelAt: number,
+): Promise<void> {
+  await stripe().subscriptions.update(subscriptionId, { cancel_at: cancelAt })
+}
+
+// ============================================================
+// O CUPOM, ESPELHADO (D-07: nasce no nosso banco, nunca o contrário)
+// ============================================================
+//
+// A direção é a mesma do `price`: o cupom existe na tabela `cupons` e
+// esta camada garante que exista no Stripe um `coupon` que o represente.
+// Cupom criado à mão no Dashboard não existe para o sistema — não aparece
+// no painel, não tem contagem de uso, e a Giovanna não teria como saber
+// que ele existe.
+//
+// ⚠️ A LEITURA DE `valor` MUDA CONFORME O `tipo`, e é a decisão mais
+// fácil de errar deste projeto (está escrita assim na `013`):
+//
+//   primeiro_mes  → `valor` é PERCENTUAL   (20 = 20% no 1º mês)
+//   todos_meses   → `valor` é PERCENTUAL   (15 = 15% em todas)
+//   meses_gratis  → `valor` é CONTAGEM     (1 = 1 mês grátis)
+//
+// ⚠️ `meses_gratis` VIRA `percent_off: 100`, E NÃO `amount_off`. Um
+// `amount_off` teria que ser o valor da mensalidade em centavos — o que
+// obrigaria o cupom a conhecer o preço da safra, e o tornaria errado no
+// dia em que o preço mudasse. 100% por N meses é a mesma coisa para a
+// aluna e não depende de preço nenhum.
+//
+// ⚠️ `duration: 'forever'` em `todos_meses` NÃO É "para sempre" NA
+// PRÁTICA, e é seguro exatamente por causa da D-05: a assinatura morre no
+// 6º mês por `cancel_at`. "Para sempre" dura o que o contrato durar. A
+// alternativa (`repeating` + `duration_in_months = duracao_meses`) faria
+// o cupom depender da duração da safra e quebraria silenciosamente se uma
+// safra tivesse duração diferente da que estava valendo quando ele foi
+// criado.
+
+/** O recorte de `cupons` que o espelho precisa. */
+export type CupomParaEspelho = {
+  id: string
+  codigo: string
+  tipo: string
+  valor: number
+}
+
+/**
+ * Cria no Stripe o `coupon` correspondente e devolve o id dele.
+ *
+ * ⚠️ O ID É DETERMINÍSTICO (`cupom_<uuid>`), pela mesma razão do
+ * `produtoDaSafra`: `coupons.create({ id })` é a única forma idempotente
+ * aqui. `coupons.list` com filtro por metadata tem consistência eventual
+ * no índice de busca do Stripe, e dois cliques no mesmo minuto criariam
+ * dois cupons para o mesmo registro sem que nada reclamasse.
+ *
+ * ⚠️ CUPOM DO STRIPE É IMUTÁVEL no que importa: `percent_off` e
+ * `duration` não são editáveis. Editar o cupom no nosso painel depois de
+ * espelhado precisa criar OUTRO no Stripe — e é por isso que o id carrega
+ * o uuid da linha, e não o código digitável: mudar o código não deve
+ * mudar a identidade do espelho.
+ *
+ * A validade (`expira_em`), o limite de usos (`usos_max`) e o vínculo com
+ * a safra NÃO viajam para cá. Eles são regra NOSSA, verificada em `c49`
+ * antes de a sessão ser criada. Espelhar `redeem_by` e `max_redemptions`
+ * duplicaria a regra em dois sistemas, e um dia os dois discordam — com
+ * o agravante de que o Stripe seria a versão que a aluna vê.
+ */
+export async function cupomNoStripe(cupom: CupomParaEspelho): Promise<string> {
+  const cupomId = `cupom_${cupom.id}`
+
+  try {
+    await stripe().coupons.retrieve(cupomId)
+    return cupomId
+  } catch (err) {
+    // Mesma regra do `produtoDaSafra`: só `resource_missing` vira "então
+    // crie". Qualquer outro erro — chave inválida, rede, rate limit — TEM
+    // que subir, para que o erro real não desapareça atrás de um segundo
+    // erro sem relação nenhuma com a causa.
+    if (
+      !(err instanceof Stripe.errors.StripeInvalidRequestError) ||
+      err.code !== 'resource_missing'
+    ) {
+      throw err
+    }
+  }
+
+  // ⚠️ SEM `currency` AQUI, e a ausência não é esquecimento: `currency` só
+  // faz sentido junto de `amount_off`, e os três tipos deste projeto são
+  // percentuais (ver o bloco acima — `meses_gratis` é `percent_off: 100`).
+  // Mandá-la junto de `percent_off` é pedir ao Stripe que interprete um
+  // desconto de moeda que ninguém declarou.
+  const comum = {
+    id: cupomId,
+    name: cupom.codigo,
+    metadata: { cupom_id: cupom.id, codigo: cupom.codigo },
+  }
+
+  switch (cupom.tipo) {
+    case 'primeiro_mes':
+      await stripe().coupons.create({ ...comum, percent_off: cupom.valor, duration: 'once' })
+      break
+
+    case 'todos_meses':
+      await stripe().coupons.create({ ...comum, percent_off: cupom.valor, duration: 'forever' })
+      break
+
+    case 'meses_gratis':
+      await stripe().coupons.create({
+        ...comum,
+        percent_off: 100,
+        duration: 'repeating',
+        duration_in_months: cupom.valor,
+      })
+      break
+
+    default:
+      // ⚠️ Não é defensivo: é o `default` que impede um `tipo` novo de
+      // virar cupom sem desconto. O CHECK da `013` restringe a coluna a
+      // três valores, então chegar aqui significa que alguém acrescentou
+      // um quarto no banco e não neste `switch` — e o desfecho silencioso
+      // seria um `coupon` criado sem `percent_off`, que o Stripe aceita e
+      // que não desconta nada. A aluna paga o valor cheio achando que
+      // usou o cupom.
+      throw new Error(`cupom ${cupom.id}: tipo desconhecido "${cupom.tipo}"`)
+  }
+
+  return cupomId
+}
+
+// ============================================================
+// O WEBHOOK — a verificação de assinatura é o que separa "o Stripe
+// disse" de "alguém disse"
+// ============================================================
+//
+// ⚠️ SEM ISTO, A ROTA É UM ENDPOINT PÚBLICO ONDE QUALQUER UM DECLARA QUE
+// UMA ASSINATURA FOI PAGA. Um POST com o corpo certo bastaria para pôr
+// uma inscrição em `ativa`, sem um centavo ter saído de lugar nenhum. É a
+// única defesa que existe ali — a rota não tem sessão, não tem allowlist,
+// e é pública por obrigação (o Stripe precisa alcançá-la).
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET
+
+export class WebhookNotConfiguredError extends Error {
+  constructor() {
+    super('STRIPE_WEBHOOK_SECRET ausente no ambiente')
+    this.name = 'WebhookNotConfiguredError'
+  }
+}
+
+/**
+ * Verifica a assinatura e devolve o evento. LANÇA se não conferir.
+ *
+ * ⚠️ O CORPO TEM QUE SER O TEXTO CRU, byte a byte. `await req.json()`
+ * seguido de `JSON.stringify` produz uma string DIFERENTE — ordem de
+ * chaves, espaços, escapes — e a verificação falha para eventos
+ * perfeitamente legítimos. Quem chama passa `await req.text()`, e é por
+ * isso que a rota não pode usar o corpo parseado antes desta linha.
+ *
+ * ⚠️ E ELA PROTEGE CONTRA REPLAY, não só contra forja. O `Stripe-
+ * Signature` carrega um timestamp que entra no HMAC, e o SDK recusa
+ * assinatura velha (tolerância default de 5 minutos). Um POST capturado e
+ * reenviado amanhã não passa — o que importa porque a idempotência da
+ * `014` protege contra reprocessar o MESMO evento, e não contra alguém
+ * reenviar um evento antigo de propósito.
+ *
+ * O erro sobe. No webhook não há para onde degradar: assinatura que não
+ * confere é 400, e o Stripe não reentrega 4xx — que é o certo, porque
+ * reentregar um evento forjado não o tornaria verdadeiro.
+ */
+export function verificarEventoDoStripe(corpoCru: string, assinatura: string): Stripe.Event {
+  if (!STRIPE_WEBHOOK_SECRET) throw new WebhookNotConfiguredError()
+
+  return stripe().webhooks.constructEvent(corpoCru, assinatura, STRIPE_WEBHOOK_SECRET)
+}
