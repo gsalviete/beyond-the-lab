@@ -289,13 +289,47 @@ escopo do painel.
 - **`supabase/operacao/gerar_convites.sql`** gera os tokens e o CSV da base
   atual, sem painel nenhum.
 
-### ⚠️ Bloqueio conhecido, não resolvido
+### ⚠️ EXCEÇÃO DECLARADA — o design de `/admin`
 
-**Não existe Figma do painel**, e `design/SPEC.md` cobre só a landing. A regra
-"nenhum número visual estimado, valor de layout vem do Figma Dev Mode" torna
-`/admin` inimplementável nos termos do resto do repositório. **Ou aparece uma
-fonte de design, ou `/admin` recebe uma exceção declarada.** É decisão do dono,
-e não foi tomada.
+**Decidida em 09/08/2026 pelo dono do repositório.** Não existe Figma do
+painel e o `design/SPEC.md` cobre só a landing, então a regra "nenhum número
+visual estimado, valor de layout vem do Figma Dev Mode" **fica suspensa para
+`/admin`, e só para ele**, com uma condição:
+
+> **Nenhuma medida nova é inventada.** Tudo sai de classe que já foi medida em
+> outro lugar — `container-page`, `btn-brand`, `font-display`, os tokens de cor
+> do `tailwind.config.js`, e os tamanhos que a modal e o `DocumentoLegal` já
+> usam.
+
+O registro fica em três lugares que a pessoa que mexer vai abrir de qualquer
+jeito: `app/admin/login/page.jsx`, `app/admin/(protegido)/layout.jsx` e
+`src/components/admin/FormularioCupom.jsx`. Se um Figma do painel aparecer,
+esses comentários são o que diz o que foi assumido.
+
+### Dependência nova
+
+**`@supabase/ssr`** entrou no corte 3. Ela é o que faz a sessão viver em cookie
+no App Router (renovação, chunking, leitura em Server Component) — escrever isso
+à mão é o tipo de coisa que quebra em silêncio.
+
+⚠️ **Ela NÃO afrouxa a regra do "único lugar que conhece a chave".** São dois
+clientes com chaves e propósitos diferentes: `service_role` (lê e escreve dado
+pessoal, ignora RLS) mora só em `src/lib/supabase.ts`; `anon` + sessão (só
+resolve "quem é você?") mora em `src/lib/admin.ts` e nas rotas de OAuth. Com RLS
+ligada e zero policies, a `anon` não lê uma linha sequer.
+
+### ⚠️ Configuração fora do código, sem a qual o login não funciona
+
+Está escrita no `.env.example`, e o passo 3 é o que falha em silêncio:
+
+1. Google Cloud → OAuth 2.0 Client ID. O redirect URI é o do **Supabase**
+   (`https://<projeto>.supabase.co/auth/v1/callback`), não o nosso.
+2. Supabase → Authentication → Providers → Google: ligar e colar client
+   id/secret.
+3. Supabase → Authentication → URL Configuration → **Redirect URLs**:
+   acrescentar `http://localhost:3000/admin/callback` e a de produção. Sem
+   isso o login termina numa página errada **sem erro visível em lugar
+   nenhum**.
 
 ### ⚠️ Limitação de modelo que o painel vai encostar
 
