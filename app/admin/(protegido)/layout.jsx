@@ -55,10 +55,7 @@ export default async function Layout({ children }) {
               Beyond The Lab
             </Link>
             <nav className="hidden items-center gap-5 sm:flex">
-              <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
-              <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
-              <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
-              <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
+              <ItensDoMenu />
             </nav>
           </div>
 
@@ -84,21 +81,50 @@ export default async function Layout({ children }) {
       </header>
 
       {/* A navegação de mobile fica abaixo do header em vez de virar
-          hambúrguer: são quatro itens curtos. Um menu que esconde quatro
+          hambúrguer: são cinco itens curtos. Um menu que esconde cinco
           links custa mais toque do que economiza espaço — e o item que mais
           importa (Pendentes) é justamente o que não pode ficar escondido
-          atrás de um clique. */}
+          atrás de um clique.
+
+          `overflow-x-auto` porque cinco itens não cabem em 390px: rolar na
+          horizontal uma faixa de links é gesto conhecido, e é melhor do que
+          quebrar em duas linhas ou encolher a fonte abaixo do que o resto
+          do site usa. */}
       <nav className="border-b border-border-soft sm:hidden">
-        <div className="container-page flex items-center gap-5 py-3">
-          <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
-          <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
-          <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
-          <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
+        <div className="container-page flex items-center gap-5 overflow-x-auto py-3">
+          <ItensDoMenu />
         </div>
       </nav>
 
       <main className="container-page py-10">{children}</main>
     </div>
+  )
+}
+
+/**
+ * Os itens do menu, num lugar só.
+ *
+ * ⚠️ ELES ESTAVAM ESCRITOS DUAS VEZES — uma no menu de desktop, outra no
+ * de mobile — e a duplicação produziu o mesmo defeito TRÊS vezes seguidas
+ * durante a implementação: acrescentar um item numa lista e não na outra,
+ * ou acrescentar duas vezes na mesma. Nenhuma das três apareceu no `tsc`
+ * (que não verifica `.jsx`) nem em teste nenhum; as três apareceram
+ * abrindo a página.
+ *
+ * Uma lista só é o mecanismo que torna aquilo impossível, em vez da
+ * disciplina de lembrar dos dois lugares. É a 8.3 do `REPORT.md` aplicada
+ * a um `<nav>`.
+ */
+function ItensDoMenu() {
+  return (
+    <>
+      <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
+      <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
+      <ItemDeMenu href="/admin/alunas">Alunas</ItemDeMenu>
+      <ItemDeMenu href="/admin/alocacao">Horários</ItemDeMenu>
+      <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
+      <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
+    </>
   )
 }
 
