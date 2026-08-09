@@ -1231,6 +1231,227 @@ export async function alternarInscricoes(safraId: string, abertas: boolean): Pro
   }
 }
 
+// ------------------------------------------------------------
+// GRUPOS — horário dentro da safra (`c68`)
+//
+// ⚠️ GRUPO NÃO TEM CALENDÁRIO NEM PREÇO (D-01). Ele é só um horário
+// (segunda 19h, quarta 19h) dentro de uma safra, e a decisão PROÍBE
+// qualquer coluna de data, valor ou duração aqui. O pool de aulas começa
+// no mesmo dia para todo mundo; a divisão por dia da semana é logística de
+// agenda, não de contrato.
+// ------------------------------------------------------------
+
+export type GrupoDoPainel = Tables<'grupos'>
+
+export async function listarGrupos(safraId: string): Promise<GrupoDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('grupos')
+    .select('*')
+    .eq('safra_id', safraId)
+    .order('dia_semana')
+    .order('horario')
+
+  if (error) {
+    throw new Error(`grupos(lista): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+export async function criarGrupo(dados: {
+  safraId: string
+  diaSemana: string
+  horario: string
+  capacidade: number | null
+}): Promise<void> {
+  const { error } = await supabase().from('grupos').insert({
+    safra_id: dados.safraId,
+    dia_semana: dados.diaSemana,
+    horario: dados.horario,
+    capacidade: dados.capacidade,
+  })
+
+  if (error) {
+    throw new Error(`grupos(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Liga e desliga um horário.
+ *
+ * ⚠️ NÃO É `delete`, e a razão é a FK: `inscricoes.grupo_id` aponta para
+ * cá, e apagar um grupo com aluna alocada esbarraria no `on delete
+ * restrict` — ou, pior, num `cascade` que alguém acrescentasse "para
+ * resolver", apagando a alocação de gente real. Desligar tira o horário
+ * das opções novas e mantém o histórico de quem está nele.
+ */
+export async function alternarGrupo(grupoId: string, ativo: boolean): Promise<void> {
+  const { error } = await supabase().from('grupos').update({ ativo }).eq('id', grupoId)
+
+  if (error) {
+    throw new Error(`grupos(ativo): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+// ------------------------------------------------------------
+// ALUNAS — a lista (`c69`), a ficha (`c70`) e a alocação (`c71`, `c72`)
+// ------------------------------------------------------------
+
+/** Uma linha da lista de alunas. */
+export type AlunaDaLista = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  status: StatusInscricao
+  criada_em: string
+  safra_id: string | null
+  safra_nome: string | null
+  grupo_id: string | null
+}
+
+/**
+ * A lista, com filtros (`c69`).
+ *
+ * ⚠️ OS FILTROS SÃO OPCIONAIS E SE COMBINAM. Sem nenhum, ela devolve tudo
+ * — o que na escala deste produto (dezenas por safra) é uma tela que
+ * carrega. Se um dia isso deixar de ser verdade, este comentário é o aviso
+ * de que ninguém pensou em paginação, e não de que alguém decidiu que não
+ * precisava.
+ *
+ * ⚠️ O `select` É UMA STRING LITERAL. O SDK infere o tipo do resultado a
+ * partir do TEXTO — quebrar em pedaços com `+` produz `string`, a
+ * inferência desiste, e o erro é críptico. Ver `buscarInscricaoParaEmail`.
+ */
+export async function listarAlunas(filtros: {
+  safraId?: string | null
+  status?: StatusInscricao | null
+}): Promise<AlunaDaLista[]> {
+  let query = supabase()
+    .from('inscricoes')
+    .select('id,status,created_at,safra_id,grupo_id,pessoas(id,nome,email,telefone),safras(nome)')
+    .order('created_at', { ascending: false })
+
+  if (filtros.safraId) query = query.eq('safra_id', filtros.safraId)
+  if (filtros.status) query = query.eq('status', filtros.status)
+
+  const { data, error } = await query
+
+  if (error) {
+    throw new Error(`inscricoes(alunas): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return (data ?? [])
+    .filter((l) => l.pessoas)
+    .map((l) => ({
+      inscricao_id: l.id,
+      pessoa_id: l.pessoas!.id,
+      nome: l.pessoas!.nome,
+      email: l.pessoas!.email,
+      telefone: l.pessoas!.telefone,
+      status: l.status as StatusInscricao,
+      criada_em: l.created_at,
+      safra_id: l.safra_id,
+      safra_nome: l.safras?.nome ?? null,
+      grupo_id: l.grupo_id,
+    }))
+}
+
+/** A ficha (`c70`) — tudo que se sabe sobre uma inscrição. */
+export type FichaDaAluna = {
+  inscricao: Tables<'inscricoes'>
+  pessoa: Tables<'pessoas'>
+  safra: Pick<Tables<'safras'>, 'id' | 'nome' | 'data_inicio_aulas'> | null
+  grupo: Pick<Tables<'grupos'>, 'id' | 'dia_semana' | 'horario'> | null
+  assinatura: Pick<
+    Tables<'assinaturas'>,
+    'status_stripe' | 'ciclos_pagos' | 'trial_end' | 'cancel_at' | 'stripe_subscription_id'
+  > | null
+}
+
+/**
+ * A ficha inteira, numa consulta.
+ *
+ * ⚠️ ELA CARREGA O CONSENTIMENTO — `consent`, `consent_at`, `consent_text`
+ * — e isso é o ponto, não um descuido. É a única tela do sistema onde a
+ * prova de consentimento é legível por gente, e ela existe porque um dia
+ * alguém vai perguntar "quando ela aceitou, e o quê?". Sob LGPD, não
+ * conseguir responder é o mesmo que não ter a prova.
+ *
+ * ⚠️ `consent` NULO É UM VALOR, e a ficha tem que mostrá-lo como "não
+ * sabemos" — nunca como "não aceitou". São as linhas herdadas da `010`,
+ * onde nunca houve backfill de propósito: `null` significa que o registro
+ * é anterior ao sistema de consentimento, e falsificá-lo seria destruir a
+ * própria prova que a coluna existe para guardar.
+ */
+export async function buscarFicha(inscricaoId: string): Promise<FichaDaAluna | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('*,pessoas(*),safras(id,nome,data_inicio_aulas),grupos(id,dia_semana,horario),assinaturas(status_stripe,ciclos_pagos,trial_end,cancel_at,stripe_subscription_id)')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(ficha): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const l = data?.[0]
+  if (!l || !l.pessoas) return null
+
+  const { pessoas, safras, grupos, assinaturas, ...inscricao } = l
+
+  return {
+    inscricao: inscricao as Tables<'inscricoes'>,
+    pessoa: pessoas,
+    safra: safras ?? null,
+    grupo: grupos ?? null,
+    // `assinaturas` é 1:1 pelo unique de `inscricao_id` (`012`), mas o
+    // PostgREST devolve o embed conforme a cardinalidade que ele infere.
+    // O `Array.isArray` cobre as duas formas sem apostar em uma.
+    assinatura: Array.isArray(assinaturas) ? (assinaturas[0] ?? null) : (assinaturas ?? null),
+  }
+}
+
+/**
+ * Move uma aluna de horário (`c72`).
+ *
+ * ============================================================
+ * ⚠️ ELA NÃO TOCA NO STRIPE — D-03, e é a decisão inteira
+ * ============================================================
+ *
+ * "Arrastar uma aluna de segunda para quarta no painel não dispara,
+ * cancela ou altera nada no Stripe." A razão: ela já pagou antes de ser
+ * alocada. Separar as duas coisas é o que torna o kanban seguro de usar —
+ * a Giovanna pode reorganizar a semana inteira sem medo.
+ *
+ * A D-03 PROÍBE "qualquer chamada ao Stripe nos handlers de alocação", e
+ * `tests/admin-alocacao.test.ts` verifica isso lendo este módulo e a rota
+ * como texto.
+ *
+ * ⚠️ QUEM GARANTE QUE O GRUPO É DA MESMA SAFRA É O BANCO, não esta
+ * função. O trigger `inscricao_grupo_da_mesma_safra` da `009` recusa a
+ * escrita — a FK sozinha só sabe dizer "este grupo existe", e não que ele
+ * pertence à safra da inscrição. Repetir a regra aqui criaria uma segunda
+ * cópia dela, e um dia as duas discordam (REPORT §9.9).
+ *
+ * ⚠️ `null` É UM DESTINO VÁLIDO: tirar de todos os horários. Uma inscrição
+ * nasce sem grupo e pode voltar a ficar sem — "ainda não alocada" é um
+ * estado legítimo, não um erro.
+ */
+export async function moverParaGrupo(inscricaoId: string, grupoId: string | null): Promise<void> {
+  const { error } = await supabase()
+    .from('inscricoes')
+    .update({ grupo_id: grupoId })
+    .eq('id', inscricaoId)
+
+  if (error) {
+    const e = new Error(`inscricoes(grupo): ${error.code ?? 'sem código'} — ${error.message}`)
+    ;(e as Error & { codigoPg?: string }).codigoPg = error.code
+    throw e
+  }
+}
+
 /**
  * A fila de pagamento pendente (D-15, `c75`).
  *

@@ -731,6 +731,44 @@ export async function declararFimDaAssinatura(
   await stripe().subscriptions.update(subscriptionId, { cancel_at: cancelAt })
 }
 
+/**
+ * Encerra a assinatura de quem cancelou a inscrição (`c73`, Fluxo 6).
+ *
+ * ============================================================
+ * ⚠️ `cancel_at_period_end` E NÃO CANCELAMENTO IMEDIATO
+ * ============================================================
+ *
+ * As duas formas param as cobranças futuras; a diferença é o que acontece
+ * com o mês que a pessoa JÁ PAGOU.
+ *
+ *   `subscriptions.cancel()` mata a assinatura na hora. Quem pagou dia 5 e
+ *     cancelou dia 20 perde os dez dias restantes do mês que comprou — e o
+ *     sistema não faz reembolso (está fora de escopo, e reembolso de
+ *     assinatura é o pior fluxo de suporte que existe, D-04).
+ *
+ *   `cancel_at_period_end` para no fim do ciclo pago. Nenhuma cobrança
+ *     nova, e ninguém perde o que já comprou.
+ *
+ * A segunda é a leitura conservadora, e é a escolhida: cancelar não pode
+ * significar "tomar de volta". ⚠️ **É uma decisão de negócio que o dono do
+ * repositório não tomou explicitamente** — está registrada aqui e no
+ * `ESTADO.md` para ser revista. Se a intenção for cortar o acesso na hora,
+ * a troca é de uma linha, e o custo dela é o reembolso que ninguém quer
+ * fazer.
+ *
+ * ⚠️ ELA NÃO É CHAMADA PELA ALOCAÇÃO. A D-03 proíbe qualquer chamada ao
+ * Stripe nos handlers de alocação — arrastar alguém de segunda para quarta
+ * não move dinheiro. Esta função pertence ao cancelamento, que é outro
+ * ato, com outra tela e outra confirmação.
+ *
+ * ⚠️ IDEMPOTENTE: marcar de novo uma assinatura já marcada é um `update`
+ * com o valor que já está lá. Cancelar duas vezes por engano no painel não
+ * produz nada de novo.
+ */
+export async function encerrarAssinatura(subscriptionId: string): Promise<void> {
+  await stripe().subscriptions.update(subscriptionId, { cancel_at_period_end: true })
+}
+
 // ============================================================
 // O CUPOM, ESPELHADO (D-07: nasce no nosso banco, nunca o contrário)
 // ============================================================
