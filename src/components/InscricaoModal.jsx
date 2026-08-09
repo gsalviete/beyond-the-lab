@@ -81,6 +81,7 @@ export default function InscricaoModal({ onFechar }) {
   const nivelId = `${id}-nivel`
   const cursoId = `${id}-curso`
   const periodoId = `${id}-periodo`
+  const cupomId = `${id}-cupom`
   const consentId = `${id}-consentimento`
   // Alvo do `aria-labelledby` da caixa de consentimento — ver o bloco do
   // consentimento no formulário para o porquê de o nome acessível não
@@ -300,6 +301,11 @@ export default function InscricaoModal({ onFechar }) {
     const name = String(dados.get('name') ?? '').trim()
     const email = String(dados.get('email') ?? '').trim()
     const website = String(dados.get('website') ?? '')
+    // ⚠️ `trim` aqui e `trim` no schema, e a duplicação é de propósito: o
+    // servidor não pode confiar no cliente, e o cliente não pode mandar
+    // espaço para o servidor recusar. Ver o `z.string().trim()` em
+    // `schemas.ts` — quem VALIDA é ele; isto é higiene do que sai daqui.
+    const cupom = String(dados.get('cupom') ?? '').trim()
 
     // ------------------------------------------------------------
     // ⚠️ AQUI HAVIA `const escolha = inscricaoAberta ? 'agora' : 'depois'`,
@@ -365,6 +371,18 @@ export default function InscricaoModal({ onFechar }) {
       setErro('Digite o seu período.')
       return
     }
+    // ⚠️ SÓ O TAMANHO, E NÃO SE O CUPOM EXISTE. Esta validação é de FORMA;
+    // "existe, está ativo, não expirou, não esgotou e vale nesta safra" é
+    // pergunta para o banco, e a resposta muda de um minuto para o outro —
+    // quem responde é `cupomInvalidoPorque`, no servidor, e a mensagem
+    // específica dele volta no corpo do 400 e cai no mesmo `aria-live`
+    // logo abaixo. Uma cópia da regra aqui seria a segunda versão dela,
+    // desatualizada no dia em que a Giovanna desligasse o cupom.
+    if (cupom.length > 60) {
+      setErro('Confira o código do cupom.')
+      return
+    }
+
     // Mesmo espírito da mensagem de consentimento: é erro que se corrige
     // com um clique, e um "confira seus dados" genérico mandaria a pessoa
     // revisar campos que estão certos.
@@ -394,6 +412,12 @@ export default function InscricaoModal({ onFechar }) {
           disponibilidade: dias,
           consent: consentimento,
           website,
+          // ⚠️ A CHAVE SÓ VIAJA QUANDO HÁ CUPOM. O schema declara
+          // `cupom` como `.optional()` com `min(1)`: mandar string vazia
+          // seria um cupom inválido de um campo que a pessoa nem
+          // preencheu, e o POST inteiro voltaria 400 por causa de um
+          // input em branco. Ausência é a forma de dizer "não tem".
+          ...(cupom ? { cupom } : {}),
         }),
       })
       const body = await res.json().catch(() => null)
@@ -775,6 +799,61 @@ export default function InscricaoModal({ onFechar }) {
                   })}
                 </div>
               </fieldset>
+
+              {/* ============================================================
+                  CUPOM — só quando há o que descontar
+                  ============================================================
+
+                  ⚠️ ELE APARECE SÓ COM AS INSCRIÇÕES ABERTAS, e a condição
+                  não é economia de pixel: sem checkout não há cobrança, e
+                  um campo de desconto numa tela de LISTA DE ESPERA promete
+                  um preço que ninguém vai pagar hoje. O servidor ignora o
+                  campo em silêncio nesse modo (não há o que descontar), e
+                  mostrá-lo faria a pessoa digitar um código para nada.
+
+                  ⚠️ NENHUMA MEDIDA NOVA NESTE BLOCO. É o mesmo `FIELD` e o
+                  mesmo `LABEL` dos campos acima, na mesma casca de
+                  `flex flex-col gap-2`. Não existe Figma deste campo, e a
+                  regra do repositório é que valor de layout vem do Dev
+                  Mode — a saída honesta é não inventar valor nenhum e
+                  reusar o que já foi medido.
+
+                  ⚠️ SEM `autoCapitalize` E SEM `toUpperCase`, de propósito.
+                  `bemvinda`, `BemVinda` e `BEMVINDA` são o mesmo cupom, e
+                  quem garante isso é o índice funcional
+                  `cupons_codigo_upper_idx` da `013` — propriedade do banco,
+                  não uma linha de código que alguém pode esquecer de
+                  chamar (REPORT §9.9). Transformar a caixa aqui criaria
+                  uma segunda declaração da mesma regra e, pior, mudaria na
+                  tela o que a pessoa digitou.
+
+                  ⚠️ A VALIDAÇÃO DE VERDADE ACONTECE NO ENVIO, e não a cada
+                  tecla. Um endpoint que responde "este cupom existe?" a
+                  cada digitação é um oráculo de códigos: dá para varrer
+                  palavras até achar um desconto que ninguém te deu. No
+                  envio, a resposta custa um formulário inteiro preenchido
+                  e passa pelo rate limit da rota — e a inscrição NÃO é
+                  gravada quando o cupom é recusado, então a pessoa corrige
+                  o código e reenvia com tudo como estava. */}
+              {inscricaoAberta && (
+                <div className="flex flex-col gap-2 text-left">
+                  <label htmlFor={cupomId} className={LABEL}>
+                    Cupom de desconto (opcional)
+                  </label>
+                  <input
+                    id={cupomId}
+                    name="cupom"
+                    type="text"
+                    maxLength={60}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Tem um código? Digite aqui"
+                    disabled={submitting}
+                    className={FIELD}
+                  />
+                </div>
+              )}
 
               {/* CONSENTIMENTO — desmarcado por padrão, e é assim que fica.
                   Consentimento pré-marcado não é consentimento (LGPD).

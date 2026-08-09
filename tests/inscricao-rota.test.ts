@@ -57,6 +57,9 @@ const dubles = vi.hoisted(() => {
     buscarSafraAtiva: vi.fn(),
     criarInscricao: vi.fn(),
     salvarStripePriceId: vi.fn(),
+    buscarCupom: vi.fn(),
+    salvarStripeCouponId: vi.fn(),
+    cupomNoStripe: vi.fn(),
     precoDoContrato: vi.fn(),
     criarSessaoDeCheckout: vi.fn(),
     notificarAdmin: vi.fn(),
@@ -72,12 +75,23 @@ vi.mock('next/server', () => ({
   },
 }))
 
-vi.mock('@/lib/supabase', () => ({
-  SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
-  buscarSafraAtiva: dubles.buscarSafraAtiva,
-  criarInscricao: dubles.criarInscricao,
-  salvarStripePriceId: dubles.salvarStripePriceId,
-}))
+// ⚠️ `cupomInvalidoPorque` VEM DE VERDADE. Ela é pura — não lê banco, não
+// chama Stripe, não olha o relógio por conta própria —, e é a regra que
+// decide se um desconto vale. Substituí-la faria os testes de cupom
+// abaixo provarem que a rota chama uma função, e não que ela recusa um
+// cupom expirado.
+vi.mock('@/lib/supabase', async (original) => {
+  const real = await original<typeof import('@/lib/supabase')>()
+  return {
+    cupomInvalidoPorque: real.cupomInvalidoPorque,
+    SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
+    buscarSafraAtiva: dubles.buscarSafraAtiva,
+    criarInscricao: dubles.criarInscricao,
+    salvarStripePriceId: dubles.salvarStripePriceId,
+    buscarCupom: dubles.buscarCupom,
+    salvarStripeCouponId: dubles.salvarStripeCouponId,
+  }
+})
 
 // ⚠️ `ancorasDaAssinatura` e `trialEhAceitavel` VÊM DE VERDADE. São a
 // conta da D-04 e a regra das 48 horas do Stripe — substituí-las
@@ -91,6 +105,7 @@ vi.mock('@/lib/stripe', async (original) => {
     StripeNotConfiguredError: dubles.StripeNotConfiguredError,
     precoDoContrato: dubles.precoDoContrato,
     criarSessaoDeCheckout: dubles.criarSessaoDeCheckout,
+    cupomNoStripe: dubles.cupomNoStripe,
   }
 })
 
@@ -796,5 +811,140 @@ describe('vaga é limite mole', () => {
 
     const { body } = await post()
     expect(body.modo).toBe('checkout')
+  })
+})
+
+// ============================================================
+// 9. CUPOM (`c49`) — validado ANTES de qualquer escrita
+//
+// ⚠️ A ORDEM É O COMPORTAMENTO. Validar depois do insert deixaria a pessoa
+// gravada em `pendente_pagamento` por causa de um código digitado errado,
+// e ela cairia na fila da D-15 sem ter feito nada além de trocar uma
+// letra. Aqui, cupom inválido é 400, o formulário continua preenchido na
+// tela, ela corrige e reenvia.
+//
+// ⚠️ `cupomInvalidoPorque` é a de VERDADE neste arquivo (ver os `vi.mock`
+// do topo): o que se afirma abaixo é a regra real, não um dublê
+// concordando consigo mesmo.
+// ============================================================
+const CUPOM_VALIDO = {
+  id: 'cccccccc-dddd-eeee-ffff-000000000000',
+  codigo: 'PARCERIA',
+  tipo: 'primeiro_mes',
+  valor: 20,
+  stripe_coupon_id: 'cupom_cccccccc-dddd-eeee-ffff-000000000000',
+  safra_id: null,
+  usos_max: null,
+  usos_atuais: 0,
+  expira_em: null,
+  ativo: true,
+}
+
+describe('o cupom', () => {
+  beforeEach(() => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
+    rpcComCheckout()
+    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
+    dubles.buscarCupom.mockResolvedValue(CUPOM_VALIDO)
+    dubles.cupomNoStripe.mockResolvedValue(CUPOM_VALIDO.stripe_coupon_id)
+  })
+
+  it('válido → viaja para a sessão, com o id do Stripe e o nosso', async () => {
+    const { body } = await post({ cupom: 'PARCERIA' })
+
+    expect(body.modo).toBe('checkout')
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.stripeCouponId).toBe(CUPOM_VALIDO.stripe_coupon_id)
+    expect(sessao.cupomId).toBe(CUPOM_VALIDO.id)
+  })
+
+  // ⚠️ Controle do método: sem cupom, os dois campos vão nulos. Sem este
+  // par, "o cupom viajou" seria indistinguível de "a rota sempre manda
+  // alguma coisa nesses campos".
+  it('sem cupom → os dois campos vão nulos, e o banco nem é consultado', async () => {
+    const { body } = await post()
+
+    expect(body.modo).toBe('checkout')
+    expect(dubles.buscarCupom).not.toHaveBeenCalled()
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.stripeCouponId).toBeNull()
+    expect(sessao.cupomId).toBeNull()
+  })
+
+  // ⚠️ NADA É GRAVADO. É a propriedade que separa "corrige uma letra e
+  // reenvia" de "você agora está em pendente_pagamento por engano".
+  it.each([
+    ['inexistente', null, 'Não encontramos'],
+    ['expirado', { ...CUPOM_VALIDO, expira_em: '2020-01-01T00:00:00.000Z' }, 'expirou'],
+    ['esgotado', { ...CUPOM_VALIDO, usos_max: 5, usos_atuais: 5 }, 'limite de usos'],
+    ['inativo', { ...CUPOM_VALIDO, ativo: false }, 'não está mais disponível'],
+    [
+      'de outra safra',
+      { ...CUPOM_VALIDO, safra_id: '00000000-0000-0000-0000-000000000000' },
+      'não vale para esta turma',
+    ],
+  ])('%s → 400 com mensagem própria, e NADA é gravado', async (_c, registro, trecho) => {
+    dubles.buscarCupom.mockResolvedValue(registro)
+
+    const { res, body } = await post({ cupom: 'PARCERIA' })
+
+    expect(res.status).toBe(400)
+    expect(body.ok).toBe(false)
+    expect(body.message).toContain(trecho)
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+    expect(dubles.criarSessaoDeCheckout).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ O espelho é TENTADO antes de a falta dele virar recusa. O cupom
+  // nasce no nosso banco e o `coupon` do Stripe é consequência (D-07) —
+  // recusar de cara faria a Giovanna criar um cupom no painel, ele parecer
+  // pronto, e a primeira aluna a usá-lo ouvir que não dá.
+  it('sem espelho → espelha no Stripe e segue, em vez de recusar', async () => {
+    dubles.buscarCupom.mockResolvedValue({ ...CUPOM_VALIDO, stripe_coupon_id: null })
+
+    const { body } = await post({ cupom: 'PARCERIA' })
+
+    expect(dubles.cupomNoStripe).toHaveBeenCalledTimes(1)
+    expect(dubles.salvarStripeCouponId).toHaveBeenCalledWith(
+      CUPOM_VALIDO.id,
+      CUPOM_VALIDO.stripe_coupon_id,
+    )
+    expect(body.modo).toBe('checkout')
+  })
+
+  it('falha ao gravar o espelho não derruba o checkout', async () => {
+    dubles.buscarCupom.mockResolvedValue({ ...CUPOM_VALIDO, stripe_coupon_id: null })
+    dubles.salvarStripeCouponId.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { body } = await post({ cupom: 'PARCERIA' })
+    expect(body.modo).toBe('checkout')
+  })
+
+  // ⚠️ FALHA DE INFRA NÃO VIRA "SEGUE SEM DESCONTO". A pessoa digitou um
+  // cupom; abrir o checkout pelo valor cheio cobraria mais do que ela
+  // aceitou pagar, e ela só descobriria no extrato.
+  it('banco fora do ar na validação → 500, e nada é gravado', async () => {
+    dubles.buscarCupom.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { res } = await post({ cupom: 'PARCERIA' })
+
+    expect(res.status).toBe(500)
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+  })
+
+  // Sem safra aberta não há o que descontar. Recusar a inscrição por causa
+  // de um cupom que não seria usado trocaria um cadastro por uma mensagem
+  // de erro.
+  it('sem safra aberta → o cupom é ignorado em silêncio, e a pessoa entra na lista', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(false))
+    dubles.buscarCupom.mockResolvedValue(null)
+
+    const { res, body } = await post({ cupom: 'INEXISTENTE' })
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(dubles.buscarCupom).not.toHaveBeenCalled()
+    expect(argumentos().safra_id).toBeNull()
   })
 })

@@ -225,6 +225,21 @@ describe('o corpo manda exatamente o que o schema espera', () => {
     }
   })
 
+  // ⚠️ `cupom` NÃO APARECE EM `chavesDoCorpo`, e não é falha do extrator:
+  // ele entra por SPREAD CONDICIONAL (`...(cupom ? { cupom } : {})`), e a
+  // linha começa com `...`, que o regex de chave não casa. A ausência é o
+  // comportamento certo — a chave só viaja quando há cupom, porque o
+  // schema declara `min(1)` e uma string vazia faria o POST inteiro voltar
+  // 400 por causa de um input em branco.
+  //
+  // Mas então NADA neste arquivo garantiria que a modal manda o cupom. Por
+  // isso a asserção é sobre a forma do spread, e não sobre a lista de
+  // chaves: é a única maneira de o teste continuar cobrindo o campo sem
+  // afirmar que ele está sempre presente, que seria falso.
+  it('o cupom viaja por spread condicional, e só quando existe', () => {
+    expect(corpo).toMatch(/\.\.\.\(\s*cupom\s*\?\s*\{\s*cupom\s*\}\s*:\s*\{\}\s*\)/)
+  })
+
   // ⚠️ Estes três não são "campos que a modal esqueceu". Cada um tem uma
   // razão diferente para não estar:
   //
