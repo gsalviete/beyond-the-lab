@@ -927,6 +927,189 @@ export async function salvarStripePriceId(safraId: string, priceId: string): Pro
 }
 
 // ============================================================
+// O PAINEL — leituras e escritas que SÓ a Giovanna faz
+// ============================================================
+//
+// ⚠️ TUDO DAQUI PARA BAIXO É ALCANÇÁVEL SÓ POR `/api/admin/*`, e cada uma
+// dessas rotas começa com `exigirAdmin`. Nenhuma destas funções tem
+// verificação de acesso própria, de propósito: autorização é decisão de
+// ROTA, feita uma vez, num lugar que dá para auditar lendo a primeira
+// linha do handler. Espalhá-la aqui dentro criaria a ilusão de defesa em
+// profundidade e, na prática, dois lugares para alguém esquecer.
+
+/** Uma safra como o painel a lista. */
+export type SafraDoPainel = Pick<
+  Tables<'safras'>,
+  'id' | 'nome' | 'data_inicio_aulas' | 'inscricoes_abertas'
+>
+
+/**
+ * Todas as safras, da mais recente para a mais antiga.
+ *
+ * ⚠️ SEM PAGINAÇÃO, e é uma escolha com prazo de validade escrito: safra é
+ * semestral. Vinte anos de produto são quarenta linhas. No dia em que isso
+ * deixar de ser verdade, este comentário é o aviso de que ninguém pensou
+ * no assunto — e não de que alguém decidiu que não precisava.
+ */
+export async function listarSafras(): Promise<SafraDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('safras')
+    .select('id,nome,data_inicio_aulas,inscricoes_abertas')
+    .order('data_inicio_aulas', { ascending: false })
+
+  if (error) {
+    throw new Error(`safras(painel): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Os contadores da tela de hoje (`c64`).
+ *
+ * ⚠️ CINCO CONSULTAS `head: true` E NENHUMA LINHA TRAFEGANDO. O PostgREST
+ * responde só o cabeçalho `Content-Range` quando `head` é verdadeiro — é o
+ * que evita arrastar a lista inteira de inscritas, com dado pessoal
+ * dentro, para exibir um número. A tela de contagem não tem por que
+ * carregar quem está sendo contado.
+ *
+ * ⚠️ `pendentes` É A FILA DA D-15, e é o contador que existe para ser
+ * OLHADO: quem está em `pendente_pagamento` não tem como sair sozinha — não
+ * sabe que está pendente, e refazer o formulário devolve "você já está
+ * inscrita". Sem este número na cara dela, o estado é invisível.
+ */
+export type ContagensDoPainel = {
+  listaEspera: number
+  pendentes: number
+  confirmadas: number
+  ativas: number
+  inadimplentes: number
+}
+
+export async function contarPorStatus(): Promise<ContagensDoPainel> {
+  const conta = async (status: StatusInscricao) => {
+    const { count, error } = await supabase()
+      .from('inscricoes')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', status)
+
+    if (error) {
+      throw new Error(`inscricoes(count ${status}): ${error.code ?? 'sem código'} — ${error.message}`)
+    }
+
+    // ⚠️ `null` NÃO VIRA ZERO. Significaria que o `Content-Range` não veio,
+    // e exibir 0 afirmaria "não há ninguém" a partir de uma resposta que
+    // não disse nada. É o mesmo erro de sempre, com sinal trocado — e num
+    // painel ele é pior, porque um zero é exatamente o que faz a Giovanna
+    // não olhar de novo.
+    if (count === null) throw new Error(`inscricoes(count ${status}): sem contagem`)
+
+    return count
+  }
+
+  const [listaEspera, pendentes, confirmadas, ativas, inadimplentes] = await Promise.all([
+    conta('lista_espera'),
+    conta('pendente_pagamento'),
+    conta('confirmada'),
+    conta('ativa'),
+    conta('inadimplente'),
+  ])
+
+  return { listaEspera, pendentes, confirmadas, ativas, inadimplentes }
+}
+
+/** Cupom na listagem do painel — a linha inteira, que é dela mesmo. */
+export type CupomDoPainel = Tables<'cupons'>
+
+export async function listarCupons(): Promise<CupomDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('*')
+    .order('criado_em', { ascending: false })
+
+  if (error) {
+    throw new Error(`cupons(painel): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Cria o cupom no NOSSO banco. O espelho no Stripe é do chamador.
+ *
+ * ⚠️ A DIREÇÃO É UMA SÓ (D-07): nasce aqui, é espelhado lá. Cupom criado
+ * pelo Dashboard do Stripe não existe para o sistema — não aparece no
+ * painel, não tem contagem de uso, e a Giovanna não teria como saber que
+ * ele existe.
+ *
+ * ⚠️ ESTA FUNÇÃO NÃO CHAMA O STRIPE, e a separação é o que torna o estado
+ * intermediário honesto. A criação lá é uma chamada de rede que pode
+ * falhar depois de a linha estar gravada; `stripe_coupon_id` nulo
+ * significa exatamente isso — "existe aqui, ainda não existe lá" — e o
+ * painel mostra "não publicado" em vez de fingir que está pronto. Fundir
+ * as duas obrigaria a inventar uma transação que atravessa a fronteira do
+ * banco, que é o que não existe.
+ *
+ * ⚠️ NENHUMA VALIDAÇÃO DE DOMÍNIO AQUI. Percentual acima de 100, valor
+ * negativo, tipo inventado e `usos_atuais > usos_max` são recusados pelos
+ * CHECKs da `013`. Repetir as regras nesta camada criaria uma segunda
+ * cópia delas, e um dia as duas discordam — constraint no banco vence
+ * validação na aplicação (REPORT §9.9).
+ */
+export async function criarCupom(dados: {
+  codigo: string
+  tipo: string
+  valor: number
+  safraId: string | null
+  usosMax: number | null
+  expiraEm: string | null
+}): Promise<CupomDoPainel> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .insert({
+      codigo: dados.codigo,
+      tipo: dados.tipo,
+      valor: dados.valor,
+      safra_id: dados.safraId,
+      usos_max: dados.usosMax,
+      expira_em: dados.expiraEm,
+    })
+    .select('*')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) throw new Error('cupons(insert): nenhuma linha devolvida')
+
+  return linha
+}
+
+/**
+ * Liga e desliga um cupom.
+ *
+ * ⚠️ É O BOTÃO DE PÂNICO DA GIOVANNA, e por isso ele é um `update` de uma
+ * coluna e não um `delete`. O cupom vazou num grupo de WhatsApp e ela
+ * precisa parar AGORA — sem apagar o histórico de quem já usou, que é
+ * informação financeira, e sem quebrar a FK de `assinaturas.cupom_id`.
+ *
+ * ⚠️ E DESLIGAR NÃO MEXE NO STRIPE. O `coupon` de lá continua existindo,
+ * inerte: quem decide se um desconto se aplica é `cupomInvalidoPorque`,
+ * do nosso lado, ANTES de a sessão ser criada. Apagar no Stripe não
+ * cancelaria desconto de assinatura nenhuma que já o tenha — só tiraria a
+ * nossa capacidade de reativar.
+ */
+export async function alternarCupom(cupomId: string, ativo: boolean): Promise<void> {
+  const { error } = await supabase().from('cupons').update({ ativo }).eq('id', cupomId)
+
+  if (error) {
+    throw new Error(`cupons(ativo): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+// ============================================================
 // O TOKEN DE ACESSO — identifica, e NÃO autoriza (D-10, D-15)
 // ============================================================
 
