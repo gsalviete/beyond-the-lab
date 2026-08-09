@@ -36,6 +36,25 @@ import {
 } from '@/config/dominio'
 import type { Safra } from '@/lib/supabase'
 
+/**
+ * O que os dois e-mails de fato leem da safra: o nome e a data de início.
+ *
+ * ⚠️ ERA `Safra` INTEIRA, E ESTREITOU NO `c42`, por necessidade e não por
+ * capricho. Quem passa este objeto deixou de ser só a rota de inscrição —
+ * o webhook do Stripe também manda a confirmação, depois do pagamento, e
+ * ele teria que carregar oito colunas de `safras` para preencher um tipo
+ * que usa duas. `valor_mensal` e `duracao_meses` são o caso mais claro:
+ * pela D-06 o que vale para quem pagou é o valor TRAVADO na inscrição, e
+ * um campo com o preço atual da safra viajando até aqui é um número certo
+ * para a pessoa errada esperando alguém imprimi-lo por engano.
+ *
+ * `Pick` sobre `Safra` e não um tipo solto: assim ele continua derivado do
+ * schema, e renomear uma coluna quebra este arquivo em vez de o deixar
+ * mentindo. É o corte de fronteira do REPORT §9.6 aplicado ao e-mail —
+ * carregar o mínimo, com o corte explícito no ponto onde acontece.
+ */
+export type SafraDoEmail = Pick<Safra, 'nome' | 'data_inicio_aulas'>
+
 // Nenhuma com prefixo NEXT_PUBLIC_, de propósito: o Next só expõe ao cliente
 // as variáveis com esse prefixo. Sem ele, elas nunca saem do servidor.
 const RESEND_API_KEY = process.env.RESEND_API_KEY
@@ -207,7 +226,7 @@ function linkWhatsApp(e164: string): string {
  * acabou de se inscrever numa safra aberta — dizer "não há turma" a quem
  * tem vaga é pior que não mandar e-mail nenhum e ver o erro no log.
  */
-function semanaDeInicioDaSafra(safra: Safra | null): string | null {
+function semanaDeInicioDaSafra(safra: SafraDoEmail | null): string | null {
   if (!safra) return null
   return formatarSemanaDeInicio(safra.data_inicio_aulas)
 }
@@ -337,7 +356,7 @@ function linhaDado(rotulo: string, valorHtml: string): string {
 // ------------------------------------------------------------
 // E-MAIL 1 — para a Giovanna. Operacional: densidade acima de enfeite.
 // ------------------------------------------------------------
-function montarAdmin(inscricao: InscricaoEmail, turma: Safra | null) {
+function montarAdmin(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
   const {
     name, email, phone, nivel_ingles, curso, periodo, disponibilidade,
   } = inscricao
@@ -404,7 +423,7 @@ Data e hora: ${quando}
 // na lista de espera não existe data de início nem vaga garantida, e
 // prometer qualquer uma das duas seria mentira.
 // ------------------------------------------------------------
-function montarInscrita(inscricao: InscricaoEmail, turma: Safra | null) {
+function montarInscrita(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
   const { name, email, phone, nivel_ingles, curso, periodo, disponibilidade } = inscricao
 
   // Uma coisa só, e continua sendo duas: o TEXTO da semana de início e o
@@ -566,7 +585,7 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 /** Avisa a Giovanna de uma inscrição nova. Não lança. */
 export async function notificarAdmin(
   inscricao: InscricaoEmail,
-  turma: Safra | null,
+  turma: SafraDoEmail | null,
 ): Promise<void> {
   try {
     if (!EMAIL_ADMIN) {
@@ -586,7 +605,7 @@ export async function notificarAdmin(
 /** Confirma para quem se inscreveu. Não lança. */
 export async function confirmarInscricao(
   inscricao: InscricaoEmail,
-  turma: Safra | null,
+  turma: SafraDoEmail | null,
 ): Promise<void> {
   try {
     const { assunto, html, texto } = montarInscrita(inscricao, turma)

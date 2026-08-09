@@ -69,7 +69,9 @@ const dubles = vi.hoisted(() => {
     mudarStatusInscricao: vi.fn(),
     buscarAssinaturaPorSubscription: vi.fn(),
     buscarTravadosDaInscricao: vi.fn(),
+    buscarInscricaoParaEmail: vi.fn(),
     contarCicloPago: vi.fn(),
+    confirmarInscricao: vi.fn(),
   }
 })
 
@@ -98,8 +100,11 @@ vi.mock('@/lib/supabase', () => ({
   mudarStatusInscricao: dubles.mudarStatusInscricao,
   buscarAssinaturaPorSubscription: dubles.buscarAssinaturaPorSubscription,
   buscarTravadosDaInscricao: dubles.buscarTravadosDaInscricao,
+  buscarInscricaoParaEmail: dubles.buscarInscricaoParaEmail,
   contarCicloPago: dubles.contarCicloPago,
 }))
+
+vi.mock('@/lib/email', () => ({ confirmarInscricao: dubles.confirmarInscricao }))
 
 // Caminho relativo, e não `@/`: o alias aponta para `src/`, e as rotas
 // moram em `app/`. Mesma forma de `inscricao-rota.test.ts`.
@@ -182,6 +187,16 @@ beforeEach(() => {
     cancel_at: '2027-03-01T00:00:00.000Z',
   })
   dubles.contarCicloPago.mockResolvedValue(true)
+  dubles.buscarInscricaoParaEmail.mockResolvedValue({
+    nome: 'Maria Silva',
+    email: 'maria@exemplo.com',
+    telefone: '+5521987654321',
+    nivel_ingles: 'basico',
+    curso: 'Fonoaudiologia',
+    periodo: '6º semestre',
+    disponibilidade: ['seg', 'qua'],
+    safra: { nome: 'Setembro 2026', data_inicio_aulas: '2026-09-01' },
+  })
 })
 
 // ============================================================
@@ -426,5 +441,74 @@ describe('evento sem handler', () => {
     expect(res.status).toBe(200)
     expect(dubles.reservarEventoStripe).toHaveBeenCalledTimes(1)
     for (const escrita of escritas()) expect(escrita).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================
+// 7. A CONFIRMAÇÃO DA ALUNA — sai daqui, e não do insert
+//
+// ⚠️ A ROTA DE INSCRIÇÃO DEIXOU DE MANDÁ-LA no `c35`: pela D-02 é pagar
+// que faz entrar, e uma confirmação disparada no insert diria "sua
+// inscrição está confirmada" para alguém que ainda ia digitar o cartão.
+// Este é o primeiro instante em que a frase é verdade.
+// ============================================================
+describe('o e-mail de confirmação', () => {
+  it('sai depois do pagamento, com os dados da inscrição', async () => {
+    await POST(requisicao())
+
+    expect(dubles.buscarInscricaoParaEmail).toHaveBeenCalledWith(INSCRICAO_ID)
+    expect(dubles.confirmarInscricao).toHaveBeenCalledTimes(1)
+
+    const [inscricao, safra] = dubles.confirmarInscricao.mock.calls[0]
+    expect(inscricao.email).toBe('maria@exemplo.com')
+    expect(safra?.data_inicio_aulas).toBe('2026-09-01')
+  })
+
+  // ⚠️ DEPOIS de todas as escritas, e a ordem é o comportamento: se o
+  // e-mail saísse antes de `mudarStatusInscricao` e o update quebrasse, o
+  // 500 faria o Stripe reentregar e a segunda passagem mandaria um SEGUNDO
+  // e-mail para a mesma pessoa.
+  it('só depois de a inscrição virar `confirmada`', async () => {
+    const ordem: string[] = []
+    dubles.mudarStatusInscricao.mockImplementation(async () => {
+      ordem.push('status')
+    })
+    dubles.confirmarInscricao.mockImplementation(async () => {
+      ordem.push('email')
+    })
+
+    await POST(requisicao())
+    expect(ordem).toEqual(['status', 'email'])
+  })
+
+  // ⚠️ FALHA DE E-MAIL É LOG, NÃO REENTREGA. O efeito financeiro inteiro
+  // já aconteceu; devolver 500 faria o Stripe reprocessar um pagamento
+  // para reenviar uma mensagem.
+  it('Resend fora do ar não vira 500', async () => {
+    dubles.confirmarInscricao.mockRejectedValue(new Error('resend fora do ar'))
+    const res = await POST(requisicao())
+    expect(res.status).toBe(200)
+  })
+
+  it('leitura que falha também não vira 500', async () => {
+    dubles.buscarInscricaoParaEmail.mockRejectedValue(new Error('banco fora do ar'))
+    const res = await POST(requisicao())
+    expect(res.status).toBe(200)
+  })
+
+  // Linha herdada da `010`: `consent` e perfil podem ser nulos, porque
+  // `null` significa "não sabemos" e não houve backfill. Sem perfil a
+  // mensagem sairia com um buraco no meio.
+  it('perfil incompleto → nenhum e-mail, e ainda assim 200', async () => {
+    dubles.buscarInscricaoParaEmail.mockResolvedValue(null)
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
+    // ⚠️ Controle negativo do teste acima: o mesmo evento, com perfil
+    // completo, MANDA. Sem este par, "não mandou" seria indistinguível de
+    // "a rota não sabe mandar".
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'confirmada')
   })
 })

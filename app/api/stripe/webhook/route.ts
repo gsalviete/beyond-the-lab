@@ -8,9 +8,13 @@ import {
   verificarEventoDoStripe,
   WebhookNotConfiguredError,
 } from '@/lib/stripe'
+import { confirmarInscricao } from '@/lib/email'
 import {
   buscarAssinaturaPorSubscription,
+  buscarCupomPorId,
+  buscarInscricaoParaEmail,
   buscarTravadosDaInscricao,
+  contarUsoDeCupom,
   contarCicloPago,
   liberarEventoStripe,
   mudarStatusInscricao,
@@ -278,6 +282,14 @@ async function sessaoConcluida(sessao: Stripe.Checkout.Session): Promise<void> {
   // acabamos de mexer no objeto.
   const assinatura = await stripe().subscriptions.retrieve(subscriptionId)
 
+  // ⚠️ O CUPOM VEM DO NOSSO METADATA, e não do `discount` do Stripe.
+  // `assinaturas.cupom_id` é FK para a NOSSA tabela; o `coupon` do Stripe
+  // é o espelho dela (D-07). Mapear de volta exigiria fatiar o id
+  // `cupom_<uuid>` — decidir identidade pelo formato de uma string, que
+  // quebra no dia em que o formato mudar. Quem sabe qual cupom foi
+  // aplicado é a rota que o aplicou, e ela o carimbou aqui.
+  const cupomId = assinatura.metadata?.cupom_id || null
+
   await registrarAssinatura({
     inscricaoId,
     stripeCustomerId: customerId,
@@ -286,16 +298,96 @@ async function sessaoConcluida(sessao: Stripe.Checkout.Session): Promise<void> {
     statusStripe: assinatura.status,
     trialEnd: paraIso(assinatura.trial_end),
     cancelAt: paraIso(assinatura.cancel_at),
-    // ⚠️ O cupom aplicado NÃO é lido do Stripe aqui. `assinaturas.cupom_id`
-    // é FK para a NOSSA tabela, e o `coupon` do Stripe é o espelho dela
-    // (D-07) — mapear de volta exigiria fatiar o id `cupom_<uuid>`, que é
-    // decidir a identidade pelo formato de uma string. Quem sabe qual
-    // cupom foi aplicado é a rota que criou a sessão, e é ela que vai
-    // gravá-lo no `c49`.
-    cupomId: null,
+    cupomId,
   })
 
   await mudarStatusInscricao(inscricaoId, 'confirmada')
+
+  // ------------------------------------------------------------
+  // O USO DO CUPOM — contado no PAGAMENTO, não na abertura do checkout
+  //
+  // ⚠️ Contar ao criar a sessão gastaria o cupom de quem abriu a tela e
+  // desistiu: um cupom de 10 usos se esgotaria com 10 pessoas curiosas e
+  // zero vendas.
+  //
+  // ⚠️ E A FALHA AQUI NÃO VIRA 500. O pagamento aconteceu, a inscrição já
+  // está `confirmada`, e devolver 500 faria o Stripe reentregar o evento
+  // inteiro para corrigir um CONTADOR. A contagem é informação de painel;
+  // o desconto já foi dado pelo Stripe de qualquer forma. O CHECK
+  // `cupons_usos_check` da `013` é quem impede o número de ficar
+  // impossível — ele recusa `usos_atuais > usos_max`, e a recusa vira este
+  // log em vez de uma contagem mentirosa.
+  // ------------------------------------------------------------
+  if (cupomId) {
+    try {
+      const registro = await buscarCupomPorId(cupomId)
+
+      if (!registro) {
+        console.error('[webhook] cupom do metadata nao existe mais', cupomId)
+      } else if (!(await contarUsoDeCupom(registro.id, registro.usos_atuais))) {
+        console.warn('[webhook] uso de cupom ja contado por outra tentativa', cupomId)
+      }
+    } catch (err) {
+      console.error('[webhook] falha ao contar o uso do cupom', cupomId, err)
+    }
+  }
+
+  // ------------------------------------------------------------
+  // O E-MAIL DA ALUNA — e ele sai AQUI, e não no insert
+  //
+  // ⚠️ A ROTA DE INSCRIÇÃO DEIXOU DE MANDÁ-LO no `c35`, e o motivo é a
+  // D-02: pagar é o que faz entrar. Uma confirmação disparada no momento
+  // do insert diria "sua inscrição está confirmada" para alguém que ainda
+  // ia digitar o cartão — e que pode fechar a aba. Este é o primeiro
+  // instante em que a frase é verdade.
+  //
+  // ⚠️ POR ÚLTIMO, DEPOIS DE TODAS AS ESCRITAS, e não é ordem estética. O
+  // e-mail não pode ser mandado por um handler que ainda vai falhar: se
+  // ele saísse antes de `mudarStatusInscricao` e o `update` quebrasse, o
+  // 500 faria o Stripe reentregar, a reserva seria liberada, e a segunda
+  // passagem mandaria um SEGUNDO e-mail para a mesma pessoa. Aqui, tudo
+  // que podia falhar já falhou.
+  //
+  // ⚠️ E ELE NÃO PODE DERRUBAR O PAGAMENTO. Nenhuma função de
+  // `src/lib/email.ts` lança, por contrato escrito no topo daquele arquivo
+  // — mas a LEITURA que monta o payload lança, e por isso ela tem try
+  // próprio. Um Resend fora do ar, ou uma linha herdada da `010` sem
+  // perfil, viraria 500 aqui e o Stripe reentregaria um evento cujo efeito
+  // financeiro inteiro já aconteceu: a inscrição voltaria a ser processada
+  // do zero para reenviar um e-mail. Falha de e-mail é log, não reentrega.
+  //
+  // ⚠️ SEM `after()`, ao contrário da rota de inscrição. Lá o `after`
+  // existe para a pessoa ver a tela de sucesso sem esperar o Resend; aqui
+  // não há ninguém esperando — o Stripe não lê nem o corpo nem o tempo de
+  // resposta, dentro do timeout dele. E `after` num handler que pode
+  // devolver 500 agendaria e-mail para um evento que vai ser reentregue.
+  // ------------------------------------------------------------
+  try {
+    const paraEmail = await buscarInscricaoParaEmail(inscricaoId)
+
+    if (!paraEmail) {
+      console.error(
+        '[webhook] inscricao confirmada sem perfil completo — e-mail nao enviado',
+        inscricaoId,
+      )
+      return
+    }
+
+    await confirmarInscricao(
+      {
+        name: paraEmail.nome,
+        email: paraEmail.email,
+        phone: paraEmail.telefone,
+        nivel_ingles: paraEmail.nivel_ingles,
+        curso: paraEmail.curso,
+        periodo: paraEmail.periodo,
+        disponibilidade: paraEmail.disponibilidade,
+      },
+      paraEmail.safra,
+    )
+  } catch (err) {
+    console.error('[webhook] falha ao enviar a confirmacao', inscricaoId, err)
+  }
 }
 
 /**

@@ -927,6 +927,179 @@ export async function salvarStripePriceId(safraId: string, priceId: string): Pro
 }
 
 // ============================================================
+// CUPOM — nasce no nosso banco, é espelhado no Stripe (D-07)
+// ============================================================
+//
+// A direção é uma só, e nunca a inversa. Cupom criado pelo Dashboard do
+// Stripe não existe para o sistema: não aparece no painel, não tem
+// contagem de uso, e a Giovanna não teria como saber que ele existe.
+// Ver o cabeçalho da `013`.
+
+/** O recorte de `cupons` que a validação e o espelho precisam. */
+export type Cupom = Pick<
+  Tables<'cupons'>,
+  'id' | 'codigo' | 'tipo' | 'valor' | 'stripe_coupon_id' | 'safra_id' | 'usos_max' | 'usos_atuais' | 'expira_em' | 'ativo'
+>
+
+/**
+ * Acha o cupom pelo código digitado. `null` quando não existe.
+ *
+ * ⚠️ A BUSCA É POR `upper(codigo)`, e a normalização não é aqui — é o
+ * índice `cupons_codigo_upper_idx` da `013` que a torna propriedade do
+ * banco. A aluna digita `bemvinda`, `BemVinda` ou `BEMVINDA` e as três são
+ * o mesmo cupom. O `.toUpperCase()` desta função é o que faz a consulta
+ * casar com o índice funcional; a UNICIDADE continua sendo do banco, e não
+ * desta linha (REPORT §9.9).
+ *
+ * ⚠️ ESTA FUNÇÃO NÃO DECIDE SE O CUPOM VALE. Ela devolve a linha como
+ * está — inclusive expirada, esgotada ou inativa. Quem julga é
+ * `cupomAplicavel`, e a separação é deliberada: a leitura tem uma resposta
+ * (existe ou não), o julgamento tem várias (expirado, esgotado, de outra
+ * safra), e misturá-los produziria um `null` que significa cinco coisas
+ * diferentes e uma mensagem de erro que não sabe qual delas dizer.
+ */
+export async function buscarCupom(codigo: string): Promise<Cupom | null> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('id,codigo,tipo,valor,stripe_coupon_id,safra_id,usos_max,usos_atuais,expira_em,ativo')
+    .ilike('codigo', codigo.trim())
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons: ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * O mesmo cupom, pelo id. É o que o webhook tem em mãos.
+ *
+ * ⚠️ DUAS FUNÇÕES E NÃO UMA COM DOIS FILTROS, e a razão é o SDK: o tipo do
+ * resultado é inferido do TEXTO do `select`, que precisa ser um literal —
+ * uma constante compartilhada viraria `string` e a inferência desistiria
+ * (ver a nota em `buscarInscricaoParaEmail`). As duas listas de colunas
+ * são idênticas de propósito, e é o `Cupom` acima que as amarra: mudar uma
+ * sem a outra quebra o tipo.
+ */
+export async function buscarCupomPorId(id: string): Promise<Cupom | null> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('id,codigo,tipo,valor,stripe_coupon_id,safra_id,usos_max,usos_atuais,expira_em,ativo')
+    .eq('id', id)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons(id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/** Grava o espelho do Stripe. Mesma janela de `salvarStripePriceId`. */
+export async function salvarStripeCouponId(cupomId: string, stripeCouponId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('cupons')
+    .update({ stripe_coupon_id: stripeCouponId })
+    .eq('id', cupomId)
+
+  if (error) {
+    throw new Error(`cupons(stripe_coupon_id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Soma um uso. Devolve `false` quando alguém somou antes.
+ *
+ * Mesmo compare-and-swap de `contarCicloPago`, pela mesma razão: o
+ * PostgREST não sabe expressar `usos_atuais = usos_atuais + 1`, e ler para
+ * depois escrever abre a corrida clássica.
+ *
+ * ⚠️ O USO É CONTADO NO PAGAMENTO, E NÃO NA ABERTURA DO CHECKOUT. Contar
+ * ao criar a sessão gastaria o cupom de quem abriu a tela e desistiu — um
+ * cupom de 10 usos se esgotaria com 10 pessoas curiosas e zero vendas.
+ * Quem conta é o webhook, depois de `checkout.session.completed`.
+ *
+ * ⚠️ E ISSO ACEITA UM ESTOURO CONHECIDO: entre a validação (que só lê) e o
+ * pagamento não há trava, então onze pessoas podem concluir um cupom de
+ * dez. É a mesma escolha da D-08 para vagas — na escala do produto, um
+ * lock distribuído não se paga —, com uma diferença a favor: o CHECK
+ * `cupons_usos_check` da `013` recusa `usos_atuais > usos_max`, então o
+ * décimo primeiro uso falha no banco e vira log em vez de contagem
+ * mentirosa. O desconto já foi dado; o que não acontece é o número ficar
+ * errado.
+ */
+export async function contarUsoDeCupom(cupomId: string, usosLidos: number): Promise<boolean> {
+  const { count, error } = await supabase()
+    .from('cupons')
+    .update({ usos_atuais: usosLidos + 1 }, { count: 'exact' })
+    .eq('id', cupomId)
+    .eq('usos_atuais', usosLidos)
+
+  if (error) {
+    throw new Error(`cupons(usos_atuais): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return count === 1
+}
+
+/**
+ * Por que um cupom não vale — ou `null` quando ele vale.
+ *
+ * ⚠️ FUNÇÃO PURA, E É DE PROPÓSITO: ela não lê banco, não chama Stripe e
+ * não depende de relógio que não lhe seja passado. É a única parte da
+ * regra de cupom que dá para testar sem dublê nenhum, e é onde estão as
+ * quatro formas de um desconto não valer. O resto do caminho é
+ * encanamento.
+ *
+ * As quatro, e cada uma com o motivo de existir:
+ *
+ *   INATIVO      → a Giovanna desligou. É o botão de pânico dela: o cupom
+ *                  vazou num grupo de WhatsApp e ela precisa parar agora,
+ *                  sem apagar o histórico de quem já usou.
+ *   EXPIRADO     → `expira_em` passou. Campanha tem fim.
+ *   ESGOTADO     → `usos_max` atingido.
+ *   OUTRA SAFRA  → `safra_id` preenchido e diferente. ⚠️ `safra_id` NULO
+ *                  significa "vale em qualquer safra" — não é ausência de
+ *                  dado, é um valor de negócio (o cupom de campanha que
+ *                  funciona na turma que estiver aberta, `013`).
+ *
+ * ⚠️ NÃO ESPELHADO NO STRIPE **TAMBÉM** É MOTIVO. `stripe_coupon_id` nulo
+ * significa que o cupom existe aqui e ainda não existe lá — estado real e
+ * transitório, porque a criação no Stripe é uma chamada de rede que pode
+ * falhar depois de a linha estar gravada. O checkout tenta espelhar antes
+ * de aplicar; se ainda assim não houver espelho, o desconto não pode ser
+ * aplicado, e fingir que pode cobraria o valor cheio de quem viu "cupom
+ * aplicado" na tela.
+ *
+ * ⚠️ `agora` É PARÂMETRO, e não `new Date()` aqui dentro. Uma função que
+ * lê o relógio por conta própria só pode ser testada esperando o tempo
+ * passar — e o teste de expiração viraria um teste que passa hoje e falha
+ * em 2027.
+ */
+export type MotivoCupomInvalido =
+  | 'inexistente'
+  | 'inativo'
+  | 'expirado'
+  | 'esgotado'
+  | 'outra_safra'
+  | 'sem_espelho'
+
+export function cupomInvalidoPorque(
+  cupom: Cupom | null,
+  safraId: string,
+  agora: Date,
+): MotivoCupomInvalido | null {
+  if (!cupom) return 'inexistente'
+  if (!cupom.ativo) return 'inativo'
+  if (cupom.expira_em !== null && new Date(cupom.expira_em) <= agora) return 'expirado'
+  if (cupom.usos_max !== null && cupom.usos_atuais >= cupom.usos_max) return 'esgotado'
+  if (cupom.safra_id !== null && cupom.safra_id !== safraId) return 'outra_safra'
+  if (!cupom.stripe_coupon_id) return 'sem_espelho'
+  return null
+}
+
+// ============================================================
 // O LADO DO BANCO DO WEBHOOK
 // ============================================================
 //
@@ -1215,6 +1388,104 @@ export async function buscarTravadosDaInscricao(
   }
 
   return data?.[0] ?? null
+}
+
+/**
+ * Tudo que o e-mail de confirmação precisa saber, numa consulta só.
+ *
+ * ⚠️ ESTE É O RECORTE MAIS LARGO DE DADO PESSOAL DO PROJETO, e ele existe
+ * por uma razão específica: o e-mail de confirmação da aluna deixou de ser
+ * disparado no insert (ele diria "confirmada" para quem não pagou, e pela
+ * D-02 é pagar que faz entrar) e passou a sair do webhook. Só que o
+ * webhook recebe um evento do Stripe — ele não sabe o nome de ninguém.
+ *
+ * O corte continua explícito e continua sendo o mínimo: nome, e-mail,
+ * telefone e o perfil, que é literalmente o que o corpo da mensagem
+ * imprime. Fora ficam `consent_text`, `consent_at`, `status`, os travados
+ * e os ids — nada disso é lido para escrever o e-mail.
+ *
+ * ⚠️ E ELE NÃO ATRAVESSA PARA NAVEGADOR NENHUM. O único chamador é
+ * `app/api/stripe/webhook/route.ts`, que usa o resultado para chamar
+ * `confirmarInscricao` e joga fora. Se um dia isto for parar numa rota que
+ * responde a um cliente, a pergunta certa antes de aceitar é por que uma
+ * tela precisa do telefone de alguém.
+ */
+export type InscricaoParaEmail = {
+  nome: string
+  email: string
+  telefone: string
+  nivel_ingles: NivelIngles
+  curso: string
+  periodo: string
+  disponibilidade: DiaDaSemana[]
+  safra: { nome: string; data_inicio_aulas: string } | null
+}
+
+/**
+ * A inscrição com a pessoa e a safra embutidas. `null` quando não dá para
+ * escrever o e-mail.
+ *
+ * ⚠️ `null` AQUI NÃO É ERRO, E TAMBÉM NÃO É ROTINA. Ele acontece quando o
+ * perfil está incompleto — o que é possível nas linhas HERDADAS da `010`,
+ * onde `consent` e perfil podem ser nulos porque `null` significa "não
+ * sabemos" e não houve backfill. Uma dessas linhas não pode virar e-mail:
+ * faltaria o nível de inglês, o curso, o período. Quem chama registra e
+ * segue — um e-mail que não sai não pode derrubar um pagamento que
+ * aconteceu.
+ *
+ * ⚠️ O `join` é feito pelo PostgREST (`pessoas(...)`, `safras(...)`), e não
+ * por duas consultas seguidas. Duas consultas seriam duas leituras
+ * separadas no tempo, e entre elas a Giovanna pode ter editado a safra —
+ * o e-mail sairia com o nome de uma safra e a data de outra. Uma consulta
+ * é um instante só.
+ */
+export async function buscarInscricaoParaEmail(
+  inscricaoId: string,
+): Promise<InscricaoParaEmail | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    // ⚠️ UMA STRING LITERAL, e não uma concatenação por mais legível que
+    // ela pareça. O SDK do Supabase INFERE O TIPO DO RESULTADO a partir do
+    // texto deste `select` — é um parser de tipos sobre o literal. Quebrar
+    // a string em pedaços com `+` produz `string` em vez de um literal, a
+    // inferência desiste, e o retorno vira um tipo de erro onde nenhuma
+    // coluna existe. O erro que aparece é críptico (`Property 'pessoas'
+    // does not exist on type '{ error: true } & String'`) e não menciona a
+    // causa.
+    .select('nivel_ingles,curso,periodo,disponibilidade,pessoas(nome,email,telefone),safras(nome,data_inicio_aulas)')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(email): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) return null
+
+  const { pessoas, safras, nivel_ingles, curso, periodo, disponibilidade } = linha
+
+  // O perfil é tudo-ou-nada para efeito de e-mail: sem qualquer um destes
+  // a mensagem sairia com um buraco no meio. Ver o ⚠️ acima sobre as
+  // linhas herdadas da `010`.
+  if (!pessoas || !nivel_ingles || !curso || !periodo || !disponibilidade) return null
+
+  return {
+    nome: pessoas.nome,
+    email: pessoas.email,
+    telefone: pessoas.telefone,
+    // ⚠️ Os dois `as` são a mesma limitação de sempre: `supabase gen types`
+    // traz `text` como `string`, porque um CHECK de coluna não vira união
+    // de TypeScript. Quem garante o domínio é o CHECK da `002`/`009`, e a
+    // conversão aqui é a fronteira onde o dado do banco vira dado do
+    // domínio — o mesmo lugar onde ela sempre esteve, e não um `any`
+    // espalhado adiante.
+    nivel_ingles: nivel_ingles as NivelIngles,
+    curso,
+    periodo,
+    disponibilidade: disponibilidade as DiaDaSemana[],
+    safra: safras ?? null,
+  }
 }
 
 /**
