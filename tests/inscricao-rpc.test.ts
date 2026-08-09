@@ -4,7 +4,7 @@
 // ⚠️ `.rpc()` CASA PARÂMETRO POR NOME, e é isso que torna este arquivo o
 // de maior valor por linha do `c26`.
 //
-// Os dez nomes são a assinatura da função NO BANCO, não uma convenção
+// Os treze nomes são a assinatura da função NO BANCO, não uma convenção
 // nossa. Errar um deles não é erro de tipo — os tipos gerados descrevem a
 // função que existia no dia em que alguém rodou `supabase gen types` — é
 // erro de RUNTIME: o PostgREST responde "function not found" porque a
@@ -12,8 +12,23 @@
 //
 // Por isso a comparação aqui não é com uma lista escrita à mão neste
 // arquivo, que seria a segunda cópia da assinatura. É com o PRÓPRIO
-// `.sql` da migração `011b` — o texto que roda no SQL Editor e cria a
+// `.sql` da migração `016` — o texto que roda no SQL Editor e cria a
 // função.
+//
+// ============================================================
+// ⚠️ AQUI O CONJUNTO DE NOMES FAZ MAIS DO QUE CASAR: ELE ESCOLHE A FUNÇÃO
+// ============================================================
+//
+// Existem DUAS `criar_inscricao` no banco enquanto a `018` não roda: a de
+// dez argumentos da `011b`, que o build em produção chama entre a migração
+// e o deploy, e a de treze da `016`. O PostgREST resolve sobrecarga pelo
+// CONJUNTO DE CHAVES do corpo JSON.
+//
+// A consequência é que um `undefined` a mais neste objeto não é um
+// parâmetro faltando — é OUTRA FUNÇÃO SENDO CHAMADA, a que devolve um
+// booleano onde `criarInscricao` espera uma linha. Este arquivo é o que
+// impede isso de acontecer sem ninguém perceber, e é por isso que ele
+// afirma os treze nomes como CONJUNTO e não um a um.
 //
 // ============================================================
 // ⚠️ O LIMITE, E ELE É O MESMO DO BLOCO 5 DO `dominio.test.ts`
@@ -72,18 +87,18 @@ const { criarInscricao } = await import('@/lib/supabase')
 // ------------------------------------------------------------
 // A ASSINATURA, LIDA DA MIGRAÇÃO
 //
-// ⚠️ Só o bloco do `create or replace function`. O fim do `011b` tem
+// ⚠️ Só o bloco do `create or replace function`. O fim da `016` tem
 // TESTES DE BARREIRA comentados — chamadas de exemplo com argumentos
-// posicionais — e um varredor ingênuo os leria como se fossem a
-// assinatura. É a mesma armadilha que fez o bloco 5 do `dominio.test.ts`
-// reprovar procurando `'sab'` num contraexemplo comentado.
+// nomeados — e um varredor ingênuo os leria como se fossem a assinatura.
+// É a mesma armadilha que fez o bloco 5 do `dominio.test.ts` reprovar
+// procurando `'sab'` num contraexemplo comentado.
 // ------------------------------------------------------------
-const MIGRACAO = 'supabase/migrations/011b_rpc_criar_inscricao.sql'
+const MIGRACAO = 'supabase/migrations/016_rpc_criar_inscricao_travados.sql'
 const sql = readFileSync(MIGRACAO, 'utf8')
 
 const ABRE = 'create or replace function public.criar_inscricao('
 const inicio = sql.indexOf(ABRE)
-const fim = sql.indexOf('returns boolean', inicio)
+const fim = sql.indexOf('returns table (', inicio)
 const listaDeParametros = sql
   .slice(inicio + ABRE.length, fim)
   .replace(/--[^\n]*/g, '')
@@ -103,6 +118,7 @@ const NOMES_NO_SQL = declaracoes.map((d) => d.split(' ')[0])
 // ver `inscricao-rota.test.ts`.
 // ------------------------------------------------------------
 const SAFRA_ID = '11111111-2222-3333-4444-555555555555'
+const INSCRICAO_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
 const DADOS = {
   nome: 'Maria Silva',
@@ -127,6 +143,18 @@ const DADOS = {
   consent_at: '2026-08-06T12:00:00.000Z',
   consent_text: 'Texto do consentimento, gravado como prova.',
   safra_id: null,
+  // Lista de espera: sem safra, sem contrato. Os dois andam colados — o
+  // `inscricoes_espera_sem_travado_check` da `015` recusa contrato numa
+  // linha sem safra, porque seria um preço acordado numa safra que não
+  // existe.
+  travados: null,
+}
+
+/** O contrato de uma inscrição em safra aberta (D-06). */
+const CONTRATO = {
+  valorMensal: 299.99,
+  duracaoMeses: 6,
+  dataPrimeiraCobranca: '2026-09-01',
 }
 
 /** O nome da função e o objeto de argumentos da última chamada. */
@@ -137,7 +165,21 @@ const chamada = () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
-  dubles.rpc.mockResolvedValue({ data: true, error: null, status: 200 })
+  // A forma que a `016` devolve: UMA linha, sempre — inclusive na
+  // duplicata. `returns table` chega pelo PostgREST como array.
+  dubles.rpc.mockResolvedValue({
+    data: [
+      {
+        inscricao_id: INSCRICAO_ID,
+        criada: true,
+        valor_mensal_travado: null,
+        duracao_meses_travada: null,
+        data_primeira_cobranca_travada: null,
+      },
+    ],
+    error: null,
+    status: 200,
+  })
 })
 
 // ============================================================
@@ -154,8 +196,8 @@ describe('a leitura da migração não é vácuo', () => {
     expect(listaDeParametros.length).toBeGreaterThan(100)
   })
 
-  it('saíram dez parâmetros, todos com o prefixo `p_`', () => {
-    expect(NOMES_NO_SQL).toHaveLength(10)
+  it('saíram treze parâmetros, todos com o prefixo `p_`', () => {
+    expect(NOMES_NO_SQL).toHaveLength(13)
     for (const n of NOMES_NO_SQL) expect(n).toMatch(/^p_[a-z_]+$/)
   })
 
@@ -176,7 +218,7 @@ describe('a chamada casa com a assinatura da `011b`', () => {
     expect(sql).toContain('public.criar_inscricao(')
   })
 
-  it('manda exatamente os dez nomes do SQL — nem um a mais, nem um a menos', async () => {
+  it('manda exatamente os treze nomes do SQL — nem um a mais, nem um a menos', async () => {
     await criarInscricao(DADOS)
     expect(Object.keys(chamada().args).sort()).toEqual([...NOMES_NO_SQL].sort())
   })
@@ -204,8 +246,12 @@ describe('a chamada casa com a assinatura da `011b`', () => {
   )
 
   it('cada valor vai no parâmetro do próprio nome', async () => {
-    await criarInscricao({ ...DADOS, safra_id: SAFRA_ID })
+    await criarInscricao({ ...DADOS, safra_id: SAFRA_ID, travados: CONTRATO })
     const { args } = chamada()
+
+    expect(args.p_valor_mensal_travado).toBe(CONTRATO.valorMensal)
+    expect(args.p_duracao_meses_travada).toBe(CONTRATO.duracaoMeses)
+    expect(args.p_data_primeira_cobranca_travada).toBe(CONTRATO.dataPrimeiraCobranca)
 
     expect(args.p_nome).toBe(DADOS.nome)
     expect(args.p_email).toBe(DADOS.email)
@@ -292,12 +338,153 @@ describe('a lista de espera OMITE o argumento', () => {
 })
 
 // ============================================================
+// 2b. OS TRÊS TRAVADOS VÃO COMO `null` EXPLÍCITO — nunca omitidos
+//
+// ⚠️ É O OPOSTO EXATO DO BLOCO ACIMA, e a assimetria é o ponto. Omitir
+// `p_safra_id` é como a lista de espera diz "sem safra", porque ele TEM
+// `default null` no SQL. Omitir os três travados produziria um corpo com
+// exatamente as dez chaves da sobrecarga ANTIGA (`011b`) — e o PostgREST
+// resolveria a chamada para ela, que devolve um booleano onde
+// `criarInscricao` espera uma linha. A inscrição seria gravada e a rota
+// responderia falha.
+//
+// É por isso que os três NÃO têm default na `016`, e é isto que este
+// bloco tranca dos dois lados: o call site manda os três, e o `.sql` não
+// dá default a nenhum.
+// ============================================================
+describe('os travados viajam como null, e não como ausência', () => {
+  it('lista de espera manda os três como `null` explícito', async () => {
+    await criarInscricao({ ...DADOS, safra_id: null, travados: null })
+    const { args } = chamada()
+
+    expect(args.p_valor_mensal_travado).toBeNull()
+    expect(args.p_duracao_meses_travada).toBeNull()
+    expect(args.p_data_primeira_cobranca_travada).toBeNull()
+  })
+
+  // O que de fato atravessa. Uma chave `undefined` sumiria no
+  // `JSON.stringify` e o corpo cairia na sobrecarga de dez.
+  it('as três chaves SOBREVIVEM à serialização', async () => {
+    await criarInscricao({ ...DADOS, safra_id: null, travados: null })
+    const corpo = JSON.stringify(chamada().args)
+
+    expect(corpo).toContain('p_valor_mensal_travado')
+    expect(corpo).toContain('p_duracao_meses_travada')
+    expect(corpo).toContain('p_data_primeira_cobranca_travada')
+  })
+
+  // ⚠️ Contagem de chaves, que é literalmente o que o PostgREST usa para
+  // escolher a sobrecarga. Dez seria a função errada.
+  it('o corpo de uma lista de espera tem doze chaves, não dez', async () => {
+    await criarInscricao({ ...DADOS, safra_id: null, travados: null })
+    const chaves = Object.keys(JSON.parse(JSON.stringify(chamada().args)))
+
+    expect(chaves).toHaveLength(12) // 13 menos `p_safra_id`, que é omitido
+    expect(chaves).not.toHaveLength(10)
+  })
+
+  // A outra metade, e ela é sobre o `.sql`: se alguém der `default null`
+  // aos três para "simplificar", a chamada de dez argumentos do build
+  // antigo passa a casar com esta função.
+  it('nenhum dos três tem default na migração', () => {
+    for (const nome of [
+      'p_valor_mensal_travado',
+      'p_duracao_meses_travada',
+      'p_data_primeira_cobranca_travada',
+    ]) {
+      const decl = declaracoes.find((d) => d.startsWith(nome))
+      expect(decl, `${nome} nao encontrado na assinatura`).toBeDefined()
+      expect(decl).not.toContain('default')
+    }
+  })
+})
+
+// ============================================================
 // 3. O QUE A FUNÇÃO DEVOLVE — e por que `false` não pode virar erro
 // ============================================================
 describe('a tradução do retorno', () => {
-  it('`true` → inscrição criada agora', async () => {
-    dubles.rpc.mockResolvedValue({ data: true, error: null, status: 200 })
-    expect(await criarInscricao(DADOS)).toEqual({ ok: true, criada: true })
+  it('`criada: true` → inscrição criada agora, com o id na mão', async () => {
+    expect(await criarInscricao(DADOS)).toEqual({
+      ok: true,
+      criada: true,
+      inscricaoId: INSCRICAO_ID,
+      contrato: null,
+    })
+  })
+
+  // ⚠️ O id é o que permite a Checkout Session existir
+  // (`client_reference_id`) — sem ele o webhook não teria como saber qual
+  // linha confirmar.
+  it('o id da inscrição atravessa', async () => {
+    const r = await criarInscricao(DADOS)
+    expect(r.ok === true && r.inscricaoId).toBe(INSCRICAO_ID)
+  })
+
+  // ⚠️ O contrato que volta é o DA LINHA, e na duplicata ele é o da
+  // PRIMEIRA vez (D-06) — pode diferir do que foi enviado. É ele que a
+  // sessão de checkout tem que cobrar.
+  it('o contrato volta montado a partir das três colunas', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: INSCRICAO_ID,
+          criada: false,
+          valor_mensal_travado: 299.99,
+          duracao_meses_travada: 6,
+          data_primeira_cobranca_travada: '2026-09-01',
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
+    const r = await criarInscricao({ ...DADOS, safra_id: SAFRA_ID, travados: CONTRATO })
+    expect(r.ok === true && r.contrato).toEqual(CONTRATO)
+  })
+
+  // ⚠️ MEIO CONTRATO NÃO VIRA CONTRATO. É o
+  // `inscricoes_travados_tudo_ou_nada_check` da `015` reafirmado na
+  // fronteira: valor sem duração produziria um `cancel_at` calculado
+  // sobre `undefined`, e o erro só apareceria seis meses depois.
+  it('travado incompleto vira `contrato: null`, nunca um objeto pela metade', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: INSCRICAO_ID,
+          criada: true,
+          valor_mensal_travado: 299.99,
+          duracao_meses_travada: null,
+          data_primeira_cobranca_travada: null,
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
+    const r = await criarInscricao(DADOS)
+    expect(r.ok === true && r.contrato).toBeNull()
+  })
+
+  // O caso raro e real: conflito com transação ainda não commitada. Sem
+  // id não há checkout, e a rota responde duplicata — o que não se pode
+  // fazer é fingir que o id existe.
+  it('`inscricao_id` nulo com `criada: false` é resultado válido', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: null,
+          criada: false,
+          valor_mensal_travado: null,
+          duracao_meses_travada: null,
+          data_primeira_cobranca_travada: null,
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
+    const r = await criarInscricao(DADOS)
+    expect(r).toEqual({ ok: true, criada: false, inscricaoId: null, contrato: null })
   })
 
   // ⚠️ `criada: false` mora DENTRO do ramo `ok: true`. A união anterior
@@ -306,11 +493,29 @@ describe('a tradução do retorno', () => {
   // "já existia" é uma resposta que a função dá de propósito, e
   // colapsá-la de novo em erro faria a rota responder 500 para alguém
   // cujo cadastro está perfeitamente gravado.
-  it('`false` → duplicata, e ela é SUCESSO', async () => {
-    dubles.rpc.mockResolvedValue({ data: false, error: null, status: 200 })
+  it('`criada: false` → duplicata, e ela é SUCESSO', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: INSCRICAO_ID,
+          criada: false,
+          valor_mensal_travado: null,
+          duracao_meses_travada: null,
+          data_primeira_cobranca_travada: null,
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
     const r = await criarInscricao(DADOS)
-    expect(r).toEqual({ ok: true, criada: false })
     expect(r.ok).toBe(true)
+    expect(r.ok === true && r.criada).toBe(false)
+    // ⚠️ E ELA VOLTA COM O ID. É o que destrava quem ficou preso em
+    // `pendente_pagamento`: a segunda tentativa abre o checkout da
+    // inscrição que já existe, em vez de receber "você já está inscrita"
+    // e ficar sem saída (D-15).
+    expect(r.ok === true && r.inscricaoId).toBe(INSCRICAO_ID)
   })
 
   it('erro do PostgREST → falha, com o detalhe montado para o log', async () => {
@@ -326,25 +531,34 @@ describe('a tradução do retorno', () => {
     expect(r.ok === false && r.detail).toContain('23514')
   })
 
-  // ⚠️ `data` não-booleano é FALHA, e não "provavelmente deu certo". A
-  // função declara `returns boolean` e sempre devolve um; outra coisa
-  // significa que a resposta não tem a forma que a assinatura promete —
-  // schema divergente, função substituída — que é a classe de incidente
-  // da `004`.
+  // ⚠️ RESPOSTA COM FORMA INESPERADA É FALHA, e não "provavelmente deu
+  // certo". A `016` declara `returns table (...)` e devolve sempre
+  // exatamente uma linha; outra coisa significa que a resposta não tem a
+  // forma que a assinatura promete — schema divergente, função
+  // substituída, ou a chamada tendo caído na sobrecarga de dez argumentos
+  // da `011b`. É a classe de incidente da `004`.
   //
-  // Assumir `true` mandaria e-mail de confirmação por uma inscrição que
-  // talvez não exista. Assumir `false` diria "você já está cadastrada"
-  // para quem não está. As duas mentem; só o erro não mente.
+  // ⚠️ E O `true` SECO ESTÁ NESTA LISTA DE PROPÓSITO: ele é EXATAMENTE o
+  // que a função antiga devolve. Se um dia alguém omitir os travados no
+  // call site, é este caso que fica vermelho — e a mensagem diz onde
+  // olhar.
+  //
+  // Assumir `criada: true` mandaria e-mail de confirmação por uma
+  // inscrição que talvez não exista. Assumir `false` diria "você já está
+  // cadastrada" para quem não está. As duas mentem; só o erro não mente.
   it.each([
     ['null', null],
+    ['`true` seco — a resposta da sobrecarga de dez', true],
+    ['`false` seco', false],
     ['a string "true"', 'true'],
-    ['o número 1', 1],
+    ['um array vazio', []],
     ['undefined', undefined],
-    ['um objeto', { criada: true }],
+    ['um objeto fora de array', { criada: true }],
+    ['uma linha sem `criada`', [{ inscricao_id: 'x' }]],
   ])('`data` = %s → falha, nunca um palpite', async (_c, data) => {
     dubles.rpc.mockResolvedValue({ data, error: null, status: 200 })
     const r = await criarInscricao(DADOS)
     expect(r.ok).toBe(false)
-    expect(r.ok === false && r.detail).toContain('esperado boolean')
+    expect(r.ok === false && r.detail).toContain('esperado uma linha')
   })
 })

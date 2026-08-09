@@ -104,10 +104,16 @@ export type { NivelIngles, DiaDaSemana }
  *
  * É um `Pick`, e não `Tables<'safras'>` inteiro, de propósito: a lista
  * de colunas aqui é exatamente a do `select` lá embaixo. Tipar com a
- * `Row` completa afirmaria que `slug` e `stripe_price_id` chegaram,
- * quando não chegaram — é o mesmo princípio de toda travessia de
- * fronteira deste projeto (REPORT §7): carregar o mínimo, com o corte
- * explícito no ponto onde acontece.
+ * `Row` completa afirmaria que `slug` chegou, quando não chegou — é o
+ * mesmo princípio de toda travessia de fronteira deste projeto (REPORT
+ * §7): carregar o mínimo, com o corte explícito no ponto onde acontece.
+ *
+ * ⚠️ `stripe_price_id` ESTAVA NESTA LISTA DE AUSENTES ATÉ O `c35`, e
+ * entrou porque o mínimo mudou: quem monta a Checkout Session precisa
+ * saber se já existe um `price` que represente esta safra, e a
+ * alternativa era uma segunda consulta à mesma linha um instante depois.
+ * Ele NÃO atravessa para o navegador — quem corta é
+ * `app/api/safra-ativa/route.ts`, que monta a resposta sem o campo.
  *
  * Sobre o `valor_mensal`, que é `number`: **medido na resposta real do
  * PostgREST — vem `299.99`, número JSON, não string.** O tipo gerado
@@ -134,6 +140,7 @@ export type Safra = Pick<
   | 'duracao_meses'
   | 'inscricoes_abertas'
   | 'vagas_total'
+  | 'stripe_price_id'
 >
 
 /**
@@ -378,7 +385,7 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   const { data, error } = await supabase()
     .from('safras')
     .select(
-      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total',
+      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total,stripe_price_id',
     )
     .order('data_inicio_aulas', { ascending: false })
     .limit(1)
@@ -530,22 +537,79 @@ export async function buscarSafraDeVitrine(): Promise<SafraVitrine | null> {
 }
 
 /**
+ * O contrato travado de uma inscrição (D-06), do lado do TypeScript.
+ *
+ * Os três andam SEMPRE juntos — tudo-ou-nada, e quem obriga é o
+ * `inscricoes_travados_tudo_ou_nada_check` da `015`. Modelá-los como um
+ * objeto só, em vez de três campos opcionais lado a lado, é o que torna
+ * "valor sem duração" impossível de escrever aqui em cima: um contrato
+ * pela metade deixa de ser um estado representável antes de chegar ao
+ * banco.
+ */
+export type ContratoTravado = {
+  valorMensal: number
+  duracaoMeses: number
+  /** `'YYYY-MM-DD'` — dia de calendário, sem fuso. Ver `paraDataUTC`. */
+  dataPrimeiraCobranca: string
+}
+
+/**
  * O que a escrita da inscrição devolve.
  *
- * `criada` é o booleano da RPC: `true` = inscrição nova, `false` = essa
- * pessoa já tem inscrição nesta safra.
+ * `criada`: `true` = inscrição nova, `false` = essa pessoa já tem
+ * inscrição nesta safra.
  *
  * ⚠️ `criada: false` NÃO É FALHA, e é por isso que ele mora dentro do
- * ramo `ok: true`. A união anterior tinha `{ ok: false; duplicate: true }`
+ * ramo `ok: true`. A união original tinha `{ ok: false; duplicate: true }`
  * — duplicata como uma espécie de erro —, e aquilo era herança de o
  * mecanismo ser uma unique violation. Com a RPC, "já existia" é uma
  * resposta que a função dá de propósito, e colapsá-la de novo em erro
  * faria a rota degradar (e responder 500) para alguém cujo cadastro está
  * perfeitamente gravado no banco.
+ *
+ * ⚠️ `inscricaoId` PODE SER `null` COM `ok: true`, e o caso é real: com
+ * `on conflict do nothing`, o conflito com uma transação AINDA NÃO
+ * COMMITADA não insere e também não deixa a outra linha visível para a
+ * releitura da `016`. Exige duas submissões da mesma pessoa no mesmo
+ * instante, e é recuperável — a tentativa seguinte enxerga a linha. Quem
+ * chama trata: sem id não há sessão de checkout, e a resposta é a de
+ * duplicata. O que não se pode fazer é fingir que o id existe.
+ *
+ * ⚠️ `contrato` é o da LINHA QUE EXISTE, não o que foi enviado. Na
+ * duplicata ele é o da PRIMEIRA vez (D-06), e é ele que a sessão de
+ * checkout tem que cobrar — ver `precoDoContrato` em `src/lib/stripe.ts`.
  */
 export type ResultadoInscricao =
-  | { ok: true; criada: boolean }
+  | {
+      ok: true
+      criada: boolean
+      inscricaoId: string | null
+      contrato: ContratoTravado | null
+    }
   | { ok: false; status: number; detail: string }
+
+/**
+ * ⚠️ O ESCAPE DE NULIDADE DE ARGUMENTO — um lugar só, e é este.
+ *
+ * `supabase gen types` não expressa nulidade de ARGUMENTO de função (só
+ * de coluna): os três parâmetros travados chegam tipados como
+ * `p_valor_mensal_travado: number`, sem `| null`, apesar de a coluna ser
+ * nullable e de a lista de espera PRECISAR mandar null nos três.
+ *
+ * ⚠️ E MANDAR `undefined` NÃO É ALTERNATIVA, é um defeito. Omitir os três
+ * produz um corpo com exatamente as dez chaves da sobrecarga ANTIGA
+ * (`011b`), e o PostgREST resolveria a chamada para ela — que devolve um
+ * booleano onde este módulo espera uma linha. A inscrição seria gravada e
+ * a rota responderia falha. É a razão pela qual os três não têm `default`
+ * no SQL, e está escrita no cabeçalho da `016`.
+ *
+ * Então o `null` viaja explícito, e esta função é o único ponto onde o
+ * tipo é dobrado — nomeada, comentada e grep-ável, em vez de um `as
+ * number` solto em três linhas que ninguém liga uma à outra.
+ */
+function nulavel<T>(valor: T | null): T {
+  return valor as T
+}
 
 /**
  * Cria a inscrição: pessoa + inscrição, numa transação só.
@@ -571,11 +635,20 @@ export type ResultadoInscricao =
  * ⚠️ `.rpc()` CASA PARÂMETRO POR NOME
  * ============================================================
  *
- * Os dez nomes abaixo são a assinatura da função no banco, não uma
+ * Os treze nomes abaixo são a assinatura da função no banco, não uma
  * convenção nossa. Errar um deles é erro em tempo de execução — o
  * PostgREST responde "function not found" porque a assinatura não bate —,
  * e é o tipo de erro que só aparece quando alguém real se inscreve.
  * Renomear um parâmetro no SQL é mudar este objeto junto, no mesmo commit.
+ *
+ * ⚠️ E AQUI O CONJUNTO DE NOMES FAZ MAIS DO QUE CASAR: ELE ESCOLHE A
+ * FUNÇÃO. Existem DUAS `criar_inscricao` no banco enquanto a `018` não
+ * roda — a de dez argumentos da `011b`, que o build em produção chama
+ * entre a migração e o deploy, e a de treze da `016`. O PostgREST resolve
+ * sobrecarga pelo CONJUNTO DE CHAVES do corpo JSON. Mandar os treze é o
+ * que faz esta chamada cair na função certa; mandar dez cairia na antiga,
+ * que devolve um booleano onde este módulo espera uma linha. Ver
+ * `nulavel` acima.
  *
  * ============================================================
  * O QUE **NÃO** É PARÂMETRO, E NÃO É ESQUECIMENTO
@@ -599,20 +672,30 @@ export type ResultadoInscricao =
  *     não chega aqui: quem o corta é a rota, na fronteira.
  *
  * ============================================================
- * O QUE ELA DEVOLVE: UM BOOLEANO. SÓ.
+ * O QUE ELA DEVOLVE, E O QUE CONTINUA NÃO ATRAVESSANDO
  * ============================================================
  *
- * Nenhum dado pessoal atravessa de volta — nem id de pessoa, nem id de
- * inscrição, nem nome, nem status, nem contagem. É o mesmo corte de
- * fronteira do resto do projeto (REPORT §9.6), aplicado à RPC.
+ * ⚠️ ATÉ O CORTE 1 ERA UM BOOLEANO E SÓ, e o comentário que ocupava este
+ * lugar dizia, com razão, que "nenhum dado pessoal atravessa de volta —
+ * nem id de pessoa, nem id de inscrição, nem nome, nem status, nem
+ * contagem". O corte de fronteira do REPORT §9.6 é "carregar o mínimo,
+ * com o corte explícito" — não "carregar um booleano para sempre". O
+ * mínimo mudou porque o chamador mudou: quem monta a Checkout Session
+ * precisa saber QUAL inscrição pagar (`client_reference_id`) e QUANTO ela
+ * deve pagar (D-06).
  *
- * É também o que o `Prefer: return=minimal` fazia no insert que existia
- * aqui antes, e vale registrar como o mecanismo mudou: aquele efeito não
- * vinha de um cabeçalho nosso, vinha do **default do PostgREST** para um
- * POST sem `Prefer` — bastava encadear `.select()` para a linha inteira
- * voltar. Encadear por reflexo, "porque é assim que se faz", desfazia o
- * corte em silêncio. Agora o corte está do lado de lá, escrito no
- * `returns boolean` da função, e nem um `.select()` distraído o desfaz.
+ * O que continua fora é o que importa: nome, e-mail, telefone, status,
+ * consentimento, contagem. Nada de dado pessoal atravessa de volta, e o
+ * que não sai não vaza depois por um spread distraído três camadas acima.
+ *
+ * Vale registrar como o mecanismo do corte mudou ao longo do projeto,
+ * porque o caminho explica a forma atual: no `fetch` cru original o corte
+ * vinha do **default do PostgREST** para um POST sem `Prefer` — bastava
+ * encadear `.select()` para a linha inteira voltar, e encadear por
+ * reflexo desfazia o corte em silêncio. Depois ele passou a estar escrito
+ * do lado de lá, no `returns` da função, onde nenhum descuido daqui o
+ * desfaz. Continua assim: o que a `016` não projeta, esta camada não tem
+ * como pedir.
  *
  * A service_role key ignora RLS — é por isso que `pessoas` e `inscricoes`
  * podem ficar com RLS ligada e ZERO policies, e é por isso que a função
@@ -657,6 +740,23 @@ export async function criarInscricao(dados: {
    * andam juntos ou o insert é recusado pelo CHECK da `009`.
    */
   safra_id: string | null
+  /**
+   * O contrato a travar na inscrição (D-06), ou `null` para lista de
+   * espera.
+   *
+   * ⚠️ ELE ANDA COLADO EM `safra_id`, e o banco obriga: contrato com
+   * `safra_id` nulo é recusado pelo `inscricoes_espera_sem_travado_check`
+   * da `015` — seria um preço acordado numa safra que não existe. O
+   * inverso (safra sem contrato) é permitido de propósito, porque
+   * `pendente_pagamento` ficou de fora da exigência do CHECK.
+   *
+   * ⚠️ E ELE NÃO É O QUE VAI SER COBRADO NA DUPLICATA. Quem já tem
+   * inscrição mantém o contrato da primeira vez — a `016` não sobrescreve
+   * —, e é o `contrato` DE VOLTA, no resultado, que a sessão de checkout
+   * tem que usar. Mandar um e cobrar o outro é o desalinhamento que a
+   * `015` existe para impedir.
+   */
+  travados: ContratoTravado | null
 }): Promise<ResultadoInscricao> {
   const { data, error, status } = await supabase().rpc('criar_inscricao', {
     p_nome: dados.nome,
@@ -693,6 +793,19 @@ export async function criarInscricao(dados: {
     //      `009` significa `lista_espera` — um estado afirmado, decidido
     //      pela rota depois de ler `inscricoes_abertas` no banco.
     p_safra_id: dados.safra_id ?? undefined,
+
+    // ⚠️ `null` EXPLÍCITO, e nunca `undefined` — o oposto exato da linha
+    // acima, e a assimetria tem motivo. `p_safra_id` TEM `default null`
+    // no SQL, então omiti-lo é a forma de dizer "sem safra". Estes três
+    // NÃO têm default, de propósito: é a ausência de default que impede a
+    // chamada de dez argumentos da `011b` de cair na função de treze. Se
+    // eles fossem omitidos aqui, o corpo teria exatamente as dez chaves da
+    // sobrecarga antiga e o PostgREST resolveria para ela. Ver `nulavel`.
+    p_valor_mensal_travado: nulavel(dados.travados?.valorMensal ?? null),
+    p_duracao_meses_travada: nulavel(dados.travados?.duracaoMeses ?? null),
+    p_data_primeira_cobranca_travada: nulavel(
+      dados.travados?.dataPrimeiraCobranca ?? null,
+    ),
   })
 
   if (error) {
@@ -705,30 +818,67 @@ export async function criarInscricao(dados: {
     return { ok: false, status, detail }
   }
 
-  // ⚠️ `data` não-booleano é FALHA, e não "provavelmente deu certo".
+  // ============================================================
+  // ⚠️ RESPOSTA COM FORMA INESPERADA É FALHA, E NÃO "PROVAVELMENTE DEU
+  //    CERTO"
+  // ============================================================
   //
-  // A função declara `returns boolean` e sempre devolve um. Um `null`
-  // aqui significa que a resposta não tem a forma que a assinatura
-  // promete — schema divergente, função substituída, PostgREST devolvendo
-  // outra coisa — e é exatamente a classe de incidente da migração `004`:
-  // o banco andou, a aplicação não, e nada reclamou.
+  // A função declara `returns table (...)` e devolve SEMPRE exatamente uma
+  // linha — inclusive na duplicata. Um array vazio, um booleano ou um
+  // `null` aqui significam que a resposta não tem a forma que a assinatura
+  // promete: schema divergente, função substituída, ou — o caso concreto e
+  // provável — a chamada tendo caído na SOBRECARGA DE DEZ ARGUMENTOS da
+  // `011b`, que devolve `boolean`. É exatamente a classe de incidente da
+  // migração `004`: o banco andou, a aplicação não, e nada reclamou.
   //
-  // Assumir `true` faria a rota mandar e-mail de confirmação por uma
-  // inscrição que talvez não exista. Assumir `false` diria "você já está
-  // cadastrada" para quem não está. As duas mentem; só o erro não mente.
+  // Assumir `criada: true` faria a rota mandar e-mail de confirmação por
+  // uma inscrição que talvez não exista. Assumir `false` diria "você já
+  // está cadastrada" para quem não está. As duas mentem; só o erro não
+  // mente.
   //
   // Se a linha TIVER sido gravada, o custo é a pessoa ver "tente de novo"
   // e tentar — e a segunda tentativa cai no caminho de duplicata, que
-  // responde a verdade. É o desfecho menos ruim dos três.
-  if (typeof data !== 'boolean') {
+  // agora devolve o id e abre o checkout dela. É o desfecho menos ruim
+  // dos três, e ficou melhor do que era no corte 1.
+  const linha = Array.isArray(data) ? data[0] : undefined
+
+  if (!linha || typeof linha.criada !== 'boolean') {
     return {
       ok: false,
       status,
-      detail: `criar_inscricao devolveu ${data === null ? 'null' : typeof data}, esperado boolean`,
+      detail:
+        `criar_inscricao devolveu ${data === null ? 'null' : typeof data}` +
+        `${Array.isArray(data) ? ` (array de ${data.length})` : ''}, ` +
+        'esperado uma linha com `criada` booleano — a chamada pode ter caído ' +
+        'na sobrecarga de dez argumentos da 011b',
     }
   }
 
-  return { ok: true, criada: data }
+  // ⚠️ O CONTRATO SÓ EXISTE SE OS TRÊS EXISTIREM, e a checagem não é
+  // paranoia: é o `inscricoes_travados_tudo_ou_nada_check` da `015`
+  // reafirmado do lado de cá, na fronteira onde o dado deixa de ser linha
+  // de banco e vira objeto. Meio contrato aqui viraria um `cancel_at`
+  // calculado sobre `undefined` lá na frente — e a conta de prazo é a
+  // única deste projeto cujo erro só aparece seis meses depois.
+  const contrato: ContratoTravado | null =
+    linha.valor_mensal_travado !== null &&
+    linha.duracao_meses_travada !== null &&
+    linha.data_primeira_cobranca_travada !== null
+      ? {
+          valorMensal: linha.valor_mensal_travado,
+          duracaoMeses: linha.duracao_meses_travada,
+          dataPrimeiraCobranca: linha.data_primeira_cobranca_travada,
+        }
+      : null
+
+  return {
+    ok: true,
+    criada: linha.criada,
+    // `null` no caso raro de conflito com transação não commitada — ver o
+    // bloco de `ResultadoInscricao` e a seção 2.3 da `016`.
+    inscricaoId: linha.inscricao_id ?? null,
+    contrato,
+  }
 }
 
 /**
