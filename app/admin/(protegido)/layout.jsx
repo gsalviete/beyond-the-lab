@@ -56,6 +56,7 @@ export default async function Layout({ children }) {
             </Link>
             <nav className="hidden items-center gap-5 sm:flex">
               <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
+              <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
               <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
             </nav>
           </div>
@@ -87,6 +88,7 @@ export default async function Layout({ children }) {
       <nav className="border-b border-border-soft sm:hidden">
         <div className="container-page flex items-center gap-5 py-3">
           <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
+          <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
           <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
         </div>
       </nav>

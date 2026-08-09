@@ -61,7 +61,14 @@ export default async function Page() {
               </p>
               <p className="mt-2 font-sans text-[14px] leading-[22px] text-[#345372]">
                 Elas não conseguem resolver isso sozinhas — o formulário responde que já estão
-                inscritas. Mande o link de pagamento para cada uma.
+                inscritas.{' '}
+                <Link
+                  href="/admin/pendentes"
+                  className="font-semibold text-brand underline underline-offset-2"
+                >
+                  Mandar o link de pagamento
+                </Link>
+                .
               </p>
             </div>
           )}

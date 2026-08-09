@@ -1018,6 +1018,144 @@ export async function contarPorStatus(): Promise<ContagensDoPainel> {
   return { listaEspera, pendentes, confirmadas, ativas, inadimplentes }
 }
 
+/**
+ * A fila de pagamento pendente (D-15, `c75`).
+ *
+ * ============================================================
+ * ⚠️ POR QUE ESTA CONSULTA EXISTE, E POR QUE ELA VEM SEPARADA
+ * ============================================================
+ *
+ * Inscrição em `pendente_pagamento` é um BECO SEM SAÍDA para quem está
+ * dentro dele. A pessoa não sabe que está pendente — ninguém contou —, e
+ * refazer o formulário devolve "você já está inscrita". Sem esta tela, a
+ * única saída seria a Giovanna abrir o Supabase Studio, o que a D-07
+ * proíbe.
+ *
+ * ⚠️ E ELA MOSTRA HÁ QUANTO TEMPO CADA UMA ESTÁ PARADA, porque a D-15
+ * obriga. Não é enfeite: é a diferença entre "alguém abandonou o checkout
+ * agora e talvez volte sozinha" e "alguém está esperando há três semanas".
+ * As duas pedem ações diferentes.
+ *
+ * ⚠️ O `created_at` É O DA INSCRIÇÃO, e não o da pessoa: quem esteve na
+ * lista de espera por meses e abriu o checkout ontem está parada há um
+ * dia, não há meses.
+ *
+ * `token_expira_em` vem junto para a tela poder dizer se já existe convite
+ * vivo — reenviar tem que mandar o MESMO link que está na caixa de entrada
+ * dela, e não um novo que invalide o primeiro.
+ */
+export type PendenteDoPainel = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  criada_em: string
+  safra_nome: string | null
+  token_expira_em: string | null
+}
+
+export async function listarPendentes(): Promise<PendenteDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em),safras(nome)')
+    .eq('status', 'pendente_pagamento')
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw new Error(`inscricoes(pendentes): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  // ⚠️ Linha sem pessoa é IGNORADA em silêncio, e o silêncio é justificado:
+  // a FK de `inscricoes.pessoa_id` é `not null` (`008`), então o caso é
+  // impossível — e o `filter` existe só porque o tipo gerado não sabe
+  // disso. Transformá-lo em erro derrubaria a tela inteira por causa de
+  // uma linha que não pode existir.
+  return (data ?? [])
+    .filter((linha) => linha.pessoas)
+    .map((linha) => ({
+      inscricao_id: linha.id,
+      pessoa_id: linha.pessoas!.id,
+      nome: linha.pessoas!.nome,
+      email: linha.pessoas!.email,
+      telefone: linha.pessoas!.telefone,
+      criada_em: linha.created_at,
+      safra_nome: linha.safras?.nome ?? null,
+      token_expira_em: linha.pessoas!.token_expira_em,
+    }))
+}
+
+/**
+ * Garante um convite vivo para esta pessoa e devolve o token.
+ *
+ * ============================================================
+ * ⚠️⚠️ TOKEN AINDA VÁLIDO NÃO É SOBRESCRITO — e esta é a linha que mais
+ *      importa desta função
+ * ============================================================
+ *
+ * Regenerar o token de quem já recebeu o convite INVALIDA o link que está
+ * na caixa de entrada dela. Ela clica, cai no fluxo limpo, e preenche o
+ * formulário inteiro de novo — exatamente o que o convite existe para
+ * evitar. E como o e-mail já foi disparado, não há como avisar: o link
+ * morto continua lá.
+ *
+ * É a mesma regra do `supabase/operacao/gerar_convites.sql`, e ela vale
+ * aqui com mais força: o botão do painel é feito para ser apertado duas
+ * vezes por engano.
+ *
+ * ⚠️ LER E DEPOIS ESCREVER É UMA CORRIDA, e ela é aceita: o único
+ * chamador é uma pessoa clicando num botão. Dois cliques simultâneos da
+ * mesma Giovanna produziriam dois tokens, o segundo vencendo — e o
+ * desfecho é um e-mail com link morto, que ela reenvia. Um lock aqui
+ * custaria mais do que o problema que resolve (D-08 aplicada a outro
+ * objeto).
+ *
+ * ⚠️ 32 BYTES, e é a ENTROPIA que defende a URL — não um rate limit. É a
+ * premissa do parágrafo de `GET /api/pessoa/:token` que explica por que
+ * não há rate limit lá. Se este número encolher, aquela análise morre
+ * junto.
+ */
+export async function garantirConvite(
+  pessoaId: string,
+  validadeEmDias: number,
+): Promise<{ token: string; expiraEm: string; reaproveitado: boolean }> {
+  const { data, error } = await supabase()
+    .from('pessoas')
+    .select('token_acesso,token_expira_em')
+    .eq('id', pessoaId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`pessoas(convite): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const atual = data?.[0]
+
+  if (atual?.token_acesso && atual.token_expira_em && new Date(atual.token_expira_em) > new Date()) {
+    return { token: atual.token_acesso, expiraEm: atual.token_expira_em, reaproveitado: true }
+  }
+
+  // `randomBytes` do Node e não `Math.random`: este valor é um segredo, e
+  // `Math.random` não é criptográfico — é previsível a partir de saídas
+  // anteriores. base64url porque `+`, `/` e `=` mudam de forma ao passar
+  // por uma URL, e um token que muda de forma não casa com nada quando
+  // volta.
+  const { randomBytes } = await import('node:crypto')
+  const token = randomBytes(32).toString('base64url')
+  const expiraEm = new Date(Date.now() + validadeEmDias * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error: erroUpdate } = await supabase()
+    .from('pessoas')
+    .update({ token_acesso: token, token_expira_em: expiraEm })
+    .eq('id', pessoaId)
+
+  if (erroUpdate) {
+    throw new Error(`pessoas(token): ${erroUpdate.code ?? 'sem código'} — ${erroUpdate.message}`)
+  }
+
+  return { token, expiraEm, reaproveitado: false }
+}
+
 /** Cupom na listagem do painel — a linha inteira, que é dela mesmo. */
 export type CupomDoPainel = Tables<'cupons'>
 
