@@ -5,6 +5,21 @@ import { emailAutorizado, parsearAllowlist } from '@/lib/admin'
 // ============================================================
 // A VOLTA DO GOOGLE (`c58`, `c59`) — onde a allowlist decide
 //
+// ⚠️⚠️ ESTA ROTA ESTÁ DORMENTE, E NÃO É CÓDIGO MORTO.
+//
+// Em 09/08/2026 o login passou temporariamente para e-mail e senha, por
+// urgência de publicação (o raciocínio inteiro está em
+// `app/api/admin/entrar/route.ts`). Enquanto o provider Google não for
+// ligado no Supabase, ninguém chega aqui.
+//
+// Ela fica porque a D-09 continua sendo o destino, e apagá-la significa
+// reescrevê-la depois — na pressa, refazendo as duas decisões que ela
+// carrega: derrubar a sessão de quem não está na allowlist, e não
+// distinguir "cancelou" de "token inválido" na tela. Voltar para o Google
+// é trocar o corpo de `/api/admin/entrar` por `signInWithOAuth`; esta
+// rota não muda uma linha.
+// ============================================================
+//
 // ⚠️ É AQUI QUE "LOGOU COM GOOGLE" DEIXA DE SER SUFICIENTE. O `code` que
 // chega prova que a pessoa se autenticou; não prova que ela pode entrar.
 // Qualquer pessoa do planeta tem conta Google e consegue chegar até esta

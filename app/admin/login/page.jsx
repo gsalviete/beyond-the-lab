@@ -35,11 +35,21 @@ export const metadata = {
 // acesso não é dela.
 const ERROS = {
   'sem-permissao': 'Esta conta não tem acesso ao painel.',
+  // ⚠️ UMA MENSAGEM SÓ para "e-mail não existe", "senha errada" e "campo
+  // vazio". Distinguir os três diria a quem tenta se aquele endereço tem
+  // conta — um oráculo de e-mails, com o agravante de que o e-mail em
+  // questão é o de quem administra o sistema. A frase é vaga de propósito.
+  credenciais: 'E-mail ou senha incorretos.',
   cancelado: 'O login não foi concluído.',
   invalido: 'Não conseguimos validar o login. Tente de novo.',
   oauth: 'Não conseguimos falar com o Google agora. Tente de novo em instantes.',
   config: 'O login não está configurado neste ambiente.',
 }
+
+const CAMPO =
+  'h-[52px] w-full rounded-2xl border border-border-soft bg-white px-4 ' +
+  'font-sans text-[15px] text-ink placeholder:text-muted shadow-soft ' +
+  'focus-visible:border-brand'
 
 export default async function Page({ searchParams }) {
   const { erro } = await searchParams
@@ -54,7 +64,7 @@ export default async function Page({ searchParams }) {
       </h1>
 
       <p className="mt-4 max-w-[420px] font-display text-[16px] leading-[25.6px] text-[#345372]">
-        Entre com a conta Google autorizada.
+        Acesso restrito.
       </p>
 
       {mensagem && (
@@ -70,13 +80,53 @@ export default async function Page({ searchParams }) {
         </p>
       )}
 
-      {/* ⚠️ FORM POST, e não um <Link>. Um link seria PREFETCHADO pelo Next
-          assim que aparecesse na tela, e o prefetch dispararia a criação do
-          code verifier do PKCE — gravando cookie de uma tentativa de login
-          que ninguém pediu. Ver o comentário em /api/admin/entrar. */}
-      <form action="/api/admin/entrar" method="post" className="mt-8 w-full max-w-[420px]">
-        <button type="submit" className="btn-brand w-full text-[17px]">
-          Entrar com Google
+      {/* ⚠️⚠️ DESVIO TEMPORÁRIO E DATADO DA D-09 — senha no lugar do Google.
+          Decidido em 09/08/2026, por urgência de publicação. O que a D-09
+          proíbe continua inteiro: a allowlist é conferida no servidor, em
+          todo request. O raciocínio completo, com o que se perde e as duas
+          contenções obrigatórias no Supabase, está em
+          `app/api/admin/entrar/route.ts`.
+
+          ⚠️ FORM HTML DE VERDADE, sem `fetch`. O login precisa funcionar
+          antes de qualquer bundle hidratar — é a primeira coisa que
+          carrega e a última que pode depender de JavaScript. */}
+      <form
+        action="/api/admin/entrar"
+        method="post"
+        className="mt-8 flex w-full max-w-[420px] flex-col gap-3 text-left"
+      >
+        <label htmlFor="email" className="sr-only">
+          E-mail
+        </label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          required
+          autoComplete="username"
+          placeholder="E-mail"
+          className={CAMPO}
+        />
+
+        <label htmlFor="senha" className="sr-only">
+          Senha
+        </label>
+        {/* `autoComplete="current-password"` faz o gerenciador de senhas do
+            navegador oferecer a senha salva — que é o que torna viável
+            exigir uma senha longa e única. Sem isso, a pressão é para
+            escolher algo digitável, e digitável é adivinhável. */}
+        <input
+          id="senha"
+          name="senha"
+          type="password"
+          required
+          autoComplete="current-password"
+          placeholder="Senha"
+          className={CAMPO}
+        />
+
+        <button type="submit" className="btn-brand mt-2 w-full text-[17px]">
+          Entrar
         </button>
       </form>
     </main>
