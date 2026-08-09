@@ -52,6 +52,49 @@ const SELECT = `${FIELD} appearance-none cursor-pointer pr-12`
 
 const LABEL = 'pl-5 font-display text-[14px] font-semibold leading-[19.2px] text-ink'
 
+// ============================================================
+// O PARÂMETRO DO CONVITE (D-10)
+//
+// ⚠️ O NOME É `convite` E NÃO `token`, e a escolha é de linguagem, não de
+// implementação: a URL fica visível na barra de endereço e vai para o
+// histórico, e "token" anuncia credencial para quem passar o olho. O que
+// a pessoa recebeu foi um convite.
+//
+// ⚠️ E ELE NUNCA ENTRA NUM LINK PÚBLICO. A D-10 proíbe "token em URL
+// postada publicamente": este parâmetro existe só no e-mail dirigido à
+// base atual (o `c55`). O link do Instagram é o limpo, sem nada.
+// ============================================================
+const PARAM_CONVITE = 'convite'
+
+/** O token da URL, ou `''` no fluxo limpo — que é o caso normal. */
+function tokenDaUrl() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get(PARAM_CONVITE) ?? ''
+}
+
+/**
+ * Tira o token da barra de endereço depois de usado.
+ *
+ * ⚠️ ISTO NÃO INVALIDA O TOKEN, e não deve invalidar: quem fechou a aba
+ * sem terminar precisa poder voltar pelo mesmo e-mail. O que sai daqui é
+ * só a CÓPIA que estava na barra de endereço — a que seria copiada,
+ * encaminhada ou espalhada num compartilhamento distraído desta página.
+ *
+ * `replaceState` e não `pushState`: troca a entrada atual do histórico em
+ * vez de criar uma nova. Com `pushState`, o botão "voltar" do navegador
+ * devolveria a URL com o token — o oposto exato do que esta função faz.
+ *
+ * Os outros parâmetros ficam. Campanha (`utm_*`) e afins não são segredo,
+ * e apagá-los junto quebraria a atribuição de quem trouxe a pessoa.
+ */
+function limparTokenDaUrl() {
+  if (typeof window === 'undefined' || !window.history?.replaceState) return
+
+  const url = new URL(window.location.href)
+  url.searchParams.delete(PARAM_CONVITE)
+  window.history.replaceState(null, '', url.toString())
+}
+
 // ⚠️ derivado: nenhum <fieldset> existia no projeto. O <legend> herda o
 // token do LABEL sem alteração — é o mesmo papel visual. O reset
 // `m-0 border-0 p-0` é obrigatório: o preflight do Tailwind não zera a
@@ -132,6 +175,23 @@ export default function InscricaoModal({ onFechar }) {
   // resto do projeto: nenhuma decisão de negócio vem do cliente.
   const [modoSucesso, setModoSucesso] = useState('espera')
 
+  // ============================================================
+  // O CONVITE (D-10) — o contato de quem chegou pelo link do e-mail
+  // ============================================================
+  //
+  // `null` no fluxo limpo, que é o caso normal: quem vem do Instagram, de
+  // busca ou de qualquer link público preenche o formulário do zero. Só
+  // quem recebeu o e-mail dirigido à base atual chega com `?convite=`.
+  //
+  // ⚠️ ELE CARREGA CONTATO E NADA MAIS — nome, e-mail, telefone. O perfil
+  // (nível, curso, período, disponibilidade) NÃO vem, e a ausência é
+  // decisão: o perfil descreve a pessoa NAQUELA safra (`008`), e quem
+  // estava no 3º período em janeiro está no 5º em julho. Apresentar uma
+  // resposta desatualizada já marcada é a forma mais eficiente de gravar
+  // dado errado — a pessoa confirma sem ler, porque o campo já estava
+  // preenchido.
+  const [convite, setConvite] = useState(null)
+
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
   const [curso, setCurso] = useState('')
@@ -195,18 +255,65 @@ export default function InscricaoModal({ onFechar }) {
   useEffect(() => {
     let cancelado = false
 
-    fetch('/api/safra-ativa', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (cancelado) return
-        setSafra(body?.safra ?? null)
-        setStatus('idle')
-      })
-      .catch(() => {
-        if (cancelado) return
-        setSafra(null)
-        setStatus('idle')
-      })
+    // ------------------------------------------------------------
+    // ⚠️ AS DUAS RESPOSTAS CHEGAM ANTES DE O FORMULÁRIO EXISTIR, e essa
+    // ordem é o que faz o pré-preenchimento funcionar.
+    //
+    // Os campos de nome e e-mail são NÃO CONTROLADOS (`defaultValue`), e
+    // `defaultValue` só é lido na PRIMEIRA renderização daquele input.
+    // Como o formulário só aparece depois de `status` sair de
+    // 'carregando', resolver o convite antes dessa troca é o que garante
+    // que o valor esteja lá quando o campo nascer. Preencher depois
+    // exigiria transformar os dois em controlados — mais estado, e um
+    // `value` que brigaria com quem estivesse digitando.
+    //
+    // `allSettled` e não `all`: o convite falhando não pode impedir a
+    // modal de abrir. Sem safra a pessoa cai em lista de espera; sem
+    // convite ela digita o próprio nome. Nenhum dos dois é motivo para
+    // não mostrar o formulário.
+    // ------------------------------------------------------------
+    const token = tokenDaUrl()
+
+    Promise.allSettled([
+      fetch('/api/safra-ativa', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null)),
+      token
+        ? fetch(`/api/pessoa/${encodeURIComponent(token)}`, { cache: 'no-store' }).then((res) =>
+            res.ok ? res.json() : null,
+          )
+        : Promise.resolve(null),
+    ]).then(([resSafra, resConvite]) => {
+      if (cancelado) return
+
+      setSafra(resSafra.status === 'fulfilled' ? (resSafra.value?.safra ?? null) : null)
+
+      const pessoa =
+        resConvite.status === 'fulfilled' ? (resConvite.value?.pessoa ?? null) : null
+
+      if (pessoa) {
+        setConvite(pessoa)
+        // O telefone é o único campo CONTROLADO dos três, por causa da
+        // máscara. Ele entra pelo mesmo caminho de quem digita — o valor
+        // do banco é E.164 (`+5521987654321`) e `mascararTelefone`
+        // extrai os dígitos e remonta, então o `+55` some sozinho e o
+        // campo mostra `(21) 98765-4321`.
+        setTelefone(mascararTelefone(pessoa.telefone))
+      }
+
+      // ⚠️ O TOKEN SAI DA BARRA DE ENDEREÇO ASSIM QUE É USADO, e não é
+      // zelo: uma URL é copiada, encaminhada e fica no histórico do
+      // navegador para sempre — é o raciocínio da D-15 sobre por que o
+      // link não carrega `inscricao_id` cru, aplicado ao próprio token.
+      // Ele continua válido no banco (quem fechou a aba precisa poder
+      // voltar pelo e-mail), mas deixa de ser espalhado por um
+      // compartilhamento distraído desta página.
+      //
+      // `replaceState` e não `pushState`: trocar a entrada atual em vez
+      // de criar uma nova, senão o "voltar" do navegador devolveria a URL
+      // com o token.
+      if (token) limparTokenDaUrl()
+
+      setStatus('idle')
+    })
 
     return () => {
       cancelado = true
@@ -627,6 +734,7 @@ export default function InscricaoModal({ onFechar }) {
                   minLength={2}
                   maxLength={100}
                   autoComplete="name"
+                  defaultValue={convite?.nome ?? ''}
                   placeholder="Seu nome completo"
                   disabled={submitting}
                   className={FIELD}
@@ -645,6 +753,7 @@ export default function InscricaoModal({ onFechar }) {
                   required
                   maxLength={255}
                   autoComplete="email"
+                  defaultValue={convite?.email ?? ''}
                   placeholder="voce@exemplo.com"
                   disabled={submitting}
                   className={FIELD}

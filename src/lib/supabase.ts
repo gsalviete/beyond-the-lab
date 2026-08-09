@@ -927,6 +927,79 @@ export async function salvarStripePriceId(safraId: string, priceId: string): Pro
 }
 
 // ============================================================
+// O TOKEN DE ACESSO — identifica, e NÃO autoriza (D-10, D-15)
+// ============================================================
+
+/**
+ * O contato de quem chegou pelo link do convite. `null` quando o token
+ * não existe.
+ *
+ * ⚠️ ELA NÃO OLHA A VALIDADE, e a separação é a mesma de `buscarCupom` e
+ * `cupomInvalidoPorque`: a leitura tem uma resposta (existe ou não), o
+ * julgamento tem outra (venceu ou não), e o `token_expira_em` volta junto
+ * para quem chamou decidir. Fundir as duas produziria um `null` que
+ * significa duas coisas e um log que não sabe dizer qual delas aconteceu
+ * — "ninguém achou o token" e "o convite venceu" pedem respostas
+ * diferentes de quem opera.
+ *
+ * ⚠️ E ELA DEVOLVE DADO PESSOAL PARA QUEM TEM O TOKEN. É exatamente o que
+ * a D-10 pede — o link do convite pré-preenche a modal para que quem já
+ * se cadastrou não digite tudo de novo —, e é por isso que o token é um
+ * segredo de 32 bytes e não um id de banco: o que destranca este retorno
+ * precisa ser impossível de adivinhar.
+ *
+ * ⚠️ O QUE NÃO VOLTA: o perfil (`nivel_ingles`, `curso`, `periodo`,
+ * `disponibilidade`). Não é esquecimento — é a `008` sendo respeitada. O
+ * perfil descreve a pessoa NAQUELA safra, e por isso mora em `inscricoes`
+ * e não em `pessoas`: quem estava no 3º período em janeiro está no 5º em
+ * julho. Pré-preencher o perfil a partir de uma inscrição antiga
+ * apresentaria à pessoa uma resposta desatualizada JÁ MARCADA, que é a
+ * forma mais eficiente de gravar um dado errado — ela confirma sem ler,
+ * porque o campo já estava preenchido.
+ */
+export type PessoaDoToken = {
+  nome: string
+  email: string
+  telefone: string
+  token_expira_em: string | null
+}
+
+export async function buscarPessoaPorToken(token: string): Promise<PessoaDoToken | null> {
+  const { data, error } = await supabase()
+    .from('pessoas')
+    .select('nome,email,telefone,token_expira_em')
+    .eq('token_acesso', token)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`pessoas(token): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * O token venceu? `true` também quando não há data — ver abaixo.
+ *
+ * ⚠️ FUNÇÃO PURA, com `agora` POR PARÂMETRO, pelo mesmo motivo de
+ * `cupomInvalidoPorque`: uma função que lê o relógio por dentro só pode
+ * ser testada esperando o tempo passar.
+ *
+ * ⚠️ `token_expira_em` NULO CONTA COMO VENCIDO, e a escolha é deliberada.
+ * O CHECK `pessoas_token_tudo_ou_nada_check` da `017` torna esse par
+ * impossível de escrever — token sem validade é exatamente o link eterno
+ * que a D-10 proíbe —, então chegar aqui com nulo significa que alguém
+ * contornou o CHECK. Tratar como válido seria conceder acesso perpétuo
+ * justamente no caso em que o mecanismo falhou; tratar como vencido faz o
+ * link cair no fluxo limpo, que é o pior desfecho aceitável: a pessoa
+ * preenche o formulário do zero.
+ */
+export function tokenVenceu(pessoa: PessoaDoToken, agora: Date): boolean {
+  if (!pessoa.token_expira_em) return true
+  return new Date(pessoa.token_expira_em) <= agora
+}
+
+// ============================================================
 // CUPOM — nasce no nosso banco, é espelhado no Stripe (D-07)
 // ============================================================
 //
