@@ -1019,6 +1019,219 @@ export async function contarPorStatus(): Promise<ContagensDoPainel> {
 }
 
 /**
+ * Uma safra inteira, como o painel a edita (`c65`).
+ *
+ * ⚠️ `Row` COMPLETA aqui, e não um `Pick`, e a diferença em relação a
+ * `Safra`/`SafraVitrine` é o propósito: aquelas atravessam uma fronteira
+ * (para a landing, para a modal) e carregam o mínimo. Esta NÃO atravessa —
+ * ela alimenta um formulário que edita a linha, e um `Pick` aqui
+ * significaria uma coluna que a Giovanna não consegue ver nem corrigir
+ * pelo painel, que é exatamente o que a D-07 existe para impedir.
+ */
+export type SafraCompleta = Tables<'safras'>
+
+export async function listarSafrasCompletas(): Promise<SafraCompleta[]> {
+  const { data, error } = await supabase()
+    .from('safras')
+    .select('*')
+    .order('data_inicio_aulas', { ascending: false })
+
+  if (error) {
+    throw new Error(`safras(completas): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Quantas inscrições desta safra JÁ TÊM CONTRATO (`c66`, D-06).
+ *
+ * ⚠️ É O NÚMERO QUE O AVISO DE PREÇO TRAVADO PRECISA. A D-06 obriga: "o
+ * painel avisa na cara da Giovanna, ao editar uma safra que já tem
+ * inscrição paga, que a mudança só vale para quem vier depois". Sem este
+ * número o aviso teria que ser genérico — e um aviso que aparece sempre é
+ * um aviso que ninguém lê.
+ *
+ * ⚠️ OS QUATRO STATUS SÃO OS DO CHECK `inscricoes_paga_tem_travado_check`
+ * da `015`, e a coincidência não é acidente: são exatamente os estados em
+ * que existe contrato travado. `pendente_pagamento` fica de fora porque
+ * quem abandonou o checkout não acordou preço nenhum — e incluí-la faria o
+ * aviso disparar por gente que nunca vai pagar.
+ */
+export async function contarComContrato(safraId: string): Promise<number> {
+  const { count, error } = await supabase()
+    .from('inscricoes')
+    .select('id', { count: 'exact', head: true })
+    .eq('safra_id', safraId)
+    .in('status', ['confirmada', 'ativa', 'inadimplente', 'concluida'])
+
+  if (error) {
+    throw new Error(`inscricoes(contrato): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  // `null` não vira zero: exibir 0 afirmaria "ninguém pagou ainda" a partir
+  // de uma resposta que não disse nada — e é justamente esse zero que faria
+  // o aviso da D-06 não aparecer.
+  if (count === null) throw new Error('inscricoes(contrato): sem contagem')
+
+  return count
+}
+
+/**
+ * `Setembro 2026` → `setembro-2026`.
+ *
+ * ============================================================
+ * ⚠️ ELE É DERIVADO DO NOME, E SÓ NA CRIAÇÃO
+ * ============================================================
+ *
+ * `slug` é "identificador estável e legível" (`002`), usado como
+ * referência humana em log e suporte. Duas consequências, e as duas são
+ * decisão:
+ *
+ *   NÃO É CAMPO DO FORMULÁRIO. Pedir à Giovanna que digite um
+ *     identificador técnico ao lado do nome é pedir que ela invente uma
+ *     regra que o sistema já sabe aplicar — e um dia ela digitaria
+ *     `Setembro 2026`, com espaço e maiúscula, num campo que o resto do
+ *     sistema trata como chave.
+ *
+ *   ⚠️ NÃO MUDA NUM RENAME. `atualizarSafra` não toca no slug, de
+ *     propósito: "estável" é a metade do contrato dele. Corrigir um erro
+ *     de digitação no nome não pode invalidar a referência que está num
+ *     log de três meses atrás ou numa conversa de suporte.
+ *
+ * ⚠️ COLISÃO É POSSÍVEL e é tratada pelo banco: duas safras com o mesmo
+ * nome geram o mesmo slug, e o unique levanta `23505`. A mensagem do
+ * painel diz "já existe uma turma com esse nome", que é verdade e é
+ * acionável — melhor do que um sufixo numérico automático, que produziria
+ * `setembro-2026-2` sem ninguém entender de onde veio.
+ *
+ * `normalize('NFD')` + remoção de diacríticos: `Março` vira `marco`, e
+ * não `mar-o`. Sem isso, todo nome com acento perderia uma letra.
+ */
+export function paraSlug(nome: string): string {
+  const slug = nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  // Um nome só de símbolos produziria slug vazio, e o `not null` do banco
+  // recusaria com uma mensagem que não ajuda ninguém. Falhar aqui deixa a
+  // rota dizer o que fazer.
+  if (!slug) throw new Error('O nome da turma precisa ter pelo menos uma letra ou número.')
+
+  return slug
+}
+
+/** Os campos que a Giovanna edita. Nenhum deles é derivado. */
+export type SafraParaSalvar = {
+  nome: string
+  data_inicio_aulas: string
+  data_primeira_cobranca: string
+  valor_mensal: number
+  duracao_meses: number
+  vagas_total: number | null
+}
+
+/**
+ * Cria uma safra.
+ *
+ * ⚠️ ELA NASCE COM `inscricoes_abertas = false`, SEMPRE, e isso não é
+ * parâmetro. Abrir inscrições é um ato separado e visível (`c67`) — se
+ * fosse um checkbox no formulário de criação, uma safra recém-cadastrada
+ * com o preço ainda errado poderia sair vendendo no mesmo clique. Criar e
+ * publicar são decisões diferentes e o painel as separa.
+ *
+ * ⚠️ `stripe_price_id` também não entra: ele é consequência, não escolha.
+ * Nasce nulo e é preenchido pelo primeiro checkout, que espelha o valor no
+ * Stripe (D-07). Deixar a Giovanna digitar um `price_...` seria abrir a
+ * porta para a safra apontar para um preço que não é o dela.
+ */
+export async function criarSafra(dados: SafraParaSalvar): Promise<SafraCompleta> {
+  const { data, error } = await supabase()
+    .from('safras')
+    // ⚠️ O `slug` É DERIVADO DO NOME, E SÓ NA CRIAÇÃO — ver `paraSlug`.
+    .insert({ ...dados, slug: paraSlug(dados.nome) })
+    .select('*')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`safras(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) throw new Error('safras(insert): nenhuma linha devolvida')
+
+  return linha
+}
+
+/**
+ * Salva a edição.
+ *
+ * ⚠️ MUDAR O PREÇO AQUI NÃO MEXE EM QUEM JÁ ASSINOU, e é a D-06
+ * funcionando de graça: o valor que vale para cada inscrição está copiado
+ * em `valor_mensal_travado`, na própria linha dela, desde o checkout. Do
+ * lado do Stripe é igual — `price` é imutável e a assinatura cobra o que
+ * foi acordado na criação.
+ *
+ * O que este `update` muda é o preço de QUEM VIER DEPOIS. Quem avisa isso
+ * na tela é o `c66`, com a contagem de `contarComContrato`.
+ *
+ * ⚠️ E ELE NÃO TOCA `inscricoes_abertas`. Abrir e fechar é outro ato, com
+ * outra função — misturar os dois faria salvar uma correção de digitação
+ * no nome abrir as inscrições por efeito colateral.
+ */
+export async function atualizarSafra(safraId: string, dados: SafraParaSalvar): Promise<void> {
+  const { error } = await supabase().from('safras').update(dados).eq('id', safraId)
+
+  if (error) {
+    throw new Error(`safras(update): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Abre ou fecha as inscrições de uma safra (`c67`).
+ *
+ * ============================================================
+ * ⚠️ O BANCO SÓ DEIXA UMA SAFRA ABERTA POR VEZ
+ * ============================================================
+ *
+ * `safras_uma_aberta_idx` é um índice único PARCIAL sobre
+ * `inscricoes_abertas` (migração `005`): abrir a segunda levanta `23505`.
+ *
+ * ⚠️ E ESTA FUNÇÃO NÃO FECHA A OUTRA POR CONTA PRÓPRIA. A tentação é
+ * óbvia — "fecha a anterior e abre esta, numa transação" — e ela está
+ * errada por duas razões:
+ *
+ *   1. NÃO EXISTE TRANSAÇÃO AQUI. O PostgREST expõe uma requisição HTTP
+ *      por comando; fechar e abrir seriam duas, e entre elas existe um
+ *      instante com ZERO safras abertas. Quem carregasse a landing nesse
+ *      instante veria "inscrições fechadas".
+ *   2. FECHAR UMA TURMA É DECISÃO DELA, não efeito colateral de abrir
+ *      outra. Uma safra aberta pode ter gente no meio do checkout.
+ *
+ * Então o erro sobe, e o painel diz "já existe uma turma aberta — feche a
+ * outra primeiro". Duas ações explícitas, na ordem que ela escolher.
+ */
+export async function alternarInscricoes(safraId: string, abertas: boolean): Promise<void> {
+  const { error } = await supabase()
+    .from('safras')
+    .update({ inscricoes_abertas: abertas })
+    .eq('id', safraId)
+
+  if (error) {
+    // ⚠️ O código é preservado para o chamador poder distinguir "já existe
+    // uma aberta" de "o banco caiu". Sem ele, as duas viram a mesma
+    // mensagem genérica e a Giovanna não sabe se tenta de novo ou se fecha
+    // a outra.
+    const e = new Error(`safras(abertas): ${error.code ?? 'sem código'} — ${error.message}`)
+    ;(e as Error & { codigoPg?: string }).codigoPg = error.code
+    throw e
+  }
+}
+
+/**
  * A fila de pagamento pendente (D-15, `c75`).
  *
  * ============================================================

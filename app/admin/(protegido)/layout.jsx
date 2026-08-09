@@ -56,6 +56,7 @@ export default async function Layout({ children }) {
             </Link>
             <nav className="hidden items-center gap-5 sm:flex">
               <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
+              <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
               <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
               <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
             </nav>
@@ -83,11 +84,14 @@ export default async function Layout({ children }) {
       </header>
 
       {/* A navegação de mobile fica abaixo do header em vez de virar
-          hambúrguer: são dois itens. Um menu que esconde dois links custa
-          mais toque do que economiza espaço. */}
+          hambúrguer: são quatro itens curtos. Um menu que esconde quatro
+          links custa mais toque do que economiza espaço — e o item que mais
+          importa (Pendentes) é justamente o que não pode ficar escondido
+          atrás de um clique. */}
       <nav className="border-b border-border-soft sm:hidden">
         <div className="container-page flex items-center gap-5 py-3">
           <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
+          <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
           <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
           <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
         </div>
