@@ -331,6 +331,86 @@ export async function precoDaSafra(safra: SafraParaPrice): Promise<ResultadoPric
   return { priceId: price.id, criado: true }
 }
 
+/**
+ * O `price` do CONTRATO de uma inscrição — que nem sempre é o da safra.
+ *
+ * ============================================================
+ * ⚠️ POR QUE ESTA FUNÇÃO EXISTE, SE `precoDaSafra` JÁ EXISTE
+ * ============================================================
+ *
+ * Porque os dois números podem divergir, e quando divergem é a D-06 que
+ * está em jogo. O caso concreto:
+ *
+ *   1. alguém abre o checkout por R$ 299,99 e não conclui — a inscrição
+ *      fica em `pendente_pagamento`, com 299,99 travado na linha;
+ *   2. a Giovanna sobe a safra para R$ 349,99;
+ *   3. a pessoa volta pelo link de pagamento pendente (D-15).
+ *
+ * A `016` devolve o contrato DA LINHA, que continua sendo 299,99 —
+ * `on conflict do nothing` não reescreve contrato. Se a sessão fosse
+ * montada com o `price` da safra, a tela do Stripe cobraria 349,99 sobre
+ * uma inscrição que registra 299,99: o painel diria um número e o cartão
+ * seria debitado com outro, que é exatamente o desalinhamento que a
+ * `015` existe para impedir do lado do banco.
+ *
+ * ============================================================
+ * ⚠️ `lookup_key` E NÃO `products.create({ id })`
+ * ============================================================
+ *
+ * `price` do Stripe não aceita id nosso — só `product` e `coupon` aceitam.
+ * O que ele aceita é `lookup_key`, que é único na conta e, ao contrário
+ * de `search`, é consultável por `list` — endpoint de listagem, sem a
+ * consistência eventual de ~1 minuto do índice de busca. Dois checkouts
+ * no mesmo minuto pelo mesmo valor encontram o mesmo `price`; com
+ * `search`, criariam dois e nada reclamaria.
+ *
+ * A chave carrega o valor em CENTAVOS, e não um contador ou a data: é o
+ * valor que define de qual `price` estamos falando, então derivá-la dele
+ * torna a busca uma pergunta sobre o dado, e não sobre a ordem em que as
+ * coisas aconteceram.
+ *
+ * ⚠️ ESTE `price` NUNCA É GRAVADO EM `safras.stripe_price_id`, e é por
+ * isso que ele volta com `criado: false` mesmo quando acabou de nascer. O
+ * campo significa "a coluna da safra está desatualizada" — e ela não
+ * está: o `price` do contrato antigo não é o preço da safra, é o preço de
+ * uma pessoa. Gravá-lo ali faria a próxima inscrita comprar pelo valor
+ * velho.
+ */
+export async function precoDoContrato(
+  safra: SafraParaPrice,
+  valorMensalTravado: number,
+): Promise<ResultadoPrice> {
+  const centavosDoContrato = paraCentavos(valorMensalTravado)
+
+  // O caso normal, que é a esmagadora maioria: o contrato é o preço da
+  // safra. Delega, e o chamador persiste como sempre.
+  if (centavosDoContrato === paraCentavos(safra.valor_mensal)) {
+    return precoDaSafra(safra)
+  }
+
+  const lookupKey = `safra_${safra.id}_${centavosDoContrato}`
+
+  const existentes = await stripe().prices.list({
+    lookup_keys: [lookupKey],
+    active: true,
+    limit: 1,
+  })
+
+  const achado = existentes.data[0]
+  if (achado) return { priceId: achado.id, criado: false }
+
+  const price = await stripe().prices.create({
+    product: await produtoDaSafra(safra),
+    currency: MOEDA,
+    unit_amount: centavosDoContrato,
+    recurring: { interval: 'month', interval_count: 1 },
+    lookup_key: lookupKey,
+    metadata: { safra_id: safra.id, contrato_travado: 'true' },
+  })
+
+  return { priceId: price.id, criado: false }
+}
+
 // ============================================================
 // A CONTA DO PRAZO — 6 débitos, não 7
 // ============================================================
