@@ -289,6 +289,37 @@ escopo do painel.
 - **`supabase/operacao/gerar_convites.sql`** gera os tokens e o CSV da base
   atual, sem painel nenhum.
 
+### 2.8 ⚠️ DESVIO TEMPORÁRIO DA D-09 — senha no lugar do Google
+
+**Decidido em 09/08/2026 pelo dono do repositório, por urgência de
+publicação.** A D-09 diz "Google OAuth via Supabase Auth"; o painel entra no ar
+com **e-mail e senha**, e o Google é viabilizado depois.
+
+**O que a D-09 PROÍBE continua inteiro.** A proibição dela é "decidir acesso a
+partir de qualquer coisa que venha do cliente", e a allowlist no servidor não
+mudou uma linha: `sessaoAdmin` chama `getUser()` (que valida o token com o
+Supabase, e não lê o cookie) e confere o e-mail contra `ADMIN_EMAILS` em todo
+request. O raciocínio da decisão — "logou com Google não é autorização, qualquer
+pessoa tem conta Google" — nunca dependeu do Google: vale igual para "digitou
+uma senha".
+
+⚠️ **O que se perde, escrito para não ser esquecido:** o Google carregava 2FA,
+detecção de vazamento e política de senha. Com senha própria, a força da senha é
+a fechadura inteira. **Duas contenções obrigatórias, as duas no Supabase:**
+
+1. **Cadastro público DESLIGADO** — Authentication → Providers → Email →
+   *Enable email signup* off. Ligado, qualquer pessoa cria conta no projeto.
+   Elas não entrariam no painel (a allowlist barra), mas encheriam `auth.users`
+   e o sinal de "alguém tentou" se perderia no ruído.
+2. **Usuário criado à mão**, em Authentication → Users → Add user, com senha
+   forte e única.
+
+**O caminho do Google continua escrito e não é código morto.**
+`app/admin/callback/route.ts` está de pé, dormente. Voltar para a D-09 completa
+é trocar o corpo de `/api/admin/entrar` por `signInWithOAuth` — allowlist,
+guard, middleware e callback não mudam uma linha. O passo a passo da
+configuração do Google está no `.env.example`.
+
 ### ⚠️ EXCEÇÃO DECLARADA — o design de `/admin`
 
 **Decidida em 09/08/2026 pelo dono do repositório.** Não existe Figma do
