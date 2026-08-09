@@ -1,14 +1,19 @@
 import { after } from 'next/server'
 import {
+  buscarCupom,
   buscarSafraAtiva,
   criarInscricao,
+  cupomInvalidoPorque,
+  salvarStripeCouponId,
   salvarStripePriceId,
   SupabaseNotConfiguredError,
+  type MotivoCupomInvalido,
   type SafraAtiva,
 } from '@/lib/supabase'
 import {
   ancorasDaAssinatura,
   criarSessaoDeCheckout,
+  cupomNoStripe,
   precoDoContrato,
   StripeNotConfiguredError,
   trialEhAceitavel,
@@ -182,6 +187,34 @@ const DUPLICATE_MESSAGE_ESPERA =
 
 const GENERIC_ERROR = 'Não conseguimos salvar seu cadastro agora. Tente novamente em instantes.'
 
+// ============================================================
+// AS MENSAGENS DE CUPOM — específicas, e a especificidade é decisão
+//
+// ⚠️ ELAS CONTRARIAM A REGRA DA MENSAGEM GENÉRICA DESTA ROTA, e de
+// propósito. A regra existe porque erro de infra e erro de validação não
+// podem virar um oráculo sobre o banco (`schemas.ts` documenta o
+// raciocínio). Cupom é o caso em que o oposto vale: o código foi
+// DIGITADO pela pessoa, ela sabe qual é, e "cupom inválido" seco a deixa
+// sem ação — ela vai tentar o mesmo código de novo, ou desistir da compra
+// achando que o site quebrou. "Expirado" e "esgotado" ela entende na hora.
+//
+// O que elas NÃO revelam: nada sobre cupom que ela não tenha digitado.
+// Só se pergunta pelo código que se conhece, e a resposta fala só dele —
+// não há listagem, não há "quase", não há sugestão.
+// ============================================================
+const MENSAGEM_CUPOM: Record<MotivoCupomInvalido, string> = {
+  inexistente: 'Não encontramos esse cupom. Confira o código e tente de novo.',
+  inativo: 'Esse cupom não está mais disponível.',
+  expirado: 'Esse cupom expirou.',
+  esgotado: 'Esse cupom já atingiu o limite de usos.',
+  outra_safra: 'Esse cupom não vale para esta turma.',
+  // ⚠️ Este é o único da lista que NÃO é culpa de quem digitou: o cupom é
+  // válido e o espelho no Stripe não subiu. A mensagem não diz "inválido"
+  // porque ele não é — e não diz "erro nosso" porque isso não ajuda
+  // ninguém a decidir o que fazer agora.
+  sem_espelho: 'Não conseguimos aplicar esse cupom agora. Tente novamente em instantes.',
+}
+
 export async function POST(req: Request) {
   const ip = clientIp(req)
 
@@ -250,6 +283,7 @@ export async function POST(req: Request) {
     curso,
     periodo,
     disponibilidade,
+    cupom,
   } = parsed.data
 
   // Honeypot preenchido: responde sucesso e não grava nada. Devolver erro
@@ -397,6 +431,77 @@ export async function POST(req: Request) {
           dataPrimeiraCobranca: safra.data_primeira_cobranca,
         }
       : null
+
+  // ============================================================
+  // O CUPOM (`c49`) — validado ANTES de qualquer escrita
+  // ============================================================
+  //
+  // ⚠️ A ORDEM É O COMPORTAMENTO. Validar depois do insert deixaria a
+  // pessoa gravada em `pendente_pagamento` por causa de um código digitado
+  // errado — e ela cairia na fila da D-15 sem ter feito nada de errado
+  // além de trocar uma letra. Aqui, cupom inválido é 400, o formulário
+  // continua preenchido na tela, ela corrige e reenvia.
+  //
+  // ⚠️ E CUPOM INVÁLIDO NÃO DEGRADA PARA LISTA DE ESPERA. Seria o oposto
+  // do que a pessoa pediu: ela quer comprar, com desconto. Empurrá-la para
+  // a fila de espera porque o código expirou é responder outra pergunta.
+  //
+  // ⚠️ SEM SAFRA ABERTA, O CUPOM É IGNORADO EM SILÊNCIO. Não há o que
+  // descontar numa lista de espera, e recusar a inscrição por causa de um
+  // cupom que não seria usado de qualquer jeito trocaria um cadastro por
+  // uma mensagem de erro.
+  // ------------------------------------------------------------
+  let stripeCouponId: string | null = null
+  let cupomId: string | null = null
+
+  if (cupom && abreCheckout && safra) {
+    try {
+      let registro = await buscarCupom(cupom)
+      let motivo = cupomInvalidoPorque(registro, safra.id, new Date())
+
+      // ⚠️ O ESPELHO É TENTADO ANTES DE O `sem_espelho` VIRAR RECUSA, e
+      // essa ordem é a D-07 funcionando. O cupom nasce no nosso banco; o
+      // `coupon` do Stripe é consequência, e ele pode não existir ainda
+      // porque a criação é uma chamada de rede que falha às vezes. Recusar
+      // de cara faria a Giovanna criar um cupom no painel, ele parecer
+      // pronto, e a primeira aluna a usá-lo ouvir que não dá.
+      //
+      // `cupomNoStripe` é idempotente (id determinístico), então tentar de
+      // novo a cada checkout não acumula nada.
+      if (motivo === 'sem_espelho' && registro) {
+        const espelho = await cupomNoStripe(registro)
+
+        // Falha ao gravar não derruba: o `coupon` existe no Stripe e a
+        // sessão pode usá-lo. A coluna fica para trás e a próxima chamada
+        // tenta de novo — mesma janela de `salvarStripePriceId`.
+        try {
+          await salvarStripeCouponId(registro.id, espelho)
+        } catch (err) {
+          console.error('[inscricao] coupon criado mas nao gravado', registro.id, err)
+        }
+
+        registro = { ...registro, stripe_coupon_id: espelho }
+        motivo = cupomInvalidoPorque(registro, safra.id, new Date())
+      }
+
+      if (motivo) {
+        console.warn('[inscricao] cupom recusado', motivo)
+        return json({ ok: false, message: MENSAGEM_CUPOM[motivo] }, 400)
+      }
+
+      stripeCouponId = registro!.stripe_coupon_id
+      cupomId = registro!.id
+    } catch (err) {
+      // ⚠️ FALHA DE INFRA AQUI NÃO PODE VIRAR "SEGUE SEM DESCONTO". A
+      // pessoa digitou um cupom; abrir o checkout pelo valor cheio
+      // cobraria mais do que ela aceitou pagar, e ela só descobriria no
+      // extrato. As duas saídas honestas seriam recusar ou perguntar de
+      // novo — e recusar sem gravar nada é a que não perde dado e não
+      // mente: ela tenta outra vez, com o formulário como estava.
+      console.error('[inscricao] falha ao validar o cupom', err)
+      return json({ ok: false, message: GENERIC_ERROR }, 500)
+    }
+  }
 
   // ------------------------------------------------------------
   // A ESCRITA — e o `try` que a envolve NÃO é simetria com o de cima.
@@ -611,6 +716,14 @@ export async function POST(req: Request) {
         // cobrar na hora seria não vender. Ver `trialEhAceitavel`.
         trialEnd: trialEhAceitavel(trialEnd, agora) ? trialEnd : null,
         safraId: safra.id,
+        stripeCouponId,
+        // ⚠️ O id do NOSSO cupom viaja em metadata, e é assim que o webhook
+        // grava `assinaturas.cupom_id`. Mapear de volta a partir do
+        // `coupon` do Stripe exigiria fatiar o id `cupom_<uuid>` — decidir
+        // identidade pelo formato de uma string, que quebra no dia em que
+        // o formato mudar. Quem sabe qual cupom foi aplicado é quem o
+        // aplicou.
+        cupomId,
         sucessoUrl: paginaDeRetorno(req, '/inscricao/sucesso'),
         canceladoUrl: paginaDeRetorno(req, '/inscricao/cancelado'),
       })

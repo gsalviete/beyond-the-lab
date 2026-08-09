@@ -125,6 +125,32 @@ export const inscricaoSchema = z.object({
   // Honeypot: campo escondido por CSS que só bot preenche. Opcional de
   // propósito — humano nunca manda, e a ausência não pode ser erro.
   website: z.string().optional(),
+
+  // ------------------------------------------------------------
+  // O CUPOM — opcional, e a validação de VERDADE não é aqui
+  //
+  // Este schema confere só a FORMA: string curta, sem espaço nas pontas.
+  // Se o cupom existe, está ativo, não expirou, não esgotou e vale nesta
+  // safra é pergunta para o BANCO, e a resposta muda de um minuto para o
+  // outro — `cupomInvalidoPorque` em `src/lib/supabase.ts`. Um `z.enum`
+  // com a lista de cupons aqui seria a mesma classe de erro que o literal
+  // de preço: informação de operação congelada em código.
+  //
+  // ⚠️ NÃO NORMALIZA A CAIXA, de propósito. `bemvinda`, `BemVinda` e
+  // `BEMVINDA` são o mesmo cupom, e quem garante isso é o índice funcional
+  // `cupons_codigo_upper_idx` da `013` — propriedade do banco, não uma
+  // linha de código que alguém pode esquecer de chamar (REPORT §9.9).
+  // Um `.toUpperCase()` aqui criaria uma segunda declaração da mesma
+  // regra, e no dia em que a primeira mudasse ninguém lembraria da
+  // segunda.
+  //
+  // ⚠️ E ELE AINDA NÃO TEM CAMPO NA MODAL. Não é esquecimento: o desconto
+  // da D-16 é para a base atual e chega pelo LINK do convite, sem ninguém
+  // digitar nada. Um campo visível é decisão de produto — e uma caixinha
+  // "tem cupom?" numa tela de compra é conhecida por fazer quem NÃO tem
+  // cupom sair para procurar um.
+  // ------------------------------------------------------------
+  cupom: z.string().trim().min(1).max(60).optional(),
 })
 
 export type InscricaoValidada = z.infer<typeof inscricaoSchema>

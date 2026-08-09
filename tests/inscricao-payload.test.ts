@@ -189,8 +189,40 @@ describe('o texto livre de "Outro" é o que vai no POST', () => {
 // seria a quinta cópia.
 // ============================================================
 describe('o corpo manda exatamente o que o schema espera', () => {
-  it('as chaves do POST são as do `inscricaoSchema`, nem mais nem menos', () => {
-    expect([...chavesDoCorpo].sort()).toEqual(Object.keys(inscricaoSchema.shape).sort())
+  // ⚠️ A COMPARAÇÃO É COM OS CAMPOS OBRIGATÓRIOS, e a distinção nasceu no
+  // `c49`. `cupom` entrou no schema como OPCIONAL e a modal ainda não tem
+  // campo para ele — o desconto da D-16 chega pelo link do convite, sem
+  // ninguém digitar nada. Comparar com `Object.keys(shape)` cru passaria a
+  // exigir que a modal mandasse um campo que ela não deve mandar.
+  //
+  // ⚠️ E A LISTA CONTINUA DERIVADA DO SCHEMA, não escrita à mão aqui — o
+  // que o teste afirma é "a modal manda tudo que é obrigatório e nada além
+  // do que o schema conhece". Uma lista literal seria a quinta cópia dos
+  // mesmos nomes, que é exatamente o que este arquivo existe para impedir.
+  const obrigatorios = Object.entries(inscricaoSchema.shape)
+    .filter(([, campo]) => !campo.safeParse(undefined).success)
+    .map(([nome]) => nome)
+
+  const opcionais = Object.keys(inscricaoSchema.shape).filter((n) => !obrigatorios.includes(n))
+
+  // Controle do método: se o filtro acima classificasse tudo como
+  // opcional, o teste seguinte compararia vazio com vazio e passaria sem
+  // exercitar nada. É a lição do `c07`.
+  it('a partição obrigatório/opcional não é vácuo', () => {
+    expect(obrigatorios.length).toBeGreaterThan(5)
+    expect(opcionais).toContain('cupom')
+  })
+
+  it('a modal manda todos os campos obrigatórios do `inscricaoSchema`', () => {
+    for (const campo of obrigatorios) {
+      expect(chavesDoCorpo, `a modal nao manda \`${campo}\``).toContain(campo)
+    }
+  })
+
+  it('e nenhuma chave que o schema não conheça', () => {
+    for (const chave of chavesDoCorpo) {
+      expect(Object.keys(inscricaoSchema.shape)).toContain(chave)
+    }
   })
 
   // ⚠️ Estes três não são "campos que a modal esqueceu". Cada um tem uma

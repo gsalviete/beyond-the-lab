@@ -595,6 +595,17 @@ export type SessaoDeCheckout = {
   trialEnd: number | null
   /** `coupons.id` do Stripe, quando há cupom aplicado. Ver `cupomNoStripe`. */
   stripeCouponId?: string | null
+  /**
+   * `cupons.id` do NOSSO banco, quando há cupom aplicado.
+   *
+   * ⚠️ ELE VIAJA SÓ EM METADATA, e é assim que o webhook grava
+   * `assinaturas.cupom_id` — que é FK para a nossa tabela, não para o
+   * Stripe. A alternativa seria mapear de volta a partir do `coupon` do
+   * Stripe fatiando o id `cupom_<uuid>`, ou seja, decidir identidade pelo
+   * formato de uma string. Quem sabe qual cupom foi aplicado é quem o
+   * aplicou; o resto é adivinhação com passo intermediário.
+   */
+  cupomId?: string | null
   /** Só para rastrear no Dashboard e conciliar depois. */
   safraId: string
 }
@@ -666,9 +677,13 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
       // `invoice.paid` NÃO carrega `client_reference_id`: ele fala de
       // fatura e assinatura, não de sessão. Sem isto, o `c43` teria que
       // reconsultar a sessão para descobrir a inscrição.
+      // ⚠️ `cupom_id` só entra quando existe. Metadata do Stripe não
+      // aceita `null`, e uma string vazia seria pior: o webhook leria
+      // `''` como valor presente e tentaria buscar um cupom de id vazio.
       metadata: {
         inscricao_id: dados.inscricaoId,
         safra_id: dados.safraId,
+        ...(dados.cupomId ? { cupom_id: dados.cupomId } : {}),
       },
     },
 
