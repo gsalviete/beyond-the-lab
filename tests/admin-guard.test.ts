@@ -40,7 +40,9 @@ vi.mock('@supabase/ssr', () => ({
 
 process.env.SUPABASE_URL = 'https://exemplo.invalid'
 process.env.SUPABASE_ANON_KEY = 'chave-anon-de-teste'
-process.env.ADMIN_EMAILS = 'giovanna@exemplo.com'
+// ⚠️ `EMAIL_ADMIN` e não uma variável própria: a allowlist reusa a que
+// já existe, e ela acumula três papéis. Ver o bloco em `src/lib/admin.ts`.
+process.env.EMAIL_ADMIN = 'giovanna@exemplo.com'
 
 const { emailAutorizado, exigirAdmin, parsearAllowlist, sessaoAdmin } = await import('@/lib/admin')
 
@@ -233,5 +235,43 @@ describe('a validação não confia no cookie', () => {
 
     expect(fonte.length).toBeGreaterThan(500)
     expect(fonte).toContain('export async function exigirAdmin')
+  })
+})
+
+// ============================================================
+// 5. O SLUG DA TURMA (`c65`) — derivado do nome, e só na criação
+//
+// ⚠️ `slug` é "identificador estável e legível" (`002`), usado como
+// referência humana em log e suporte. Ele NÃO é campo do formulário —
+// pedir à Giovanna que digite um identificador técnico é pedir que ela
+// invente uma regra que o sistema já sabe aplicar — e NÃO muda num rename,
+// porque "estável" é metade do contrato dele.
+// ============================================================
+describe('o slug da turma', () => {
+  it.each([
+    ['Setembro 2026', 'setembro-2026'],
+    ['Março 2027', 'marco-2027'],
+    ['  Turma   Piloto  ', 'turma-piloto'],
+    ['Janeiro/2027', 'janeiro-2027'],
+    ['TURMA ÚNICA', 'turma-unica'],
+  ])('`%s` → `%s`', async (nome, esperado) => {
+    const { paraSlug } = await import('@/lib/supabase')
+    expect(paraSlug(nome)).toBe(esperado)
+  })
+
+  // ⚠️ `normalize('NFD')` + remoção de diacríticos: sem isso, `Março`
+  // viraria `mar-o` — uma letra a menos numa chave que aparece em log e em
+  // conversa de suporte.
+  it('acento vira a letra, e não um hífen', async () => {
+    const { paraSlug } = await import('@/lib/supabase')
+    expect(paraSlug('Março')).not.toContain('mar-o')
+  })
+
+  // Um nome só de símbolos produziria slug vazio, e o `not null` do banco
+  // recusaria com uma mensagem que não ajuda ninguém. Falhar aqui deixa a
+  // rota dizer o que fazer.
+  it.each(['---', '!!!', '   '])('`%s` lança em vez de gerar slug vazio', async (nome) => {
+    const { paraSlug } = await import('@/lib/supabase')
+    expect(() => paraSlug(nome)).toThrow('pelo menos uma letra')
   })
 })

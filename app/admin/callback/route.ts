@@ -75,7 +75,7 @@ export async function GET(req: Request) {
     return paraLogin('invalido')
   }
 
-  if (!emailAutorizado(data.user.email, parsearAllowlist(process.env.ADMIN_EMAILS))) {
+  if (!emailAutorizado(data.user.email, parsearAllowlist(process.env.EMAIL_ADMIN))) {
     // ⚠️ A SESSÃO É DERRUBADA NA HORA. Deixá-la de pé daria a alguém não
     // autorizado um cookie válido do nosso domínio — inútil hoje (o guard
     // nega tudo), e uma peça a mais para alguém combinar com um bug de

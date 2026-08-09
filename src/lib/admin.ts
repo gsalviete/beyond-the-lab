@@ -90,8 +90,37 @@ export class AuthNotConfiguredError extends Error {
  *
  * O custo é real e aceito: acrescentar alguém à equipe exige mexer na
  * Vercel. Na escala deste produto (uma professora), é o custo certo.
+ *
+ * ============================================================
+ * ⚠️⚠️ É A `EMAIL_ADMIN`, E ELA AGORA ACUMULA TRÊS PAPÉIS
+ * ============================================================
+ *
+ * Decidido em 09/08/2026 pelo dono do repositório: em vez de uma
+ * `ADMIN_EMAILS` nova, a allowlist reusa a variável que já existe. Hoje é
+ * a mesma pessoa nos três papéis, e uma variável a menos é uma a menos
+ * para configurar errado.
+ *
+ * Os três, escritos porque quem for mexer precisa saber o que mais quebra:
+ *
+ *   1. DESTINATÁRIO da notificação de inscrição nova (`src/lib/email.ts`);
+ *   2. `reply_to` do e-mail de confirmação da aluna;
+ *   3. **quem pode entrar no painel** (esta linha).
+ *
+ * ⚠️ NÃO ACRESCENTE VÍRGULA AQUI PARA CRIAR UM SEGUNDO ADMIN. O
+ * `parsearAllowlist` aceitaria, e o login do segundo funcionaria — mas
+ * `enviar()` usa esta MESMA variável como endereço de destino, e um
+ * `a@x.com,b@y.com` no campo `to` do Resend não é uma lista, é um endereço
+ * inválido. O sintoma seria os e-mails operacionais pararem de chegar, em
+ * silêncio, dias depois, sem relação aparente com o acesso que alguém
+ * concedeu.
+ *
+ * ⚠️ **O DIA EM QUE EXISTIR UM SEGUNDO ADMIN É O DIA DE SEPARAR AS DUAS.**
+ * O conserto é pequeno e é aqui: uma `ADMIN_EMAILS` própria, com esta
+ * linha lendo dela e caindo em `EMAIL_ADMIN` só se ela não existir. Fazer
+ * isso agora seria código para um caso que não existe; deixar sem aviso
+ * seria a próxima pessoa descobrir pelo sintoma errado.
  */
-const ADMIN_EMAILS = process.env.ADMIN_EMAILS
+const ADMIN_EMAILS = process.env.EMAIL_ADMIN
 
 /**
  * A lista, normalizada. Exportada para o teste — e para nada além disso.
