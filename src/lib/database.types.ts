@@ -269,6 +269,8 @@ export type Database = {
           id: string
           nome: string
           telefone: string
+          token_acesso: string | null
+          token_expira_em: string | null
         }
         Insert: {
           created_at?: string
@@ -276,6 +278,8 @@ export type Database = {
           id?: string
           nome: string
           telefone: string
+          token_acesso?: string | null
+          token_expira_em?: string | null
         }
         Update: {
           created_at?: string
@@ -283,6 +287,8 @@ export type Database = {
           id?: string
           nome?: string
           telefone?: string
+          token_acesso?: string | null
+          token_expira_em?: string | null
         }
         Relationships: []
       }
@@ -398,21 +404,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      criar_inscricao: {
-        Args: {
-          p_consent_at: string
-          p_consent_text: string
-          p_curso: string
-          p_disponibilidade: string[]
-          p_email: string
-          p_nivel_ingles: string
-          p_nome: string
-          p_periodo: string
-          p_safra_id?: string
-          p_telefone: string
-        }
-        Returns: boolean
-      }
+      criar_inscricao:
+        | {
+            Args: {
+              p_consent_at: string
+              p_consent_text: string
+              p_curso: string
+              p_disponibilidade: string[]
+              p_email: string
+              p_nivel_ingles: string
+              p_nome: string
+              p_periodo: string
+              p_safra_id?: string
+              p_telefone: string
+            }
+            Returns: boolean
+          }
+        | {
+            Args: {
+              p_consent_at: string
+              p_consent_text: string
+              p_curso: string
+              p_data_primeira_cobranca_travada: string
+              p_disponibilidade: string[]
+              p_duracao_meses_travada: number
+              p_email: string
+              p_nivel_ingles: string
+              p_nome: string
+              p_periodo: string
+              p_safra_id?: string
+              p_telefone: string
+              p_valor_mensal_travado: number
+            }
+            Returns: {
+              criada: boolean
+              data_primeira_cobranca_travada: string
+              duracao_meses_travada: number
+              inscricao_id: string
+              valor_mensal_travado: number
+            }[]
+          }
     }
     Enums: {
       [_ in never]: never
