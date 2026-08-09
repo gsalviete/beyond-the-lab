@@ -114,6 +114,23 @@ export default function InscricaoModal({ onFechar }) {
   // mundo, que é a pior mentira que esta tela pode contar.
   const [safra, setSafra] = useState(null)
 
+  // ============================================================
+  // QUAL TELA DE SUCESSO — e a resposta vem INTEIRA do servidor
+  // ============================================================
+  //
+  // 'espera'   → entrou na lista de espera.
+  // 'pendente' → a inscrição foi gravada numa safra e o pagamento vai
+  //              chegar por e-mail (a fila da D-15).
+  //
+  // ⚠️ ELE NÃO É DERIVADO DE `inscricaoAberta`, e a diferença é uma
+  // mentira a menos. `inscricaoAberta` é o que a modal soube quando abriu;
+  // entre aquele GET e este POST a Giovanna pode ter fechado a safra, ou a
+  // última vaga pode ter acabado (D-08) — e nos dois casos o servidor
+  // grava lista de espera enquanto esta tela ainda acha que reservou vaga.
+  // O `modo` da resposta é o que o banco de fato registrou. Mesma regra do
+  // resto do projeto: nenhuma decisão de negócio vem do cliente.
+  const [modoSucesso, setModoSucesso] = useState('espera')
+
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
   const [curso, setCurso] = useState('')
@@ -411,19 +428,42 @@ export default function InscricaoModal({ onFechar }) {
       }
 
       if (res.ok && body?.ok) {
-        // TODO: `c35` — o redirecionamento para o Stripe Checkout entra
-        // exatamente aqui.
+        // ------------------------------------------------------------
+        // O CHECKOUT (`c38`) — este ponto só OBEDECE
         //
-        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é mais "a pessoa
+        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é "a pessoa
         // escolheu pagar agora" — essa pergunta morreu (D-11). É o
         // servidor que, tendo relido a safra no ato da escrita, devolve
-        // `{ modo: 'checkout', url }`; este ponto só obedece, com
-        // `window.location.assign(body.url)`. `{ modo: 'lista_espera' }`
-        // continua caindo na tela de sucesso como agora.
+        // `{ modo: 'checkout', url }`; aqui só se navega para lá.
         //
         // A ramificação vive no servidor porque entre o GET que desenhou
-        // esta modal e este POST a Giovana pode ter fechado a safra
-        // (Fluxo 1). Um `if` daqui decidiria com informação velha.
+        // esta modal e este POST a Giovanna pode ter fechado a safra, ou a
+        // última vaga pode ter acabado (D-08). Um `if` daqui decidiria com
+        // informação velha — e decidiria justamente a pergunta que mais
+        // custa errar, que é se alguém vai pagar ou não.
+        //
+        // ⚠️ `assign` E NÃO `replace`, de propósito: o Stripe tem um
+        // "voltar" próprio (o `cancel_url`), mas o botão do NAVEGADOR
+        // também precisa funcionar. Com `replace`, quem desistir na tela
+        // do cartão volta para a página anterior à landing e some do
+        // site. O histórico é da pessoa, não nosso.
+        //
+        // ⚠️ E O `status` FICA EM 'submitting' ATÉ A NAVEGAÇÃO ACONTECER.
+        // `assign` não é instantâneo — há uma requisição no meio —, e
+        // devolver o formulário ao estado normal aqui deixaria o botão
+        // clicável por alguns instantes, com a inscrição JÁ GRAVADA. Um
+        // segundo clique criaria uma segunda sessão de checkout para a
+        // mesma pessoa.
+        // ------------------------------------------------------------
+        if (body.modo === 'checkout' && body.url) {
+          window.location.assign(body.url)
+          return
+        }
+
+        // 'fila' é o caso em que a inscrição foi gravada e o checkout NÃO
+        // abriu — a pessoa está numa safra, sem ter pago, e o link vai por
+        // e-mail (D-15). Qualquer outra coisa é lista de espera.
+        setModoSucesso(body.modo === 'fila' ? 'pendente' : 'espera')
         setStatus('success')
         return
       }
@@ -503,12 +543,12 @@ export default function InscricaoModal({ onFechar }) {
           <TelaDeSucesso
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
-            inscricaoAberta={inscricaoAberta}
-            /* Sem `??` e sem default: `inscricaoAberta` só é `true` quando
-               `safra` existe (é `safra?.inscricoes_abertas === true`), e é
-               só nesse ramo que a tela de sucesso imprime a data. O `?.`
-               aqui existe para o ramo de lista de espera, onde `safra`
-               pode ser null e a data não é lida. */
+            modo={modoSucesso}
+            /* Sem `??` e sem default: só o ramo 'pendente' imprime a data,
+               e ele só acontece quando o servidor gravou uma inscrição em
+               safra — o que exige `safra` existir. O `?.` aqui existe para
+               o ramo de lista de espera, onde `safra` pode ser null e a
+               data não é lida. */
             dataInicioAulas={safra?.data_inicio_aulas}
             onFechar={pedirFechamento}
           />
@@ -991,7 +1031,13 @@ function TelaDeCarregamento({ tituloId }) {
 // `Hero`: um `'2026-09-01'` de reserva aqui seria o literal que este
 // passo remove, voltando invisível e ativado justo quando o dado real
 // faltasse.
-function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, onFechar }) {
+function TelaDeSucesso({ tituloId, tituloRef, modo, dataInicioAulas, onFechar }) {
+  // ⚠️ `modo` VEIO NO LUGAR DE `inscricaoAberta` NO `c38`, e não é
+  // renomeação: o booleano descrevia o que a MODAL sabia ao abrir, e este
+  // campo descreve o que o SERVIDOR gravou. Com checkout no fluxo, os dois
+  // divergem — safra aberta mais última vaga esgotada grava lista de
+  // espera, e a tela precisa contar a história do banco.
+  const pendente = modo === 'pendente'
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -1006,11 +1052,11 @@ function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, 
         tabIndex={-1}
         className="mt-5 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]"
       >
-        {inscricaoAberta ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
+        {pendente ? 'Recebemos sua inscrição!' : 'Recebemos seus dados!'}
       </h2>
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
-        {inscricaoAberta ? (
+        {pendente ? (
           /* Três frases, três acontecimentos, nesta ordem: o que já é
              verdade, o que chega por e-mail e quando, e o que chega
              depois. O texto anterior dizia "enviamos os próximos passos"
@@ -1025,11 +1071,23 @@ function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, 
              prometia outra coisa — duas promessas diferentes sobre o
              mesmo evento, para a mesma pessoa, com dois minutos de
              diferença. A data de início das aulas fica, que é fato de
-             calendário e não promessa de cobrança. */
+             calendário e não promessa de cobrança.
+
+             ⚠️ ESTE RAMO MUDOU DE DONO NO `c38`, E A FRASE PERDEU UMA
+             PROMESSA. Ele era o "safra aberta" e abria com "Sua vaga está
+             reservada" — o que, com checkout no fluxo, passou a ser
+             mentira: quem chega aqui agora é justamente quem NÃO pagou,
+             porque a sessão do Stripe não abriu (D-15). Quem paga não vê
+             esta tela; vê a página de retorno do Stripe.
+
+             O resto do texto sobreviveu porque já estava certo: ele foi
+             escrito num mundo sem checkout, onde o link de pagamento vinha
+             por e-mail — que é exatamente o que a fila da D-15 faz. A
+             frase não precisou ser inventada, precisou perder a promessa
+             de vaga reservada. */
           <>
-            Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
-            início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
-            começam{' '}
+            O link de pagamento chega no seu e-mail — e também avisamos pelo WhatsApp e nas
+            redes sociais. As aulas começam{' '}
             {/* ⚠️ VOLTOU A SAIR DA `data_inicio_aulas`, e desta vez sem mentir.
                 O texto era o literal "primeira semana de setembro de 2026", e o
                 comentário que estava aqui explicava por quê: a turma começa num
