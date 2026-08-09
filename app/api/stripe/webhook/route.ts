@@ -8,7 +8,7 @@ import {
   verificarEventoDoStripe,
   WebhookNotConfiguredError,
 } from '@/lib/stripe'
-import { confirmarInscricao } from '@/lib/email'
+import { alertarCobrancaFalhada, confirmarInscricao } from '@/lib/email'
 import {
   buscarAssinaturaPorSubscription,
   buscarCupomPorId,
@@ -150,7 +150,27 @@ export async function POST(req: Request) {
     // `ativa`, para sempre, sem erro nenhum aparecendo depois da primeira
     // tentativa. Ver o bloco de `liberarEventoStripe`.
     // ------------------------------------------------------------
-    console.error('[webhook] handler falhou', evento.id, evento.type, err)
+    // ------------------------------------------------------------
+    // ⚠️ O CONTEXTO RASTREÁVEL (`c57`) — o que torna este log utilizável
+    //
+    // Um `console.error(err)` seco produz um stack trace sem dono: não dá
+    // para dizer QUAL evento falhou, nem correlacionar com o Dashboard do
+    // Stripe, que é onde a outra metade da história está.
+    //
+    // ⚠️ `requestId` É O CAMPO QUE FECHA A PONTE. Todo erro do SDK do
+    // Stripe carrega o id da requisição (`req_...`), e é por ele que o
+    // suporte do Stripe encontra a chamada exata nos logs deles. Sem esse
+    // id, uma investigação vira "aconteceu por volta das 14h" — com ele, é
+    // uma linha. Ele não existe em erro que não seja do Stripe, e por isso
+    // entra como opcional em vez de virar `unknown` no meio da mensagem.
+    // ------------------------------------------------------------
+    console.error('[webhook] handler falhou', {
+      evento: evento.id,
+      tipo: evento.type,
+      requestId: (err as { requestId?: string })?.requestId,
+      erro: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    })
 
     try {
       await liberarEventoStripe(evento.id)
@@ -466,6 +486,37 @@ async function faturaRecusada(fatura: Stripe.Invoice): Promise<void> {
   }
 
   await mudarStatusInscricao(assinatura.inscricao_id, 'inadimplente')
+
+  // ------------------------------------------------------------
+  // O ALERTA (`c56`) — a Giovanna não descobre isto sozinha
+  //
+  // O Stripe avisa por e-mail a ALUNA, não a professora. Sem este alerta,
+  // uma inadimplência só aparece quando ela abre o painel por outro
+  // motivo, ou quando a aluna some da aula.
+  //
+  // ⚠️ MESMO TRATAMENTO DO E-MAIL DE CONFIRMAÇÃO: por último, depois da
+  // escrita, e com try próprio. Falha de e-mail não pode virar 500 — o
+  // evento seria reentregue e a inscrição reprocessada para reenviar um
+  // aviso, e a segunda passagem mandaria um SEGUNDO alerta.
+  // ------------------------------------------------------------
+  try {
+    const paraEmail = await buscarInscricaoParaEmail(assinatura.inscricao_id)
+
+    if (!paraEmail) {
+      console.error(
+        '[webhook] cobranca recusada mas perfil incompleto — alerta nao enviado',
+        assinatura.inscricao_id,
+      )
+      return
+    }
+
+    await alertarCobrancaFalhada(
+      { name: paraEmail.nome, email: paraEmail.email, phone: paraEmail.telefone },
+      paraEmail.safra,
+    )
+  } catch (err) {
+    console.error('[webhook] falha ao alertar a cobranca recusada', assinatura.inscricao_id, err)
+  }
 }
 
 /**

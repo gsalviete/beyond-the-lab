@@ -72,6 +72,7 @@ const dubles = vi.hoisted(() => {
     buscarInscricaoParaEmail: vi.fn(),
     contarCicloPago: vi.fn(),
     confirmarInscricao: vi.fn(),
+    alertarCobrancaFalhada: vi.fn(),
   }
 })
 
@@ -104,7 +105,10 @@ vi.mock('@/lib/supabase', () => ({
   contarCicloPago: dubles.contarCicloPago,
 }))
 
-vi.mock('@/lib/email', () => ({ confirmarInscricao: dubles.confirmarInscricao }))
+vi.mock('@/lib/email', () => ({
+  confirmarInscricao: dubles.confirmarInscricao,
+  alertarCobrancaFalhada: dubles.alertarCobrancaFalhada,
+}))
 
 // Caminho relativo, e não `@/`: o alias aponta para `src/`, e as rotas
 // moram em `app/`. Mesma forma de `inscricao-rota.test.ts`.
@@ -510,5 +514,68 @@ describe('o e-mail de confirmação', () => {
     // completo, MANDA. Sem este par, "não mandou" seria indistinguível de
     // "a rota não sabe mandar".
     expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'confirmada')
+  })
+})
+
+// ============================================================
+// 8. O ALERTA DE COBRANÇA RECUSADA (`c56`)
+//
+// ⚠️ É O ÚNICO EVENTO DESTE SISTEMA QUE GRITA. Cobrança recusada é a
+// única coisa do fluxo que exige uma pessoa fazer alguma coisa — e a
+// Giovanna não descobre sozinha: o Stripe avisa por e-mail a ALUNA, não a
+// professora.
+// ============================================================
+const FATURA_RECUSADA = {
+  id: 'evt_3',
+  type: 'invoice.payment_failed',
+  data: {
+    object: {
+      id: 'in_recusada',
+      parent: { subscription_details: { subscription: SUB_ID } },
+    },
+  },
+}
+
+describe('cobrança recusada', () => {
+  beforeEach(() => {
+    dubles.verificarEventoDoStripe.mockReturnValue(FATURA_RECUSADA)
+  })
+
+  it('marca a inscrição como inadimplente e avisa a Giovanna', async () => {
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'inadimplente')
+    expect(dubles.alertarCobrancaFalhada).toHaveBeenCalledTimes(1)
+
+    const [aluna] = dubles.alertarCobrancaFalhada.mock.calls[0]
+    expect(aluna.email).toBe('maria@exemplo.com')
+  })
+
+  // ⚠️ O alerta é para a GIOVANNA, e a aluna não recebe nada nosso: o
+  // Stripe já mandou o aviso dela, com o link para atualizar o cartão. Um
+  // segundo e-mail nosso sobre o mesmo assunto faria duas fontes falarem
+  // do mesmo problema e a pessoa não saber qual seguir.
+  it('a aluna NÃO recebe e-mail nosso', async () => {
+    await POST(requisicao())
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
+  })
+
+  // Mesmo tratamento do e-mail de confirmação: falha de e-mail não vira
+  // 500. O evento seria reentregue, a inscrição reprocessada, e a segunda
+  // passagem mandaria um SEGUNDO alerta.
+  it('falha no alerta não vira 500', async () => {
+    dubles.alertarCobrancaFalhada.mockRejectedValue(new Error('resend fora do ar'))
+    const res = await POST(requisicao())
+    expect(res.status).toBe(200)
+  })
+
+  // ⚠️ Controle negativo do teste acima: sem a reserva, nada acontece — o
+  // que prova que o alerta é efeito do processamento e não da rota ter
+  // sido chamada.
+  it('reentrega não dispara um segundo alerta', async () => {
+    dubles.reservarEventoStripe.mockResolvedValue(false)
+    await POST(requisicao())
+    expect(dubles.alertarCobrancaFalhada).not.toHaveBeenCalled()
   })
 })
