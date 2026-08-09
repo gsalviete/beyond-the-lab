@@ -37,10 +37,14 @@ em produção, `019_contagens.sql` com `ACEITE: OK`, query de retardatários
 vazia. Nenhuma superfície do sistema afirma preço, duração ou data que não
 venha do banco. A tensão 8.1 do `REPORT.md` está fechada.
 
-### O corte 2 está IMPLEMENTADO e NÃO ESTÁ DEPLOYADO
+### Os cortes 2 e 3 estão IMPLEMENTADOS e NÃO ESTÃO DEPLOYADOS
 
-Todo o código do `c34` ao `c57` existe, compila e tem teste. **O que falta é o
+Todo o código do `c34` ao `c79` existe, compila e tem teste. **O que falta é o
 aceite manual e o deploy** — ver a seção 4.
+
+⚠️ **Nada disso foi exercitado contra banco, Stripe ou navegador.** Os testes
+provam que o código concorda consigo mesmo; nenhum deles abre conexão. A lista
+do que só o uso real prova está na seção 4.
 
 ⚠️ **O aceite do corte 2 não pode ser delegado ao agente:** ele exige uma
 inscrição de ponta a ponta em modo teste do Stripe, com cartão salvo, **zero
@@ -58,7 +62,7 @@ das duas escreve dado).
 
 ### Validação atual
 
-`npx tsc --noEmit` limpo, **378 testes verdes** em 12 arquivos.
+`npx tsc --noEmit` limpo, **423 testes verdes** em 14 arquivos.
 
 ---
 
@@ -163,6 +167,37 @@ e volta depois de o preço mudar **paga o valor travado da primeira vez**. A
 `precoDoContrato`, que resolve um `price` para o valor da INSCRIÇÃO — não o da
 safra.
 
+### 2.8 ⚠️ DESVIO TEMPORÁRIO DA D-09 — senha no lugar do Google
+
+**Decidido em 09/08/2026 pelo dono do repositório, por urgência de
+publicação.** A D-09 diz "Google OAuth via Supabase Auth"; o painel entra no ar
+com **e-mail e senha**, e o Google é viabilizado depois.
+
+**O que a D-09 PROÍBE continua inteiro.** A proibição dela é "decidir acesso a
+partir de qualquer coisa que venha do cliente", e a allowlist no servidor não
+mudou uma linha: `sessaoAdmin` chama `getUser()` (que valida o token com o
+Supabase, e não lê o cookie) e confere o e-mail contra `ADMIN_EMAILS` em todo
+request. O raciocínio da decisão — "logou com Google não é autorização, qualquer
+pessoa tem conta Google" — nunca dependeu do Google: vale igual para "digitou
+uma senha".
+
+⚠️ **O que se perde, escrito para não ser esquecido:** o Google carregava 2FA,
+detecção de vazamento e política de senha. Com senha própria, a força da senha é
+a fechadura inteira. **Duas contenções obrigatórias, as duas no Supabase:**
+
+1. **Cadastro público DESLIGADO** — Authentication → Providers → Email →
+   *Enable email signup* off. Ligado, qualquer pessoa cria conta no projeto.
+   Elas não entrariam no painel (a allowlist barra), mas encheriam `auth.users`
+   e o sinal de "alguém tentou" se perderia no ruído.
+2. **Usuário criado à mão**, em Authentication → Users → Add user, com senha
+   forte e única.
+
+**O caminho do Google continua escrito e não é código morto.**
+`app/admin/callback/route.ts` está de pé, dormente. Voltar para a D-09 completa
+é trocar o corpo de `/api/admin/entrar` por `signInWithOAuth` — allowlist,
+guard, middleware e callback não mudam uma linha. O passo a passo da
+configuração do Google está no `.env.example`.
+
 ---
 
 ## 3. Fatos operacionais que não estão em documento nenhum
@@ -228,9 +263,31 @@ Descobertos na implementação. Perdê-los custa caro.
   consultável por `list` (estritamente consistente), ao contrário de `search`.
   É o que torna `precoDoContrato` idempotente.
 
+### Novos, da sessão do corte 3
+
+- ⚠️ **`z.uuid()` do Zod 4 valida a RFC, não só a forma.** Um
+  `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` tem o desenho certo e é REJEITADO
+  (o nibble de versão precisa ser 1–8, e o de variante 8/9/a/b). O sintoma é
+  a rota inteira devolvendo `400 Requisição inválida`, o que parece bug de
+  implementação. Custou sete testes vermelhos.
+- ⚠️ **Substituição de texto por indentação erra o alvo em JSX repetido.**
+  O menu do painel estava escrito duas vezes (desktop e mobile) e o mesmo
+  defeito apareceu TRÊS vezes: item duplicado numa lista, ausente na outra.
+  Nenhuma das três apareceu no `tsc` (que não verifica `.jsx`) nem em teste.
+  **O conserto foi estrutural**, não mais cuidado: os itens viraram um
+  componente `ItensDoMenu` usado nos dois lugares.
+- ⚠️ **`@supabase/ssr` precisa de dois clientes com permissões diferentes.**
+  Em Server Component a escrita de cookie LANÇA, então o `setAll` de
+  `src/lib/admin.ts` engole o erro de propósito (a renovação sai pelo
+  middleware). Nas rotas de OAuth/login a escrita é obrigatória — é onde o
+  cookie de sessão nasce. Fundi-los faria um dos dois estar errado.
+- **`revalidatePath('/')` no painel fecha a D-13.** Toda escrita de safra o
+  dispara: a defasagem de 60s da landing some, e o `revalidate = 60` vira o
+  piso e não o normal.
+
 ---
 
-## 4. O que falta — corte 2
+## 4. O que falta — o aceite e o deploy dos cortes 2 e 3
 
 ### O código está pronto. Falta rodar, conferir e subir.
 
@@ -253,6 +310,22 @@ Descobertos na implementação. Perdê-los custa caro.
 7. **Só então a `018`** — dropar a sobrecarga de 10 argumentos da `011b`.
    Antes do deploy, ela é o que mantém o formulário no ar.
 
+### ⚠️ O que só o uso real prova
+
+Nenhum teste deste repositório abre conexão. As coisas abaixo só ficam
+provadas usando:
+
+1. **A resolução da sobrecarga de `criar_inscricao`.** Existem duas funções
+   com o mesmo nome, e o PostgREST escolhe pelo conjunto de chaves do corpo.
+   Se essa leitura estiver errada, a chamada cai na de 10 argumentos, devolve
+   um booleano, e a rota responde falha **depois de gravar a linha**. É a
+   falha mais cara do corte 2 e nenhum teste a alcança.
+2. **`invoice.parent.subscription_details.subscription`** — a forma foi lida
+   no `.d.ts` do SDK, não numa entrega real.
+3. **`cancel_at` posto no webhook** e `trial_end` na data certa.
+4. **O login** — senha, cookie e guard, ponta a ponta.
+5. **As telas** — nenhuma passou pelo `shot.mjs` nem por um navegador.
+
 ### A `018` está escrita e NÃO deve ser rodada ainda
 
 `supabase/migrations/018_drop_criar_inscricao_v1.sql` dropa a sobrecarga de
@@ -263,62 +336,63 @@ sem NENHUMA `criar_inscricao`, e o formulário morreria por completo.
 ⛔ **É o único arquivo do projeto cuja hora de rodar não é "assim que estiver
 pronto".** Antes do deploy, a função antiga é o que mantém o formulário no ar.
 
-### Validação visual pendente
+### Validação visual pendente — inclusive o `c77`
 
-As telas `/inscricao/sucesso` e `/inscricao/cancelado`, e o campo de cupom na
-modal, **não passaram pelo `shot.mjs`**. O agente não pode rodá-lo: ele sobe
-um `next dev` cuja checagem de saúde renderiza `/`, que lê `public.safras` —
-e o `CLAUDE.md` proíbe o agente de abrir conexão com o banco, inclusive para
-`select`. Nenhuma medida nova foi inventada nessas telas (todas as classes já
-existiam), mas ninguém olhou.
+**Nenhuma tela nova passou pelo `shot.mjs`**: as duas de retorno do Stripe, o
+campo de cupom na modal, e o painel inteiro. O agente não pode rodá-lo — ele
+sobe um `next dev` cuja checagem de saúde renderiza `/`, que lê
+`public.safras`, e o `CLAUDE.md` proíbe abrir conexão com o banco inclusive
+para `select`.
+
+⚠️ **E o `c77` ("render das telas do painel") não é só uma questão de quem
+roda.** Mesmo rodado à mão, o `shot.mjs` fotografaria a TELA DE LOGIN: as
+telas do painel exigem sessão, e o browser headless não tem uma. Fotografar o
+painel exige um passo que ainda não existe — autenticar o headless antes de
+navegar.
+
+Some-se a isso que `design/` está no `.gitignore` (a mesma razão pela qual o
+`c28` não foi commitável), e os prints precisariam de outro lugar para morar.
+**Decisão do dono, não tomada.**
+
+Nenhuma medida nova foi inventada em tela nenhuma — todas as classes já
+existiam —, mas ninguém olhou.
 
 ---
 
-## 5. O que falta — corte 3 (painel)
+## 5. Corte 3 (painel) — IMPLEMENTADO
 
-`c58`–`c79` do `04-PLANO.md`, **mais D-15 e D-16**, que são novas e mudam o
-escopo do painel.
+`c58`–`c76`, `c78` e `c79` escritos. O `c77` está em aberto por impedimento
+técnico, e o motivo está na seção 4.
 
-### O que o corte 2 já deixou pronto para ele
+| | |
+|---|---|
+| `c58`–`c62` | auth, allowlist, middleware, guard, teste de 403 |
+| `c63`, `c64` | layout, login, visão de hoje |
+| `c65`–`c67` | CRUD de turmas, aviso de preço travado, abrir/fechar |
+| `c68`, `c71`, `c72` | horários, kanban, PATCH de grupo sem tocar no Stripe |
+| `c69`, `c70` | lista de alunas com filtros, ficha |
+| `c73` | cancelar com confirmação por nome |
+| `c74`, `c75` | cupons, fila de pagamento pendente (D-15) |
+| `c76` | teste: alocação não dispara Stripe |
+| `c78` | `docs/MANUAL.md` — sem prints, ver seção 4 |
+| `c79` | `019_remove_waitlist_legado.sql` — ⛔ não rodar ainda |
 
-- **`convidarParaInscricao(convite, safra, motivo)`** em `src/lib/email.ts`
-  manda o link de pagamento para UMA pessoa. É exatamente o que a fila da
-  D-15 precisa (`c75`).
-- **`cupomInvalidoPorque`** e **`cupomNoStripe`** já existem; o `c74` (CRUD de
-  cupons) só precisa da tela.
-- **`supabase/operacao/gerar_convites.sql`** gera os tokens e o CSV da base
-  atual, sem painel nenhum.
+### ⚠️ Decisões que eu tomei e que você não tomou explicitamente
 
-### 2.8 ⚠️ DESVIO TEMPORÁRIO DA D-09 — senha no lugar do Google
-
-**Decidido em 09/08/2026 pelo dono do repositório, por urgência de
-publicação.** A D-09 diz "Google OAuth via Supabase Auth"; o painel entra no ar
-com **e-mail e senha**, e o Google é viabilizado depois.
-
-**O que a D-09 PROÍBE continua inteiro.** A proibição dela é "decidir acesso a
-partir de qualquer coisa que venha do cliente", e a allowlist no servidor não
-mudou uma linha: `sessaoAdmin` chama `getUser()` (que valida o token com o
-Supabase, e não lê o cookie) e confere o e-mail contra `ADMIN_EMAILS` em todo
-request. O raciocínio da decisão — "logou com Google não é autorização, qualquer
-pessoa tem conta Google" — nunca dependeu do Google: vale igual para "digitou
-uma senha".
-
-⚠️ **O que se perde, escrito para não ser esquecido:** o Google carregava 2FA,
-detecção de vazamento e política de senha. Com senha própria, a força da senha é
-a fechadura inteira. **Duas contenções obrigatórias, as duas no Supabase:**
-
-1. **Cadastro público DESLIGADO** — Authentication → Providers → Email →
-   *Enable email signup* off. Ligado, qualquer pessoa cria conta no projeto.
-   Elas não entrariam no painel (a allowlist barra), mas encheriam `auth.users`
-   e o sinal de "alguém tentou" se perderia no ruído.
-2. **Usuário criado à mão**, em Authentication → Users → Add user, com senha
-   forte e única.
-
-**O caminho do Google continua escrito e não é código morto.**
-`app/admin/callback/route.ts` está de pé, dormente. Voltar para a D-09 completa
-é trocar o corpo de `/api/admin/entrar` por `signInWithOAuth` — allowlist,
-guard, middleware e callback não mudam uma linha. O passo a passo da
-configuração do Google está no `.env.example`.
+- **Cancelar usa `cancel_at_period_end`, e não cancelamento imediato.** As
+  cobranças param e a pessoa não perde o mês que já pagou — cancelar não pode
+  significar "tomar de volta", e o sistema não faz reembolso. É a leitura
+  conservadora. **Se a intenção for cortar o acesso na hora, a troca é de uma
+  linha em `encerrarAssinatura`.**
+- **O kanban tem arrastar E uma caixinha de horário.** A API de drag and drop
+  do HTML5 **não dispara em toque** — uma tela só de arrastar não funcionaria
+  no aparelho em que a Giovanna mais provavelmente vai abri-la, e falharia em
+  silêncio. A caixinha não é fallback: é o caminho principal no celular e o
+  acessível por teclado.
+- **Só quem tem contrato aparece no kanban** (`confirmada`, `ativa`,
+  `inadimplente`). Alocar quem está em `pendente_pagamento` seria dar horário
+  a quem talvez nunca pague — e o trigger da `009` recusa grupo em lista de
+  espera de qualquer forma.
 
 ### ⚠️ EXCEÇÃO DECLARADA — o design de `/admin`
 
