@@ -3,8 +3,9 @@
 //
 // Três propriedades, e as três são de consequência:
 //
-//   1. TOKEN VÁLIDO devolve CONTATO, e só contato. Nem perfil, nem id de
-//      inscrição, nem a validade do próprio token.
+//   1. TOKEN VÁLIDO devolve CONTATO — e o PERFIL só quando existe
+//      inscrição pendente na safra ABERTA (D-15). Nem id de pessoa, nem id
+//      de inscrição, nem a validade do próprio token.
 //   2. TODO O RESTO CAI NO FLUXO LIMPO — vencido, inexistente, banco fora
 //      do ar. Mesmo envelope, `pessoa: null`, sempre 200. Nunca uma tela
 //      de erro para quem clicou num convite antigo.
@@ -25,7 +26,12 @@ vi.mock('server-only', () => ({}))
 
 const dubles = vi.hoisted(() => {
   class SupabaseNotConfiguredError extends Error {}
-  return { SupabaseNotConfiguredError, buscarPessoaPorToken: vi.fn() }
+  return {
+    SupabaseNotConfiguredError,
+    buscarPessoaPorToken: vi.fn(),
+    buscarSafraAtiva: vi.fn(),
+    buscarPerfilPendente: vi.fn(),
+  }
 })
 
 // Só a LEITURA é dublê. `tokenVenceu` vem de verdade: é ela que decide se
@@ -38,6 +44,8 @@ vi.mock('@/lib/supabase', async (original) => {
     tokenVenceu: real.tokenVenceu,
     SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
     buscarPessoaPorToken: dubles.buscarPessoaPorToken,
+    buscarSafraAtiva: dubles.buscarSafraAtiva,
+    buscarPerfilPendente: dubles.buscarPerfilPendente,
   }
 })
 
@@ -47,6 +55,9 @@ const { tokenVenceu } = await import('@/lib/supabase')
 const TOKEN = 'kkZ0m3xQe9dR4tYuIoPaSdFgHjKlZxCvBnM1234567'
 
 const PESSOA = {
+  // ⚠️ O `id` existe no objeto do banco e NÃO pode atravessar para a
+  // resposta — ver o bloco de `PessoaDoToken`.
+  id: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
   nome: 'Maria Silva',
   email: 'maria@exemplo.com',
   telefone: '+5521987654321',
@@ -62,9 +73,23 @@ async function get(token = TOKEN) {
   return { res, body: await res.json() }
 }
 
+const SAFRA_ABERTA = { id: '11111111-2222-4333-8444-555555555555', inscricoes_abertas: true }
+
+const PERFIL = {
+  nivel_ingles: 'basico',
+  curso: 'Fonoaudiologia',
+  periodo: '6º semestre',
+  disponibilidade: ['seg', 'qua'],
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   dubles.buscarPessoaPorToken.mockResolvedValue(PESSOA)
+  // O caso normal do convite da D-10: safra aberta, mas nenhuma inscrição
+  // pendente — quem vem da lista de espera nunca preencheu perfil para
+  // esta turma.
+  dubles.buscarSafraAtiva.mockResolvedValue(SAFRA_ABERTA)
+  dubles.buscarPerfilPendente.mockResolvedValue(null)
 })
 
 // ============================================================
@@ -78,10 +103,13 @@ describe('o convite válido pré-preenche', () => {
     const { res, body } = await get()
 
     expect(res.status).toBe(200)
+    // A forma INTEIRA da resposta, e não um `toMatchObject`: um campo a
+    // mais aqui é dado pessoal atravessando sem ninguém decidir.
     expect(body.pessoa).toEqual({
       nome: PESSOA.nome,
       email: PESSOA.email,
       telefone: PESSOA.telefone,
+      perfil: null,
     })
   })
 
@@ -103,18 +131,24 @@ describe('o que a resposta não carrega', () => {
     expect(body.pessoa.token_expira_em).toBeUndefined()
   })
 
-  // ⚠️ O PERFIL NÃO VOLTA, e a ausência é decisão. Ele descreve a pessoa
-  // NAQUELA safra (`008`) — quem estava no 3º período em janeiro está no
-  // 5º em julho. Pré-preencher a partir de uma inscrição antiga
+  // ⚠️ SEM PENDÊNCIA NA SAFRA ABERTA, O PERFIL NÃO VOLTA. Ele descreve a
+  // pessoa NAQUELA safra (`008`) — quem estava no 3º período em janeiro
+  // está no 5º em julho. Devolvê-lo a partir de uma inscrição antiga
   // apresentaria uma resposta desatualizada JÁ MARCADA, que é a forma mais
   // eficiente de gravar dado errado: a pessoa confirma sem ler.
-  it.each(['nivel_ingles', 'curso', 'periodo', 'disponibilidade'])(
-    '`%s` não volta — perfil é da safra, não da pessoa',
-    async (campo) => {
-      const { body } = await get()
-      expect(Object.keys(body.pessoa)).not.toContain(campo)
-    },
-  )
+  it('perfil vem `null` para quem vem da lista de espera', async () => {
+    const { body } = await get()
+    expect(body.pessoa.perfil).toBeNull()
+  })
+
+  // ⚠️ E o `id` da pessoa NUNCA atravessa, mesmo agora que ele é lido do
+  // banco para procurar a inscrição pendente. O corte é na montagem da
+  // resposta.
+  it('o id da pessoa não volta', async () => {
+    const { body } = await get()
+    expect(body.pessoa.id).toBeUndefined()
+    expect(JSON.stringify(body)).not.toContain(PESSOA.id)
+  })
 
   // Nada que destranque pagamento atravessa. O caminho de pagamento
   // continua sendo o POST de `/api/inscricao`, que decide tudo relendo o
@@ -231,5 +265,62 @@ describe('quando um token venceu', () => {
   // às 12h.
   it('no instante exato da expiração, já venceu', () => {
     expect(tokenVenceu({ ...PESSOA, token_expira_em: AGORA.toISOString() }, AGORA)).toBe(true)
+  })
+})
+
+// ============================================================
+// 4. O PERFIL — só com pendência NA SAFRA ABERTA (D-15)
+//
+// ⚠️ AS DUAS CONDIÇÕES SÃO NECESSÁRIAS. "Tem inscrição pendente" não
+// basta: a pendência pode ser de uma safra que já passou, e aí o perfil é
+// velho. "A safra está aberta" também não basta sozinho — sem pendência,
+// quem vem pelo convite é da lista de espera e nunca preencheu perfil
+// para esta turma.
+//
+// Quem está em `pendente_pagamento` na safra aberta preencheu isso DIAS
+// ATRÁS, para esta turma. Fazê-la digitar de novo é o atrito que a D-15
+// existe para tirar: "sem a pessoa preencher nada de novo".
+// ============================================================
+describe('o perfil de quem tem pagamento pendente', () => {
+  it('volta inteiro quando há pendência na safra aberta', async () => {
+    dubles.buscarPerfilPendente.mockResolvedValue(PERFIL)
+
+    const { body } = await get()
+
+    expect(body.pessoa.perfil).toEqual(PERFIL)
+    expect(dubles.buscarPerfilPendente).toHaveBeenCalledWith(PESSOA.id, SAFRA_ABERTA.id)
+  })
+
+  // ⚠️ Safra FECHADA não pré-preenche perfil: não há inscrição nova a
+  // fazer, e o formulário que ela veria é o de lista de espera.
+  it('safra fechada → perfil `null`, e o banco nem é consultado', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue({ ...SAFRA_ABERTA, inscricoes_abertas: false })
+
+    const { body } = await get()
+
+    expect(body.pessoa.perfil).toBeNull()
+    expect(dubles.buscarPerfilPendente).not.toHaveBeenCalled()
+  })
+
+  it('sem safra nenhuma → perfil `null`', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue(null)
+
+    const { body } = await get()
+
+    expect(body.pessoa.perfil).toBeNull()
+    expect(dubles.buscarPerfilPendente).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ FALHA NO PERFIL NÃO DERRUBA O CONTATO. O perfil é conforto; o
+  // contato é o que a D-10 promete. Um `catch` que devolvesse
+  // `pessoa: null` trocaria o essencial pelo acessório.
+  it('erro ao buscar o perfil não tira o pré-preenchimento do contato', async () => {
+    dubles.buscarPerfilPendente.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { res, body } = await get()
+
+    expect(res.status).toBe(200)
+    expect(body.pessoa.nome).toBe(PESSOA.nome)
+    expect(body.pessoa.perfil).toBeNull()
   })
 })

@@ -428,14 +428,31 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   // antes do `c36`, que é quando a contagem passa a alimentar o painel e
   // a primeira `cancelada` vira possível. Escolher aqui, por conta
   // própria, seria inventar a regra no lugar de perguntá-la.
-  const { count, error: erroContagem } = await supabase()
+  const {
+    count,
+    error: erroContagem,
+    status: statusContagem,
+  } = await supabase()
     .from('inscricoes')
     .select('id', { count: 'exact', head: true })
     .eq('safra_id', safra.id)
 
   if (erroContagem) {
+    // ⚠️ O STATUS HTTP ENTRA NA MENSAGEM, e é a única coisa que sobra
+    // quando esta consulta falha: ela é `head: true`, e resposta HEAD não
+    // tem corpo — o SDK não consegue extrair código nem texto do erro
+    // (ver o bloco de `contarPorStatus`). Sem o status, a falha chega como
+    // `sem código —` e nada mais, que é indiagnosticável.
+    //
+    // ⚠️ ESTA CONTAGEM CONTINUA COM `head: true`, ao contrário da do
+    // painel, e a diferença é onde ela roda: aqui é o caminho PÚBLICO, que
+    // decide se alguém vê checkout ou lista de espera. Trocar o mecanismo
+    // num caminho que funciona, por causa de um problema que apareceu em
+    // outro, é mexer no que está de pé. O que dá para melhorar sem risco é
+    // o diagnóstico, e é o que esta linha faz.
     throw new Error(
-      `inscricoes(count): ${erroContagem.code ?? 'sem código'} — ${erroContagem.message}`,
+      `inscricoes(count): HTTP ${statusContagem} — ${erroContagem.code ?? 'sem código'} — ` +
+        `${erroContagem.message || 'sem mensagem'}`,
     )
   }
 
@@ -987,35 +1004,64 @@ export type ContagensDoPainel = {
 }
 
 export async function contarPorStatus(): Promise<ContagensDoPainel> {
-  const conta = async (status: StatusInscricao) => {
-    const { count, error } = await supabase()
-      .from('inscricoes')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', status)
+  // ============================================================
+  // ⚠️ UMA CONSULTA COMUM, E NÃO CINCO `head: true` EM PARALELO
+  // ============================================================
+  //
+  // A versão anterior fazia cinco `select('id', { count: 'exact', head:
+  // true })`, uma por status, num `Promise.all`. Ela quebrou em uso real
+  // com a mensagem mais inútil possível — `inscricoes(count ativa): sem
+  // código —`, sem código e sem texto — e a causa está no SDK:
+  //
+  //   `PostgrestBuilder` trata resposta não-2xx lendo `res.text()` para
+  //   extrair o erro. Numa requisição **HEAD não existe corpo**, então o
+  //   `JSON.parse('')` estoura, cai no `catch`, e o erro vira
+  //   `{ message: '' }` — sem `code`, sem `message`, sem `details`.
+  //
+  // ⚠️ ISSO NÃO É UM BUG DO SDK QUE DÁ PARA CONTORNAR COM `try/catch`: é
+  // uma propriedade de HEAD. Enquanto a contagem for feita assim, QUALQUER
+  // falha chega indistinguível de qualquer outra — e um painel que não
+  // sabe dizer por que não contou é um painel que ninguém consegue
+  // consertar.
+  //
+  // Uma consulta comum devolve corpo, então erro chega com código e texto.
+  // E, de quebra: uma viagem em vez de cinco, e nenhuma concorrência.
+  //
+  // ⚠️ O QUE ELA CARREGA, E POR QUE ISSO NÃO REABRE O PROBLEMA QUE O
+  // `head: true` RESOLVIA: só a coluna `status`. O motivo de usar `head`
+  // era "evitar arrastar a lista inteira de inscritas, COM DADO PESSOAL
+  // DENTRO, por um número" — e uma coluna de sete valores possíveis não
+  // tem dado pessoal nenhum. O que se paga é uma string por inscrição, na
+  // escala de dezenas por safra.
+  //
+  // Se um dia isso deixar de ser desprezível, o caminho certo NÃO é voltar
+  // ao `head: true`: é uma view ou uma RPC que faça `group by status` no
+  // banco e devolva cinco linhas.
+  // ============================================================
+  const { data, error, status } = await supabase().from('inscricoes').select('status')
 
-    if (error) {
-      throw new Error(`inscricoes(count ${status}): ${error.code ?? 'sem código'} — ${error.message}`)
-    }
-
-    // ⚠️ `null` NÃO VIRA ZERO. Significaria que o `Content-Range` não veio,
-    // e exibir 0 afirmaria "não há ninguém" a partir de uma resposta que
-    // não disse nada. É o mesmo erro de sempre, com sinal trocado — e num
-    // painel ele é pior, porque um zero é exatamente o que faz a Giovanna
-    // não olhar de novo.
-    if (count === null) throw new Error(`inscricoes(count ${status}): sem contagem`)
-
-    return count
+  if (error) {
+    throw new Error(
+      `inscricoes(contagem): HTTP ${status} — ${error.code ?? 'sem código'} — ` +
+        `${error.message || 'sem mensagem'}`,
+    )
   }
 
-  const [listaEspera, pendentes, confirmadas, ativas, inadimplentes] = await Promise.all([
-    conta('lista_espera'),
-    conta('pendente_pagamento'),
-    conta('confirmada'),
-    conta('ativa'),
-    conta('inadimplente'),
-  ])
+  // `null` não vira "tudo zero": significaria resposta sem corpo, e exibir
+  // zeros afirmaria "não há ninguém" a partir de algo que não disse nada.
+  // É o mesmo erro de sempre, com sinal trocado — e num painel ele é pior,
+  // porque um zero é exatamente o que faz a Giovanna não olhar de novo.
+  if (!data) throw new Error(`inscricoes(contagem): HTTP ${status} — resposta sem corpo`)
 
-  return { listaEspera, pendentes, confirmadas, ativas, inadimplentes }
+  const conta = (alvo: StatusInscricao) => data.filter((l) => l.status === alvo).length
+
+  return {
+    listaEspera: conta('lista_espera'),
+    pendentes: conta('pendente_pagamento'),
+    confirmadas: conta('confirmada'),
+    ativas: conta('ativa'),
+    inadimplentes: conta('inadimplente'),
+  }
 }
 
 /**
@@ -1768,6 +1814,14 @@ export async function alternarCupom(cupomId: string, ativo: boolean): Promise<vo
  * porque o campo já estava preenchido.
  */
 export type PessoaDoToken = {
+  /**
+   * ⚠️ O `id` VEM PARA A DECISÃO, E NÃO PARA A RESPOSTA. Ele é o que
+   * permite procurar a inscrição pendente daquela pessoa (D-15) — e o
+   * corte que o impede de atravessar para o navegador é explícito, na
+   * montagem da resposta de `GET /api/pessoa/:token`. Um spread do objeto
+   * inteiro ali devolveria um id de banco a quem tem o token.
+   */
+  id: string
   nome: string
   email: string
   telefone: string
@@ -1777,7 +1831,7 @@ export type PessoaDoToken = {
 export async function buscarPessoaPorToken(token: string): Promise<PessoaDoToken | null> {
   const { data, error } = await supabase()
     .from('pessoas')
-    .select('nome,email,telefone,token_expira_em')
+    .select('id,nome,email,telefone,token_expira_em')
     .eq('token_acesso', token)
     .limit(1)
 
@@ -1786,6 +1840,73 @@ export async function buscarPessoaPorToken(token: string): Promise<PessoaDoToken
   }
 
   return data?.[0] ?? null
+}
+
+/**
+ * O perfil que a pessoa já preencheu para a safra ABERTA, se houver
+ * inscrição pendente nela.
+ *
+ * ============================================================
+ * ⚠️ POR QUE O PERFIL VOLTA AQUI E NÃO EM `buscarPessoaPorToken`
+ * ============================================================
+ *
+ * `buscarPessoaPorToken` devolve só contato, e o comentário dela explica:
+ * o perfil descreve a pessoa NAQUELA safra (`008`), e pré-preencher a
+ * partir de uma inscrição antiga apresentaria uma resposta desatualizada
+ * já marcada — a forma mais eficiente de gravar dado errado, porque ela
+ * confirma sem ler.
+ *
+ * ⚠️ ISSO CONTINUA VERDADE PARA O CONVITE DA LISTA DE ESPERA, E É FALSO
+ * PARA QUEM ESTÁ EM `pendente_pagamento`. Quem abandonou o checkout
+ * preencheu o perfil PARA ESTA SAFRA, dias atrás — não há nada de velho
+ * nele. Fazê-la digitar tudo de novo é exatamente o atrito que a D-15
+ * existe para tirar ("sem a pessoa preencher nada de novo").
+ *
+ * A distinção, então, não é "convite sim, convite não": é **existe
+ * inscrição pendente NA SAFRA QUE ESTÁ ABERTA?**. Se existe, o perfil é
+ * atual por construção. Se não existe — lista de espera, ou pendência numa
+ * safra que já passou —, ele não volta, e ela preenche.
+ *
+ * `null` quando não há inscrição pendente naquela safra, que é o caso
+ * normal de quem vem pelo convite da D-10.
+ */
+export type PerfilPendente = {
+  nivel_ingles: string
+  curso: string
+  periodo: string
+  disponibilidade: string[]
+}
+
+export async function buscarPerfilPendente(
+  pessoaId: string,
+  safraId: string,
+): Promise<PerfilPendente | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('nivel_ingles,curso,periodo,disponibilidade')
+    .eq('pessoa_id', pessoaId)
+    .eq('safra_id', safraId)
+    .eq('status', 'pendente_pagamento')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(perfil): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const l = data?.[0]
+
+  // ⚠️ Perfil incompleto não vira perfil pela metade. Um `curso` sem
+  // `periodo` preencheria metade do formulário e deixaria a outra vazia,
+  // e a pessoa não teria como saber que faltou — ela veria campos cheios
+  // e assumiria que estava tudo lá. Ou vem inteiro, ou não vem.
+  if (!l?.nivel_ingles || !l.curso || !l.periodo || !l.disponibilidade) return null
+
+  return {
+    nivel_ingles: l.nivel_ingles,
+    curso: l.curso,
+    periodo: l.periodo,
+    disponibilidade: l.disponibilidade,
+  }
 }
 
 /**

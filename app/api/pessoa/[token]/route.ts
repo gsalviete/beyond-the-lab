@@ -1,5 +1,7 @@
 import {
+  buscarPerfilPendente,
   buscarPessoaPorToken,
+  buscarSafraAtiva,
   SupabaseNotConfiguredError,
   tokenVenceu,
 } from '@/lib/supabase'
@@ -59,6 +61,25 @@ type PessoaPublica = {
   nome: string
   email: string
   telefone: string
+  /**
+   * O perfil, SÓ quando existe inscrição pendente na safra aberta.
+   *
+   * ⚠️ A CONDIÇÃO É O QUE TORNA ISTO SEGURO. Perfil descreve a pessoa
+   * NAQUELA safra (`008`) — quem estava no 3º período em janeiro está no
+   * 5º em julho —, então devolvê-lo a partir de uma inscrição velha
+   * apresentaria uma resposta desatualizada JÁ MARCADA, e ela confirmaria
+   * sem ler. Quando a inscrição pendente é da safra que está aberta, não
+   * há nada de velho: ela preencheu isso dias atrás, para esta turma.
+   *
+   * `null` no convite da lista de espera (D-10), que é quem não tem
+   * inscrição pendente nenhuma.
+   */
+  perfil: {
+    nivel_ingles: string
+    curso: string
+    periodo: string
+    disponibilidade: string[]
+  } | null
 }
 
 /**
@@ -132,14 +153,45 @@ export async function GET(_req: Request, ctx: { params: Promise<{ token: string 
       return Response.json({ ok: true, pessoa: null } satisfies Resposta, { status: 200 })
     }
 
+    // ------------------------------------------------------------
+    // O PERFIL — só se houver pendência NA SAFRA ABERTA (D-15)
+    //
+    // ⚠️ AS DUAS CONDIÇÕES SÃO NECESSÁRIAS. "Tem inscrição pendente" não
+    // basta: a pendência pode ser de uma safra que já passou, e aí o
+    // perfil é velho. "A safra está aberta" também não basta sozinho —
+    // sem pendência, quem vem pelo convite é da lista de espera e nunca
+    // preencheu perfil para esta turma.
+    //
+    // ⚠️ FALHA AQUI NÃO DERRUBA O PRÉ-PREENCHIMENTO DO CONTATO. O perfil é
+    // conforto; o contato é o que a D-10 promete. Um `catch` que
+    // devolvesse `pessoa: null` por causa do perfil trocaria o essencial
+    // pelo acessório.
+    // ------------------------------------------------------------
+    let perfil: PessoaPublica['perfil'] = null
+
+    try {
+      const safra = await buscarSafraAtiva()
+
+      if (safra?.inscricoes_abertas === true) {
+        perfil = await buscarPerfilPendente(pessoa.id, safra.id)
+      }
+    } catch (err) {
+      console.error('[pessoa] falha ao buscar o perfil pendente — segue sem ele', err)
+    }
+
     return Response.json(
       {
         ok: true,
-        // O corte é aqui, e é explícito: `token_expira_em` veio do banco
-        // para a decisão acima e NÃO atravessa. Um spread do objeto
-        // inteiro devolveria a validade do convite ao navegador sem
-        // ninguém decidir isso.
-        pessoa: { nome: pessoa.nome, email: pessoa.email, telefone: pessoa.telefone },
+        // O corte é aqui, e é explícito: `token_expira_em` e o `id` vieram
+        // do banco para as decisões acima e NÃO atravessam. Um spread do
+        // objeto inteiro devolveria a validade do convite e um id de banco
+        // ao navegador sem ninguém decidir isso.
+        pessoa: {
+          nome: pessoa.nome,
+          email: pessoa.email,
+          telefone: pessoa.telefone,
+          perfil,
+        },
       } satisfies Resposta,
       { status: 200 },
     )
