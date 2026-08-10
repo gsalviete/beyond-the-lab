@@ -71,6 +71,39 @@ export function paraE164(valor: string): string | null {
   return `+55${somenteDigitos(valor)}`
 }
 
+/**
+ * `+5521999999999` → `(21) 99999-9999`. O caminho inverso de `paraE164`.
+ *
+ * ============================================================
+ * ⚠️ ELA EXISTE POR CAUSA DE UM BUG REAL, e o bug era silencioso do pior
+ *    jeito: preenchia um campo com um valor INVÁLIDO
+ * ============================================================
+ *
+ * O convite (D-10, D-15) pré-preenche o telefone a partir do que está no
+ * banco, que é E.164 — `+5521987654321`, TREZE dígitos. Passar isso direto
+ * por `mascararTelefone` produz `(55) 21987-64321`: ela extrai os dígitos e
+ * monta assumindo DDD + celular, e o `55` do país vira DDD.
+ *
+ * O estrago não era só cosmético. `telefoneEhValido` exige exatamente 11
+ * dígitos, então a pessoa abria o link do convite, encontrava o telefone
+ * já preenchido, e era barrada com "digite um celular válido" num campo
+ * que ela não digitou. Medido em uso real, em 10/08/2026.
+ *
+ * ⚠️ O `+55` SAI POR PREFIXO, e não por "corta os dois primeiros dígitos".
+ * A diferença aparece no dia em que alguém colar um número sem o país:
+ * `21987654321` já é nacional, e um `slice(2)` cego devolveria
+ * `987654321` — um número mutilado que parece plausível. Só remove quem
+ * de fato tem o prefixo.
+ *
+ * Aceita as duas formas de propósito: o que vem do banco (`+55...`) e o
+ * que já está nacional. Assim quem chama não precisa saber de onde o valor
+ * veio.
+ */
+export function paraNacional(valor: string): string {
+  const semPais = valor.trim().replace(/^\+?55/, '')
+  return mascararTelefone(semPais)
+}
+
 /** Valida um E.164 já normalizado — é o que a API recebe pela rede. */
 export function e164EhValido(valor: string): boolean {
   if (!E164_BR_REGEX.test(valor)) return false

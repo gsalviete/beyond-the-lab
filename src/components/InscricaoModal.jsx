@@ -33,7 +33,7 @@ import {
   OUTRO,
   PERIODOS,
 } from '@/config/dominio'
-import { mascararTelefone, paraE164, telefoneEhValido } from '@/lib/telefone'
+import { mascararTelefone, paraE164, paraNacional, telefoneEhValido } from '@/lib/telefone'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
 // modal substitui. Altura 60px é a mesma do .btn-brand, e o radius de pill é
@@ -90,6 +90,39 @@ const PARAM_CUPOM = 'cupom'
 function tokenDaUrl() {
   if (typeof window === 'undefined') return ''
   return new URLSearchParams(window.location.search).get(PARAM_CONVITE) ?? ''
+}
+
+/**
+ * Põe um valor guardado no `<select>` certo — ou em "Outro" mais o campo
+ * de texto.
+ *
+ * ⚠️ O QUE FOI GRAVADO NÃO É NECESSARIAMENTE UMA OPÇÃO DA LISTA. `curso` e
+ * `periodo` são texto livre no banco de propósito: escolhendo "Outro", sai
+ * o que a pessoa digitou ("Fonoaudiologia", "6º semestre"). É por isso que
+ * eles não são `z.enum` no servidor — a lista é o que a UI OFERECE, o
+ * schema é o que ela ACEITA, e onde há "Outro" os dois divergem.
+ *
+ * Um `setCurso(valor)` cego com um valor fora da lista deixaria o
+ * `<select>` sem opção correspondente: ele voltaria para o placeholder, e
+ * a pessoa veria o campo VAZIO num formulário que ela preencheu — pior do
+ * que não pré-preencher, porque parece que o sistema perdeu o dado dela.
+ */
+function escolherOuOutro(valor, opcoes, definirEscolha, definirTexto) {
+  if (!valor) return
+
+  // ⚠️ `includes` E NÃO `some((o) => o.valor === ...)`: `CURSOS` e
+  // `PERIODOS` são arrays de STRING, não de `{ valor, rotulo }` — o
+  // domínio deles é o próprio texto, porque o que é gravado é o rótulo
+  // (ver o bloco em `dominio.ts` sobre por que eles não viram `z.enum`).
+  // A versão com `.valor` comparava `undefined` com a string e mandava
+  // TODO curso para "Outro", em silêncio: o `tsc` não verifica `.jsx`.
+  if (opcoes.includes(valor)) {
+    definirEscolha(valor)
+    return
+  }
+
+  definirEscolha(OUTRO)
+  definirTexto(valor)
 }
 
 /** O cupom da URL, ou `''`. */
@@ -327,12 +360,33 @@ export default function InscricaoModal({ onFechar }) {
 
       if (pessoa) {
         setConvite(pessoa)
-        // O telefone é o único campo CONTROLADO dos três, por causa da
-        // máscara. Ele entra pelo mesmo caminho de quem digita — o valor
-        // do banco é E.164 (`+5521987654321`) e `mascararTelefone`
-        // extrai os dígitos e remonta, então o `+55` some sozinho e o
-        // campo mostra `(21) 98765-4321`.
-        setTelefone(mascararTelefone(pessoa.telefone))
+
+        // ------------------------------------------------------------
+        // O PERFIL — só chega quando há pendência na safra ABERTA (D-15)
+        //
+        // ⚠️ QUEM ABANDONOU O CHECKOUT JÁ PREENCHEU ISTO, PARA ESTA TURMA.
+        // Fazê-la digitar tudo de novo é exatamente o atrito que a D-15
+        // existe para tirar — "sem a pessoa preencher nada de novo". Quem
+        // vem da lista de espera recebe `perfil: null` e preenche, porque
+        // ali o perfil seria de outra safra (`008`): quem estava no 3º
+        // período em janeiro está no 5º em julho.
+        //
+        // ⚠️ QUEM DECIDE É O SERVIDOR. A modal não sabe se existe
+        // pendência nem qual safra está aberta — ela obedece ao que veio.
+        // ------------------------------------------------------------
+        if (pessoa.perfil) {
+          setNivel(pessoa.perfil.nivel_ingles)
+          setDias(pessoa.perfil.disponibilidade)
+          escolherOuOutro(pessoa.perfil.curso, CURSOS, setCurso, setCursoOutro)
+          escolherOuOutro(pessoa.perfil.periodo, PERIODOS, setPeriodo, setPeriodoOutro)
+        }
+        // ⚠️ `paraNacional` E NÃO `mascararTelefone`, e a diferença era um
+        // bug: o valor do banco é E.164 (`+5521987654321`, TREZE dígitos),
+        // e mascarar direto produzia `(55) 21987-64321` — o código do país
+        // virando DDD. Pior que feio: `telefoneEhValido` exige onze
+        // dígitos, então a pessoa chegava pelo convite e era barrada com
+        // "digite um celular válido" num campo que ela não digitou.
+        setTelefone(paraNacional(pessoa.telefone))
       }
 
       // ⚠️ O TOKEN SAI DA BARRA DE ENDEREÇO ASSIM QUE É USADO, e não é

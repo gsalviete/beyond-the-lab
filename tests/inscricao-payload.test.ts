@@ -267,3 +267,73 @@ describe('o corpo manda exatamente o que o schema espera', () => {
     expect(corpo).toMatch(/\bphone:\s*paraE164\(/)
   })
 })
+
+// ============================================================
+// O PRÉ-PREENCHIMENTO DO CONVITE (D-15) — `escolherOuOutro`
+//
+// ⚠️ O QUE FOI GRAVADO NÃO É NECESSARIAMENTE UMA OPÇÃO DA LISTA. `curso` e
+// `periodo` são texto livre no banco de propósito: escolhendo "Outro", sai
+// o que a pessoa digitou. É a mesma razão pela qual eles não são `z.enum`
+// no servidor — a lista é o que a UI OFERECE, o schema é o que ela ACEITA.
+//
+// ⚠️ E O ERRO QUE ESTE BLOCO TRAVA JÁ ACONTECEU, na implementação: a
+// primeira versão comparava `o.valor === valor`, como se `CURSOS` fosse
+// array de `{ valor, rotulo }`. Ele é array de STRING — a comparação dava
+// `undefined === 'Biomedicina'`, sempre falsa, e TODO curso caía em
+// "Outro" com o nome repetido no campo de texto. O `tsc` não pegou porque
+// não verifica `.jsx`.
+// ============================================================
+describe('a lógica de pré-preencher curso e período', () => {
+  // A mesma função do componente, reescrita aqui porque `.jsx` não é
+  // importável no runner sem arrastar React junto. ⚠️ O teste abaixo trava
+  // que a FONTE do componente usa `includes` — sem isso, esta cópia
+  // poderia divergir do original e o teste passaria testando a si mesmo.
+  function escolherOuOutro(valor: string, opcoes: readonly string[]) {
+    if (!valor) return null
+    if (opcoes.includes(valor)) return { escolha: valor, texto: '' }
+    return { escolha: OUTRO, texto: valor }
+  }
+
+  it('valor da lista vai para o select', () => {
+    expect(escolherOuOutro('Biomedicina', CURSOS)).toEqual({
+      escolha: 'Biomedicina',
+      texto: '',
+    })
+  })
+
+  it('valor fora da lista vira "Outro" mais o texto', () => {
+    expect(escolherOuOutro('Fonoaudiologia', CURSOS)).toEqual({
+      escolha: OUTRO,
+      texto: 'Fonoaudiologia',
+    })
+  })
+
+  it('vale igual para período', () => {
+    expect(escolherOuOutro('6º semestre', PERIODOS)).toEqual({
+      escolha: OUTRO,
+      texto: '6º semestre',
+    })
+  })
+
+  it('vazio não mexe em nada', () => {
+    expect(escolherOuOutro('', CURSOS)).toBeNull()
+  })
+
+  // ⚠️ A AMARRA COM O COMPONENTE. A cópia acima só vale se o original
+  // usar a mesma comparação — `some((o) => o.valor === ...)` mandaria todo
+  // curso para "Outro" em silêncio.
+  it('o componente compara com `includes`, e não por `.valor`', () => {
+    expect(semComentarios).toMatch(/opcoes\.includes\(valor\)/)
+    expect(semComentarios).not.toMatch(/opcoes\.some\([^)]*\.valor/)
+  })
+
+  // ⚠️ E `CURSOS`/`PERIODOS` são mesmo arrays de string. Se um dia virarem
+  // objetos, este teste fica vermelho ANTES de o pré-preenchimento
+  // quebrar em silêncio.
+  it('`CURSOS` e `PERIODOS` são arrays de string', () => {
+    for (const lista of [CURSOS, PERIODOS]) {
+      expect(lista.length).toBeGreaterThan(1)
+      for (const item of lista) expect(typeof item).toBe('string')
+    }
+  })
+})
