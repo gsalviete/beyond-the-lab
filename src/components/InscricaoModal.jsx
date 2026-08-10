@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
-import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
+import {
+  INSTAGRAM_URL,
+  formatarDataPorExtenso,
+  formatarSemanaDeInicio,
+  paraDataUTC,
+} from '@/config/curso'
 // A frase do consentimento saiu daqui para um módulo próprio. Não foi
 // arrumação: `/api/inscricao` grava esta mesma constante em
 // `inscricoes.consent_text`, e duas cópias divergiriam sem ninguém notar —
@@ -1066,19 +1071,70 @@ export default function InscricaoModal({ onFechar }) {
                     )}
                   </button>
 
-                  {/* A frase que sustenta o "Garantir minha vaga" logo
-                      acima. Sem ela o botão promete uma transação que a
-                      página não faz — dizer o que de fato acontece é o que
-                      torna o rótulo forte defensável.
+                  {/* ============================================================
+                      A FRASE QUE PREPARA A TELA DO STRIPE
+                      ============================================================
 
-                      Não cita mais `data_primeira_cobranca`: a data virava
-                      compromisso com dia marcado, e o envio do link passou a
-                      acompanhar o início da turma. Os outros dois canais
-                      entram aqui porque é por eles que o aviso realmente
-                      sai. */}
+                      Ela sustenta o "Garantir minha vaga" logo acima: sem
+                      ela o botão promete uma transação que a página não
+                      explica.
+
+                      ⚠️ ELA ESTAVA ERRADA ATÉ AQUI, e o erro sobreviveu ao
+                      `c38`. O texto anterior dizia "o link de pagamento é
+                      enviado por e-mail mais perto do início da turma" —
+                      verdade no mundo SEM checkout, mentira a partir do
+                      momento em que o botão passou a levar direto ao
+                      Stripe. Prometia um e-mail que não vem.
+
+                      ⚠️ E ELA EXISTE, AGORA, PARA DESARMAR O "N DIAS
+                      GRÁTIS" DA PRÓXIMA TELA.
+
+                      O Stripe monta o cabeçalho dele sozinho a partir do
+                      trial (D-04) e escreve "Testar <turma>" com "17 dias
+                      grátis". Nenhum dos dois é configurável, e os dois
+                      dizem a coisa errada: isto não é período de avaliação,
+                      é matrícula com o cartão guardado. Medido na primeira
+                      inscrição de verdade.
+
+                      Quem chega àquela tela avisado lê "grátis" como "ainda
+                      não cobraram"; quem chega desavisado lê como "posso
+                      cancelar antes e não pago nada". A diferença entre as
+                      duas leituras é uma frase, e ela custa zero.
+
+                      ⚠️ A DATA SAI SECA, e é a única do modelo que pode:
+                      cobrança tem dia exato. É o oposto de
+                      `data_inicio_aulas`, que a D-14 manda dizer por semana
+                      porque cada grupo começa num dia diferente. O `?.`
+                      cobre o caso de a safra não ter vindo — sem data, a
+                      frase encolhe em vez de imprimir `undefined`. */}
                   <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                    Nada é cobrado agora. O link de pagamento é enviado por e-mail mais perto
-                    do início da turma, e também avisamos pelo WhatsApp e nas redes sociais.
+                    Nada é cobrado hoje. Na próxima tela você guarda o cartão
+                    {safra?.data_primeira_cobranca ? (
+                      <>
+                        , e a primeira mensalidade é debitada em{' '}
+                        <strong className="font-semibold text-ink">
+                          {formatarDataPorExtenso(paraDataUTC(safra.data_primeira_cobranca))}
+                        </strong>
+                      </>
+                    ) : (
+                      ', e a primeira mensalidade só é debitada quando a turma começa'
+                    )}
+                    .
+                  </p>
+
+                  {/* ⚠️ ESTA SEGUNDA LINHA NOMEIA O MAL-ENTENDIDO em vez de
+                      torcer para ele não acontecer. Parece defensivo e é o
+                      contrário: a palavra "grátis" vai aparecer na próxima
+                      tela de qualquer jeito, e quem a explica primeiro é
+                      quem controla o que ela significa.
+
+                      Se um dia o mecanismo mudar (`billing_cycle_anchor` no
+                      lugar do `trial_end`, por exemplo), esta linha sai
+                      junto — ela descreve uma tela específica, e não uma
+                      regra do produto. */}
+                  <p className="text-center font-sans text-[12px] leading-[18px] text-muted">
+                    A tela do Stripe chama esse intervalo de “período grátis”. É só o tempo
+                    até essa data — sua vaga não é um teste.
                   </p>
                 </>
               ) : (
