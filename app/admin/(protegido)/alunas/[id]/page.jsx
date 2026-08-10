@@ -18,6 +18,35 @@ import { buscarFicha } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * ⚠️ OS ESTADOS DO STRIPE, EM PORTUGUÊS.
+ *
+ * A ficha mostrava `status_stripe` cru, e a Giovanna leu **"trialing"** e
+ * perguntou o que era. Ela tinha razão de perguntar: é vocabulário de API
+ * numa tela que pela D-07 é a única ferramenta dela. Se ela precisa
+ * aprender o idioma do Stripe para ler a própria ficha, a ferramenta
+ * falhou.
+ *
+ * A tradução mora aqui, na borda. O banco continua guardando o valor cru
+ * — ele é ESPELHO do Stripe (`012`), e espelho que traduz deixa de servir
+ * para conciliar.
+ *
+ * ⚠️ O `?? valor` NO FIM NÃO É PREGUIÇA: o Stripe pode acrescentar um
+ * estado novo, e imprimir o nome cru é melhor do que imprimir vazio ou
+ * "desconhecido". Ela vê algo estranho, pergunta, e a gente traduz — que
+ * é exatamente o que aconteceu com o `trialing`.
+ */
+const ROTULO_STRIPE = {
+  trialing: 'Cartão salvo, aguardando a primeira cobrança',
+  active: 'Cobrança em dia',
+  past_due: 'Cobrança atrasada — o Stripe vai tentar de novo',
+  unpaid: 'Cobranças falharam e o Stripe desistiu de tentar',
+  canceled: 'Encerrada',
+  incomplete: 'Pagamento começou e não foi concluído',
+  incomplete_expired: 'Pagamento não concluído a tempo',
+  paused: 'Pausada',
+}
+
 const ROTULO_STATUS = {
   lista_espera: 'Lista de espera',
   pendente_pagamento: 'Pagamento pendente',
@@ -96,7 +125,10 @@ export default async function Page({ params }) {
           {assinatura && (
             <>
               <Linha rotulo="Meses pagos" valor={String(assinatura.ciclos_pagos)} />
-              <Linha rotulo="Situação no Stripe" valor={assinatura.status_stripe} />
+              <Linha
+                rotulo="Situação da cobrança"
+                valor={ROTULO_STRIPE[assinatura.status_stripe] ?? assinatura.status_stripe}
+              />
               <Linha
                 rotulo="Cobrança encerra em"
                 valor={assinatura.cancel_at ? formatarData(assinatura.cancel_at) : '—'}
