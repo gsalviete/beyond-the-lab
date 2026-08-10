@@ -122,6 +122,7 @@ function ItensDoMenu() {
       <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
       <ItemDeMenu href="/admin/alunas">Alunas</ItemDeMenu>
       <ItemDeMenu href="/admin/alocacao">Horários</ItemDeMenu>
+      <ItemDeMenu href="/admin/espera">Lista de espera</ItemDeMenu>
       <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
       <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
     </>

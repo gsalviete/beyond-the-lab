@@ -1520,6 +1520,61 @@ export async function listarPendentes(): Promise<PendenteDoPainel[]> {
 }
 
 /**
+ * A lista de espera, com quem está esperando desde quando.
+ *
+ * ============================================================
+ * ⚠️ "HÁ QUANTO TEMPO" É DERIVADO DE `created_at`, NUNCA UMA FLAG (D-16)
+ * ============================================================
+ *
+ * A D-16 dá o desconto de "primeira semana" a quem entrou primeiro, e
+ * exige que isso seja DERIVADO: "uma coluna `primeira_semana boolean`
+ * depende de alguém lembrar de ligá-la no insert certo, e um dia não
+ * lembra; pior, ela pode ser ligada depois, à mão, para quem não é".
+ *
+ * Esta consulta devolve o carimbo cru e ordena por ele. Quem decide o
+ * corte é a Giovanna, olhando a data na tela — e a data que ela olha é a
+ * mesma que o banco guarda, sem intermediário que possa mentir.
+ *
+ * ⚠️ ⚠️ A DATA DE CORTE DA D-16 CONTINUA SEM SER DEFINIDA, e enquanto
+ * ela não existir o critério operacional é o que a própria decisão manda:
+ * "toda inscrição `lista_espera` migrada pela `010`" — um conjunto
+ * fechado e conhecido, porque a `010` recusa rodar duas vezes.
+ */
+export type EsperandoDoPainel = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  criada_em: string
+  token_expira_em: string | null
+}
+
+export async function listarListaDeEspera(): Promise<EsperandoDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em)')
+    .eq('status', 'lista_espera')
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw new Error(`inscricoes(espera): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return (data ?? [])
+    .filter((l) => l.pessoas)
+    .map((l) => ({
+      inscricao_id: l.id,
+      pessoa_id: l.pessoas!.id,
+      nome: l.pessoas!.nome,
+      email: l.pessoas!.email,
+      telefone: l.pessoas!.telefone,
+      criada_em: l.created_at,
+      token_expira_em: l.pessoas!.token_expira_em,
+    }))
+}
+
+/**
  * Garante um convite vivo para esta pessoa e devolve o token.
  *
  * ============================================================
