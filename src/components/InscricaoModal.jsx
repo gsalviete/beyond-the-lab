@@ -71,10 +71,31 @@ const LABEL = 'pl-5 font-display text-[14px] font-semibold leading-[19.2px] text
 // ============================================================
 const PARAM_CONVITE = 'convite'
 
+/**
+ * O cupom que veio no link do convite (D-16).
+ *
+ * ⚠️ ELE VEM DA URL E ISSO TORNA O LINK MAIS VALIOSO SE FOR ENCAMINHADO.
+ * É consequência aceita, e o controle dela é o LIMITE DE USOS do cupom,
+ * que a Giovanna define na tela — não uma tentativa de esconder o código.
+ * A alternativa era ela explicar no corpo do e-mail e a pessoa copiar à
+ * mão, que é exatamente onde a conversão se perde.
+ *
+ * O código também vai ESCRITO no e-mail, para quem abrir sem HTML ou
+ * colar o link sem os parâmetros. Um desconto que só existe dentro de uma
+ * URL é um desconto que some quando a URL some.
+ */
+const PARAM_CUPOM = 'cupom'
+
 /** O token da URL, ou `''` no fluxo limpo — que é o caso normal. */
 function tokenDaUrl() {
   if (typeof window === 'undefined') return ''
   return new URLSearchParams(window.location.search).get(PARAM_CONVITE) ?? ''
+}
+
+/** O cupom da URL, ou `''`. */
+function cupomDaUrl() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get(PARAM_CUPOM) ?? ''
 }
 
 /**
@@ -97,6 +118,10 @@ function limparTokenDaUrl() {
 
   const url = new URL(window.location.href)
   url.searchParams.delete(PARAM_CONVITE)
+  // O cupom sai junto: ele é parte do mesmo convite, e deixá-lo na barra
+  // de endereço depois de já ter sido lido só aumenta a chance de o link
+  // ser compartilhado com o desconto dentro.
+  url.searchParams.delete(PARAM_CUPOM)
   window.history.replaceState(null, '', url.toString())
 }
 
@@ -196,6 +221,12 @@ export default function InscricaoModal({ onFechar }) {
   // dado errado — a pessoa confirma sem ler, porque o campo já estava
   // preenchido.
   const [convite, setConvite] = useState(null)
+
+  // ⚠️ Lido UMA VEZ, na montagem, e não a cada render: o `limparTokenDaUrl`
+  // apaga o parâmetro assim que o convite é resolvido, e uma leitura tardia
+  // devolveria vazio. O `useState` com inicializador preserva o valor que
+  // existia quando a modal abriu.
+  const [cupomDoConvite] = useState(() => cupomDaUrl())
 
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
@@ -954,6 +985,11 @@ export default function InscricaoModal({ onFechar }) {
                   <label htmlFor={cupomId} className={LABEL}>
                     Cupom de desconto (opcional)
                   </label>
+                  {/* ⚠️ `defaultValue` e não `value`: o campo continua NÃO
+                      CONTROLADO. Quem chegou pelo convite encontra o código
+                      preenchido e pode apagá-lo; quem chegou pelo link
+                      limpo encontra vazio. Um `value` travaria a digitação
+                      de quem quisesse trocar o cupom. */}
                   <input
                     id={cupomId}
                     name="cupom"
@@ -962,6 +998,7 @@ export default function InscricaoModal({ onFechar }) {
                     autoComplete="off"
                     autoCorrect="off"
                     spellCheck={false}
+                    defaultValue={cupomDoConvite}
                     placeholder="Tem um código? Digite aqui"
                     disabled={submitting}
                     className={FIELD}
