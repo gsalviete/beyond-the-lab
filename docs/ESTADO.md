@@ -263,6 +263,28 @@ Descobertos na implementação. Perdê-los custa caro.
   consultável por `list` (estritamente consistente), ao contrário de `search`.
   É o que torna `precoDoContrato` idempotente.
 
+### ⚠️ Descobertos no PRIMEIRO teste de ponta a ponta (09/08/2026)
+
+- ⚠️⚠️ **A assinatura com trial emite uma fatura de R$ 0,00 NA HORA, e ela
+  dispara `invoice.paid`.** Medido: `invoice.created` → `finalized` → `paid`
+  no mesmo segundo do cadastro, antes de qualquer débito. Tratada como ciclo,
+  ela marcaria a inscrição como `ativa` ("Pagando") com o cartão só salvo, e
+  `ciclos_pagos` fecharia em SETE num curso de seis — a reclamação de julho
+  chegando por outra porta. **Corrigido:** o handler conta ciclo por
+  `billing_reason`, e não por valor (um `subscription_cycle` de R$ 0,00 por
+  cupom de meses grátis É um mês consumido e conta).
+- ⚠️ **`stripe listen` NÃO REENTREGA.** A CLI encaminha cada evento uma vez;
+  ela não implementa a política de retentativa do webhook de verdade. Um 500
+  local é definitivo — para completar o teste é preciso reenviar à mão
+  (`stripe events resend evt_...` ou o botão *Resend* no Dashboard). Em
+  produção o Stripe reentrega sozinho, com backoff.
+- **`invoice.paid` chega ANTES de `checkout.session.completed` na prática.**
+  O handler já previa (devolve 500 para reentrega) e o comportamento foi
+  observado na primeira inscrição — não é hipótese.
+- **O Next 16 depreciou `middleware.ts` em favor de `proxy.ts`.** É aviso, não
+  erro: o middleware funciona (aparece como `proxy.ts:` nos tempos do log).
+  Migrar é pendência, não bloqueio.
+
 ### Novos, da sessão do corte 3
 
 - ⚠️ **`z.uuid()` do Zod 4 valida a RFC, não só a forma.** Um
