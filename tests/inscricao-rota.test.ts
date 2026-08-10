@@ -35,18 +35,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CONSENT_TEXT } from '@/config/consentimento'
 
+// `@/lib/stripe` é `server-only`, e o pacote LANÇA quando importado fora
+// de um Server Component — em Node puro, sempre. O dublê vazio permite
+// testar a rota sem afrouxar a proteção: o `import 'server-only'`
+// continua no topo do arquivo de produção, que é onde ele protege alguma
+// coisa (REPORT §9.5).
+vi.mock('server-only', () => ({}))
+
 const dubles = vi.hoisted(() => {
-  // A classe precisa nascer aqui dentro: a fábrica do `vi.mock` é içada
-  // para o topo do módulo, e a rota faz `err instanceof
+  // As classes precisam nascer aqui dentro: a fábrica do `vi.mock` é
+  // içada para o topo do módulo, e a rota faz `err instanceof
   // SupabaseNotConfiguredError` — tem que ser a MESMA classe dos dois
   // lados, ou o `catch` cai no ramo errado e o teste passa a medir outra
   // coisa.
   class SupabaseNotConfiguredError extends Error {}
+  class StripeNotConfiguredError extends Error {}
 
   return {
     SupabaseNotConfiguredError,
+    StripeNotConfiguredError,
     buscarSafraAtiva: vi.fn(),
     criarInscricao: vi.fn(),
+    salvarStripePriceId: vi.fn(),
+    buscarCupom: vi.fn(),
+    salvarStripeCouponId: vi.fn(),
+    cupomNoStripe: vi.fn(),
+    precoDoContrato: vi.fn(),
+    criarSessaoDeCheckout: vi.fn(),
     notificarAdmin: vi.fn(),
     confirmarInscricao: vi.fn(),
     /** O que o `after` agendou. Uma tarefa = um lote de e-mails. */
@@ -60,11 +75,39 @@ vi.mock('next/server', () => ({
   },
 }))
 
-vi.mock('@/lib/supabase', () => ({
-  SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
-  buscarSafraAtiva: dubles.buscarSafraAtiva,
-  criarInscricao: dubles.criarInscricao,
-}))
+// ⚠️ `cupomInvalidoPorque` VEM DE VERDADE. Ela é pura — não lê banco, não
+// chama Stripe, não olha o relógio por conta própria —, e é a regra que
+// decide se um desconto vale. Substituí-la faria os testes de cupom
+// abaixo provarem que a rota chama uma função, e não que ela recusa um
+// cupom expirado.
+vi.mock('@/lib/supabase', async (original) => {
+  const real = await original<typeof import('@/lib/supabase')>()
+  return {
+    cupomInvalidoPorque: real.cupomInvalidoPorque,
+    SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
+    buscarSafraAtiva: dubles.buscarSafraAtiva,
+    criarInscricao: dubles.criarInscricao,
+    salvarStripePriceId: dubles.salvarStripePriceId,
+    buscarCupom: dubles.buscarCupom,
+    salvarStripeCouponId: dubles.salvarStripeCouponId,
+  }
+})
+
+// ⚠️ `ancorasDaAssinatura` e `trialEhAceitavel` VÊM DE VERDADE. São a
+// conta da D-04 e a regra das 48 horas do Stripe — substituí-las
+// transformaria os testes de checkout em "a rota chama uma função" em vez
+// de "a rota manda a data certa".
+vi.mock('@/lib/stripe', async (original) => {
+  const real = await original<typeof import('@/lib/stripe')>()
+  return {
+    ancorasDaAssinatura: real.ancorasDaAssinatura,
+    trialEhAceitavel: real.trialEhAceitavel,
+    StripeNotConfiguredError: dubles.StripeNotConfiguredError,
+    precoDoContrato: dubles.precoDoContrato,
+    criarSessaoDeCheckout: dubles.criarSessaoDeCheckout,
+    cupomNoStripe: dubles.cupomNoStripe,
+  }
+})
 
 vi.mock('@/lib/email', () => ({
   notificarAdmin: dubles.notificarAdmin,
@@ -240,11 +283,15 @@ describe('o par safra_id / status', () => {
   })
 
   // O corte de fronteira da chamada. A lista é fechada de propósito:
-  // `status` não está (é derivado na `011b`), `consent` não está (a função
+  // `status` não está (é derivado na `016`), `consent` não está (a função
   // grava `true` fixo), `grupo_id` não está (D-03), `payment_choice` não
   // existe mais (D-11). Uma chave a mais aqui é uma decisão de negócio
   // atravessando por engano.
-  it('manda exatamente dez campos — nem `status`, nem `consent`, nem `grupo_id`', async () => {
+  //
+  // ⚠️ `travados` ENTROU NO `c35`, e é o décimo primeiro. Ele é o contrato
+  // copiado da safra (D-06) e anda colado em `safra_id`: `null` nos dois
+  // ou preenchido nos dois. Ver o teste do bloco de checkout.
+  it('manda exatamente onze campos — nem `status`, nem `consent`, nem `grupo_id`', async () => {
     await post()
     expect(Object.keys(argumentos()).sort()).toEqual(
       [
@@ -258,6 +305,7 @@ describe('o par safra_id / status', () => {
         'periodo',
         'safra_id',
         'telefone',
+        'travados',
       ].sort(),
     )
   })
@@ -407,13 +455,24 @@ describe('inscrição nova (`criada: true`)', () => {
     expect(dubles.confirmarInscricao.mock.calls[0][1]).toBeNull()
   })
 
-  it('safra aberta → os e-mails recebem a safra que foi gravada', async () => {
+  // ⚠️ COM SAFRA ABERTA, A CONFIRMAÇÃO PARA A ALUNA NÃO SAI MAIS AQUI, e
+  // a mudança é do `c35`. Ela diria "sua inscrição está confirmada" para
+  // alguém que ainda não pagou — e pela D-02 é pagar que faz entrar.
+  // Quem manda é o webhook, depois de `checkout.session.completed`, que é
+  // o instante em que a frase passa a ser verdade.
+  //
+  // O aviso para a Giovanna sai dos dois jeitos: o e-mail dela é
+  // OPERACIONAL, não promessa. "Fulana está se inscrevendo agora" é
+  // verdade mesmo que o cartão nunca seja digitado — e é ela que precisa
+  // saber que existe gente chegando, inclusive gente que abandona o
+  // checkout e vira fila de pendência (D-15).
+  it('safra aberta → só a Giovanna é avisada, e com a safra que foi gravada', async () => {
     dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
     await post()
     await rodarTarefas()
 
     expect(dubles.notificarAdmin.mock.calls[0][1]?.id).toBe(SAFRA_ID)
-    expect(dubles.confirmarInscricao.mock.calls[0][1]?.id).toBe(SAFRA_ID)
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
   })
 
   // `payment_choice` alimentava a linha "Pagamento" do e-mail da Giovana.
@@ -559,5 +618,355 @@ describe('curso e período livres chegam à RPC como foram digitados', () => {
     await post({ curso: 'Biomedicina', periodo: '1º ao 3º' })
     expect(argumentos().curso).toBe('Biomedicina')
     expect(argumentos().periodo).toBe('1º ao 3º')
+  })
+})
+
+// ============================================================
+// 7. O CHECKOUT (`c35`, `c36`, `c37`) — a sessão nasce nesta rota
+//
+// ⚠️ NÃO EXISTE `POST /api/checkout`, e a ausência é a decisão. Uma rota
+// separada teria que receber do cliente QUAL inscrição pagar, e "nenhuma
+// decisão de negócio vem do cliente" é a regra que abre o
+// `02-FLUXOS.md` — qualquer pessoa abriria o checkout de uma inscrição
+// alheia mandando outro id. Aqui o id vem da RPC que acabou de escrever a
+// linha, na mesma requisição.
+//
+// ⚠️ `ancorasDaAssinatura` e `trialEhAceitavel` são as de VERDADE neste
+// arquivo (ver os `vi.mock` do topo). O que se afirma abaixo sobre datas
+// é a conta real, não um dublê concordando consigo mesmo.
+// ============================================================
+const INSCRICAO_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+const CONTRATO = {
+  valorMensal: 299.99,
+  duracaoMeses: 6,
+  dataPrimeiraCobranca: '2026-09-01',
+}
+
+/** A RPC devolvendo uma inscrição pagável. */
+function rpcComCheckout(criada = true, contrato = CONTRATO) {
+  dubles.criarInscricao.mockResolvedValue({
+    ok: true,
+    criada,
+    inscricaoId: INSCRICAO_ID,
+    contrato,
+  })
+}
+
+describe('safra aberta abre o checkout', () => {
+  beforeEach(() => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
+    rpcComCheckout()
+    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
+  })
+
+  it('responde `modo: checkout` com a url do Stripe', async () => {
+    const { res, body } = await post()
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.modo).toBe('checkout')
+    expect(body.url).toBe('https://checkout.stripe.com/c/pay/teste')
+  })
+
+  // ⚠️ O fio que liga o pagamento à inscrição. Sem `client_reference_id` o
+  // webhook recebe um id de sessão do Stripe e nenhuma forma de saber qual
+  // linha confirmar.
+  it('a sessão carrega o id da inscrição que a RPC devolveu', async () => {
+    await post()
+    expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].inscricaoId).toBe(INSCRICAO_ID)
+  })
+
+  // D-06: o contrato é COPIADO da safra no momento do checkout.
+  it('os travados enviados à RPC são os da safra', async () => {
+    await post()
+    expect(argumentos().travados).toEqual(CONTRATO)
+  })
+
+  // ⚠️ D-04: `trial_end` é a data de cobrança da safra, em epoch de
+  // SEGUNDOS. A conta é a de verdade — 2026-09-01 UTC.
+  it('`trial_end` é a data de primeira cobrança, em segundos', async () => {
+    await post()
+    const esperado = Math.floor(Date.UTC(2026, 8, 1) / 1000)
+    expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].trialEnd).toBe(esperado)
+  })
+
+  // ⚠️ A DATA VIAJA TAMBÉM COMO STRING, para a frase que o Stripe imprime
+  // acima do botão de pagar. O cabeçalho dele ("Testar X", "N dias
+  // grátis") é gerado a partir do trial e não é configurável — esse texto
+  // é o único lugar onde dá para dizer que nada será cobrado hoje.
+  it('a data de cobrança vai por extenso para o texto do Stripe', async () => {
+    await post()
+    expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].dataPrimeiraCobranca).toBe(
+      CONTRATO.dataPrimeiraCobranca,
+    )
+  })
+
+  // ⚠️ E ela sai do CONTRATO, não da safra: quem retomou um checkout
+  // antigo tem que ler a data que combinou, não a de hoje (D-06).
+  it('e ela é a do contrato, não a da safra', async () => {
+    rpcComCheckout(false, { ...CONTRATO, dataPrimeiraCobranca: '2026-10-01' })
+    await post()
+
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.dataPrimeiraCobranca).toBe('2026-10-01')
+    expect(sessao.dataPrimeiraCobranca).not.toBe(safra(true).data_primeira_cobranca)
+  })
+
+  // ⚠️ O Stripe recusa `trial_end` a menos de 48h. Omitir e cobrar na hora
+  // é o menos ruim: a alternativa não é "cobrar depois", é "não vender". E
+  // o que NÃO se pode fazer é empurrar a data, que desalinharia os seis
+  // ciclos inteiros.
+  it('cobrança a menos de 48h → `trialEnd: null`, e a data NÃO é empurrada', async () => {
+    const amanha = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10)
+    rpcComCheckout(true, { ...CONTRATO, dataPrimeiraCobranca: amanha })
+
+    await post()
+    expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].trialEnd).toBeNull()
+  })
+
+  // ⚠️ O `price` sai do CONTRATO DA LINHA, não do valor da safra. Os dois
+  // coincidem no caminho normal e divergem na retomada depois de uma
+  // mudança de preço — e aí é o contrato que vale (D-06).
+  it('o `price` é pedido para o valor do contrato devolvido', async () => {
+    rpcComCheckout(false, { ...CONTRATO, valorMensal: 249.99 })
+    await post()
+    expect(dubles.precoDoContrato.mock.calls[0][1]).toBe(249.99)
+  })
+
+  // ⚠️ DUPLICATA TAMBÉM PAGA. Quem abandonou o checkout ficava preso em
+  // `pendente_pagamento` recebendo "você já está inscrita" (D-15). Agora a
+  // segunda tentativa abre a sessão da inscrição que já existe.
+  it('duplicata em safra aberta abre o checkout, não a mensagem de duplicata', async () => {
+    rpcComCheckout(false)
+    const { body } = await post()
+
+    expect(body.modo).toBe('checkout')
+    expect(body.duplicada).toBeUndefined()
+  })
+
+  it('e a duplicata continua não disparando e-mail nenhum', async () => {
+    rpcComCheckout(false)
+    await post()
+    await rodarTarefas()
+
+    expect(dubles.notificarAdmin).not.toHaveBeenCalled()
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ A inscrição JÁ ESTÁ GRAVADA quando o Stripe falha. Não dá para
+  // degradar para lista de espera — o par (safra_id, status) está no banco
+  // —, e responder erro diria "não conseguimos salvar" sobre um cadastro
+  // que existe. O que é verdade é a fila da D-15: alguém manda o link.
+  it('Stripe fora do ar → 200 com a promessa da fila, nunca 500', async () => {
+    dubles.criarSessaoDeCheckout.mockRejectedValue(new Error('stripe fora do ar'))
+    const { res, body } = await post()
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    // ⚠️ `modo: 'fila'` e não ausência de `modo`: sem ele a modal cai na
+    // tela de sucesso genérica, que prometeria vaga reservada a quem não
+    // pagou. É o servidor que sabe que o checkout não abriu.
+    expect(body.modo).toBe('fila')
+    expect(body.url).toBeUndefined()
+    expect(body.message).toContain('link de pagamento')
+  })
+
+  // A gravação do `price` na safra é otimização de próxima chamada, não
+  // requisito desta: o `priceId` devolvido pelo Stripe é válido agora.
+  it('falha ao gravar o price na safra não derruba o checkout', async () => {
+    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_novo', criado: true })
+    dubles.salvarStripePriceId.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { body } = await post()
+    expect(body.modo).toBe('checkout')
+  })
+})
+
+// ============================================================
+// 8. VAGAS — D-08, limite MOLE (`c36`)
+//
+// ⚠️ `vagas_total` nulo significa SEM LIMITE, e é o caso normal: a
+// Giovanna respondeu que não precisa de número fixo de vagas — "podemos
+// ter mais ou menos alunos dependendo da aderência deles e da
+// disponibilidade da professora". A coluna existe para o dia em que ela
+// quiser um teto.
+//
+// ⚠️ ESTOURO NÃO É ERRO — É LISTA DE ESPERA. Recusar aqui significa não
+// abrir o checkout, nunca mostrar tela de erro (REPORT §9.3).
+// ============================================================
+describe('vaga é limite mole', () => {
+  beforeEach(() => {
+    rpcComCheckout()
+    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
+  })
+
+  it('`vagas_total` null → sem limite, o checkout abre', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue({
+      ...safra(true),
+      vagas_total: null,
+      inscritas: 9999,
+    })
+
+    const { body } = await post()
+    expect(body.modo).toBe('checkout')
+  })
+
+  it('vagas esgotadas → grava lista de espera, sem safra e sem contrato', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue({ ...safra(true), vagas_total: 20, inscritas: 20 })
+
+    const { res, body } = await post()
+
+    expect(argumentos().safra_id).toBeNull()
+    expect(argumentos().travados).toBeNull()
+    expect(res.status).toBe(200)
+    expect(body.modo).toBeUndefined()
+    expect(dubles.criarSessaoDeCheckout).not.toHaveBeenCalled()
+  })
+
+  // A última vaga é vaga. `inscritas === vagas_total` já é estouro;
+  // `inscritas === vagas_total - 1` ainda compra.
+  it('a última vaga ainda abre o checkout', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue({ ...safra(true), vagas_total: 20, inscritas: 19 })
+
+    const { body } = await post()
+    expect(body.modo).toBe('checkout')
+  })
+})
+
+// ============================================================
+// 9. CUPOM (`c49`) — validado ANTES de qualquer escrita
+//
+// ⚠️ A ORDEM É O COMPORTAMENTO. Validar depois do insert deixaria a pessoa
+// gravada em `pendente_pagamento` por causa de um código digitado errado,
+// e ela cairia na fila da D-15 sem ter feito nada além de trocar uma
+// letra. Aqui, cupom inválido é 400, o formulário continua preenchido na
+// tela, ela corrige e reenvia.
+//
+// ⚠️ `cupomInvalidoPorque` é a de VERDADE neste arquivo (ver os `vi.mock`
+// do topo): o que se afirma abaixo é a regra real, não um dublê
+// concordando consigo mesmo.
+// ============================================================
+const CUPOM_VALIDO = {
+  id: 'cccccccc-dddd-eeee-ffff-000000000000',
+  codigo: 'PARCERIA',
+  tipo: 'primeiro_mes',
+  valor: 20,
+  stripe_coupon_id: 'cupom_cccccccc-dddd-eeee-ffff-000000000000',
+  safra_id: null,
+  usos_max: null,
+  usos_atuais: 0,
+  expira_em: null,
+  ativo: true,
+}
+
+describe('o cupom', () => {
+  beforeEach(() => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
+    rpcComCheckout()
+    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
+    dubles.buscarCupom.mockResolvedValue(CUPOM_VALIDO)
+    dubles.cupomNoStripe.mockResolvedValue(CUPOM_VALIDO.stripe_coupon_id)
+  })
+
+  it('válido → viaja para a sessão, com o id do Stripe e o nosso', async () => {
+    const { body } = await post({ cupom: 'PARCERIA' })
+
+    expect(body.modo).toBe('checkout')
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.stripeCouponId).toBe(CUPOM_VALIDO.stripe_coupon_id)
+    expect(sessao.cupomId).toBe(CUPOM_VALIDO.id)
+  })
+
+  // ⚠️ Controle do método: sem cupom, os dois campos vão nulos. Sem este
+  // par, "o cupom viajou" seria indistinguível de "a rota sempre manda
+  // alguma coisa nesses campos".
+  it('sem cupom → os dois campos vão nulos, e o banco nem é consultado', async () => {
+    const { body } = await post()
+
+    expect(body.modo).toBe('checkout')
+    expect(dubles.buscarCupom).not.toHaveBeenCalled()
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.stripeCouponId).toBeNull()
+    expect(sessao.cupomId).toBeNull()
+  })
+
+  // ⚠️ NADA É GRAVADO. É a propriedade que separa "corrige uma letra e
+  // reenvia" de "você agora está em pendente_pagamento por engano".
+  it.each([
+    ['inexistente', null, 'Não encontramos'],
+    ['expirado', { ...CUPOM_VALIDO, expira_em: '2020-01-01T00:00:00.000Z' }, 'expirou'],
+    ['esgotado', { ...CUPOM_VALIDO, usos_max: 5, usos_atuais: 5 }, 'limite de usos'],
+    ['inativo', { ...CUPOM_VALIDO, ativo: false }, 'não está mais disponível'],
+    [
+      'de outra safra',
+      { ...CUPOM_VALIDO, safra_id: '00000000-0000-0000-0000-000000000000' },
+      'não vale para esta turma',
+    ],
+  ])('%s → 400 com mensagem própria, e NADA é gravado', async (_c, registro, trecho) => {
+    dubles.buscarCupom.mockResolvedValue(registro)
+
+    const { res, body } = await post({ cupom: 'PARCERIA' })
+
+    expect(res.status).toBe(400)
+    expect(body.ok).toBe(false)
+    expect(body.message).toContain(trecho)
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+    expect(dubles.criarSessaoDeCheckout).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ O espelho é TENTADO antes de a falta dele virar recusa. O cupom
+  // nasce no nosso banco e o `coupon` do Stripe é consequência (D-07) —
+  // recusar de cara faria a Giovanna criar um cupom no painel, ele parecer
+  // pronto, e a primeira aluna a usá-lo ouvir que não dá.
+  it('sem espelho → espelha no Stripe e segue, em vez de recusar', async () => {
+    dubles.buscarCupom.mockResolvedValue({ ...CUPOM_VALIDO, stripe_coupon_id: null })
+
+    const { body } = await post({ cupom: 'PARCERIA' })
+
+    expect(dubles.cupomNoStripe).toHaveBeenCalledTimes(1)
+    expect(dubles.salvarStripeCouponId).toHaveBeenCalledWith(
+      CUPOM_VALIDO.id,
+      CUPOM_VALIDO.stripe_coupon_id,
+    )
+    expect(body.modo).toBe('checkout')
+  })
+
+  it('falha ao gravar o espelho não derruba o checkout', async () => {
+    dubles.buscarCupom.mockResolvedValue({ ...CUPOM_VALIDO, stripe_coupon_id: null })
+    dubles.salvarStripeCouponId.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { body } = await post({ cupom: 'PARCERIA' })
+    expect(body.modo).toBe('checkout')
+  })
+
+  // ⚠️ FALHA DE INFRA NÃO VIRA "SEGUE SEM DESCONTO". A pessoa digitou um
+  // cupom; abrir o checkout pelo valor cheio cobraria mais do que ela
+  // aceitou pagar, e ela só descobriria no extrato.
+  it('banco fora do ar na validação → 500, e nada é gravado', async () => {
+    dubles.buscarCupom.mockRejectedValue(new Error('banco fora do ar'))
+
+    const { res } = await post({ cupom: 'PARCERIA' })
+
+    expect(res.status).toBe(500)
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+  })
+
+  // Sem safra aberta não há o que descontar. Recusar a inscrição por causa
+  // de um cupom que não seria usado trocaria um cadastro por uma mensagem
+  // de erro.
+  it('sem safra aberta → o cupom é ignorado em silêncio, e a pessoa entra na lista', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(false))
+    dubles.buscarCupom.mockResolvedValue(null)
+
+    const { res, body } = await post({ cupom: 'INEXISTENTE' })
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(dubles.buscarCupom).not.toHaveBeenCalled()
+    expect(argumentos().safra_id).toBeNull()
   })
 })

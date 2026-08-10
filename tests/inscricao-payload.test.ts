@@ -189,8 +189,55 @@ describe('o texto livre de "Outro" é o que vai no POST', () => {
 // seria a quinta cópia.
 // ============================================================
 describe('o corpo manda exatamente o que o schema espera', () => {
-  it('as chaves do POST são as do `inscricaoSchema`, nem mais nem menos', () => {
-    expect([...chavesDoCorpo].sort()).toEqual(Object.keys(inscricaoSchema.shape).sort())
+  // ⚠️ A COMPARAÇÃO É COM OS CAMPOS OBRIGATÓRIOS, e a distinção nasceu no
+  // `c49`. `cupom` entrou no schema como OPCIONAL e a modal ainda não tem
+  // campo para ele — o desconto da D-16 chega pelo link do convite, sem
+  // ninguém digitar nada. Comparar com `Object.keys(shape)` cru passaria a
+  // exigir que a modal mandasse um campo que ela não deve mandar.
+  //
+  // ⚠️ E A LISTA CONTINUA DERIVADA DO SCHEMA, não escrita à mão aqui — o
+  // que o teste afirma é "a modal manda tudo que é obrigatório e nada além
+  // do que o schema conhece". Uma lista literal seria a quinta cópia dos
+  // mesmos nomes, que é exatamente o que este arquivo existe para impedir.
+  const obrigatorios = Object.entries(inscricaoSchema.shape)
+    .filter(([, campo]) => !campo.safeParse(undefined).success)
+    .map(([nome]) => nome)
+
+  const opcionais = Object.keys(inscricaoSchema.shape).filter((n) => !obrigatorios.includes(n))
+
+  // Controle do método: se o filtro acima classificasse tudo como
+  // opcional, o teste seguinte compararia vazio com vazio e passaria sem
+  // exercitar nada. É a lição do `c07`.
+  it('a partição obrigatório/opcional não é vácuo', () => {
+    expect(obrigatorios.length).toBeGreaterThan(5)
+    expect(opcionais).toContain('cupom')
+  })
+
+  it('a modal manda todos os campos obrigatórios do `inscricaoSchema`', () => {
+    for (const campo of obrigatorios) {
+      expect(chavesDoCorpo, `a modal nao manda \`${campo}\``).toContain(campo)
+    }
+  })
+
+  it('e nenhuma chave que o schema não conheça', () => {
+    for (const chave of chavesDoCorpo) {
+      expect(Object.keys(inscricaoSchema.shape)).toContain(chave)
+    }
+  })
+
+  // ⚠️ `cupom` NÃO APARECE EM `chavesDoCorpo`, e não é falha do extrator:
+  // ele entra por SPREAD CONDICIONAL (`...(cupom ? { cupom } : {})`), e a
+  // linha começa com `...`, que o regex de chave não casa. A ausência é o
+  // comportamento certo — a chave só viaja quando há cupom, porque o
+  // schema declara `min(1)` e uma string vazia faria o POST inteiro voltar
+  // 400 por causa de um input em branco.
+  //
+  // Mas então NADA neste arquivo garantiria que a modal manda o cupom. Por
+  // isso a asserção é sobre a forma do spread, e não sobre a lista de
+  // chaves: é a única maneira de o teste continuar cobrindo o campo sem
+  // afirmar que ele está sempre presente, que seria falso.
+  it('o cupom viaja por spread condicional, e só quando existe', () => {
+    expect(corpo).toMatch(/\.\.\.\(\s*cupom\s*\?\s*\{\s*cupom\s*\}\s*:\s*\{\}\s*\)/)
   })
 
   // ⚠️ Estes três não são "campos que a modal esqueceu". Cada um tem uma
@@ -218,5 +265,75 @@ describe('o corpo manda exatamente o que o schema espera', () => {
   // partir do mesmo módulo (REPORT §9.8).
   it('manda o telefone em E.164, não o texto mascarado', () => {
     expect(corpo).toMatch(/\bphone:\s*paraE164\(/)
+  })
+})
+
+// ============================================================
+// O PRÉ-PREENCHIMENTO DO CONVITE (D-15) — `escolherOuOutro`
+//
+// ⚠️ O QUE FOI GRAVADO NÃO É NECESSARIAMENTE UMA OPÇÃO DA LISTA. `curso` e
+// `periodo` são texto livre no banco de propósito: escolhendo "Outro", sai
+// o que a pessoa digitou. É a mesma razão pela qual eles não são `z.enum`
+// no servidor — a lista é o que a UI OFERECE, o schema é o que ela ACEITA.
+//
+// ⚠️ E O ERRO QUE ESTE BLOCO TRAVA JÁ ACONTECEU, na implementação: a
+// primeira versão comparava `o.valor === valor`, como se `CURSOS` fosse
+// array de `{ valor, rotulo }`. Ele é array de STRING — a comparação dava
+// `undefined === 'Biomedicina'`, sempre falsa, e TODO curso caía em
+// "Outro" com o nome repetido no campo de texto. O `tsc` não pegou porque
+// não verifica `.jsx`.
+// ============================================================
+describe('a lógica de pré-preencher curso e período', () => {
+  // A mesma função do componente, reescrita aqui porque `.jsx` não é
+  // importável no runner sem arrastar React junto. ⚠️ O teste abaixo trava
+  // que a FONTE do componente usa `includes` — sem isso, esta cópia
+  // poderia divergir do original e o teste passaria testando a si mesmo.
+  function escolherOuOutro(valor: string, opcoes: readonly string[]) {
+    if (!valor) return null
+    if (opcoes.includes(valor)) return { escolha: valor, texto: '' }
+    return { escolha: OUTRO, texto: valor }
+  }
+
+  it('valor da lista vai para o select', () => {
+    expect(escolherOuOutro('Biomedicina', CURSOS)).toEqual({
+      escolha: 'Biomedicina',
+      texto: '',
+    })
+  })
+
+  it('valor fora da lista vira "Outro" mais o texto', () => {
+    expect(escolherOuOutro('Fonoaudiologia', CURSOS)).toEqual({
+      escolha: OUTRO,
+      texto: 'Fonoaudiologia',
+    })
+  })
+
+  it('vale igual para período', () => {
+    expect(escolherOuOutro('6º semestre', PERIODOS)).toEqual({
+      escolha: OUTRO,
+      texto: '6º semestre',
+    })
+  })
+
+  it('vazio não mexe em nada', () => {
+    expect(escolherOuOutro('', CURSOS)).toBeNull()
+  })
+
+  // ⚠️ A AMARRA COM O COMPONENTE. A cópia acima só vale se o original
+  // usar a mesma comparação — `some((o) => o.valor === ...)` mandaria todo
+  // curso para "Outro" em silêncio.
+  it('o componente compara com `includes`, e não por `.valor`', () => {
+    expect(semComentarios).toMatch(/opcoes\.includes\(valor\)/)
+    expect(semComentarios).not.toMatch(/opcoes\.some\([^)]*\.valor/)
+  })
+
+  // ⚠️ E `CURSOS`/`PERIODOS` são mesmo arrays de string. Se um dia virarem
+  // objetos, este teste fica vermelho ANTES de o pré-preenchimento
+  // quebrar em silêncio.
+  it('`CURSOS` e `PERIODOS` são arrays de string', () => {
+    for (const lista of [CURSOS, PERIODOS]) {
+      expect(lista.length).toBeGreaterThan(1)
+      for (const item of lista) expect(typeof item).toBe('string')
+    }
   })
 })

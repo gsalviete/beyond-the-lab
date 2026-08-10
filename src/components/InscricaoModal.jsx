@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowUpRight, Check, ChevronRight, Plus } from './Icons.jsx'
-import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
+import {
+  INSTAGRAM_URL,
+  formatarDataPorExtenso,
+  formatarSemanaDeInicio,
+  paraDataUTC,
+} from '@/config/curso'
 // A frase do consentimento saiu daqui para um módulo próprio. Não foi
 // arrumação: `/api/inscricao` grava esta mesma constante em
 // `inscricoes.consent_text`, e duas cópias divergiriam sem ninguém notar —
@@ -28,7 +33,7 @@ import {
   OUTRO,
   PERIODOS,
 } from '@/config/dominio'
-import { mascararTelefone, paraE164, telefoneEhValido } from '@/lib/telefone'
+import { mascararTelefone, paraE164, paraNacional, telefoneEhValido } from '@/lib/telefone'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
 // modal substitui. Altura 60px é a mesma do .btn-brand, e o radius de pill é
@@ -51,6 +56,107 @@ const FIELD =
 const SELECT = `${FIELD} appearance-none cursor-pointer pr-12`
 
 const LABEL = 'pl-5 font-display text-[14px] font-semibold leading-[19.2px] text-ink'
+
+// ============================================================
+// O PARÂMETRO DO CONVITE (D-10)
+//
+// ⚠️ O NOME É `convite` E NÃO `token`, e a escolha é de linguagem, não de
+// implementação: a URL fica visível na barra de endereço e vai para o
+// histórico, e "token" anuncia credencial para quem passar o olho. O que
+// a pessoa recebeu foi um convite.
+//
+// ⚠️ E ELE NUNCA ENTRA NUM LINK PÚBLICO. A D-10 proíbe "token em URL
+// postada publicamente": este parâmetro existe só no e-mail dirigido à
+// base atual (o `c55`). O link do Instagram é o limpo, sem nada.
+// ============================================================
+const PARAM_CONVITE = 'convite'
+
+/**
+ * O cupom que veio no link do convite (D-16).
+ *
+ * ⚠️ ELE VEM DA URL E ISSO TORNA O LINK MAIS VALIOSO SE FOR ENCAMINHADO.
+ * É consequência aceita, e o controle dela é o LIMITE DE USOS do cupom,
+ * que a Giovanna define na tela — não uma tentativa de esconder o código.
+ * A alternativa era ela explicar no corpo do e-mail e a pessoa copiar à
+ * mão, que é exatamente onde a conversão se perde.
+ *
+ * O código também vai ESCRITO no e-mail, para quem abrir sem HTML ou
+ * colar o link sem os parâmetros. Um desconto que só existe dentro de uma
+ * URL é um desconto que some quando a URL some.
+ */
+const PARAM_CUPOM = 'cupom'
+
+/** O token da URL, ou `''` no fluxo limpo — que é o caso normal. */
+function tokenDaUrl() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get(PARAM_CONVITE) ?? ''
+}
+
+/**
+ * Põe um valor guardado no `<select>` certo — ou em "Outro" mais o campo
+ * de texto.
+ *
+ * ⚠️ O QUE FOI GRAVADO NÃO É NECESSARIAMENTE UMA OPÇÃO DA LISTA. `curso` e
+ * `periodo` são texto livre no banco de propósito: escolhendo "Outro", sai
+ * o que a pessoa digitou ("Fonoaudiologia", "6º semestre"). É por isso que
+ * eles não são `z.enum` no servidor — a lista é o que a UI OFERECE, o
+ * schema é o que ela ACEITA, e onde há "Outro" os dois divergem.
+ *
+ * Um `setCurso(valor)` cego com um valor fora da lista deixaria o
+ * `<select>` sem opção correspondente: ele voltaria para o placeholder, e
+ * a pessoa veria o campo VAZIO num formulário que ela preencheu — pior do
+ * que não pré-preencher, porque parece que o sistema perdeu o dado dela.
+ */
+function escolherOuOutro(valor, opcoes, definirEscolha, definirTexto) {
+  if (!valor) return
+
+  // ⚠️ `includes` E NÃO `some((o) => o.valor === ...)`: `CURSOS` e
+  // `PERIODOS` são arrays de STRING, não de `{ valor, rotulo }` — o
+  // domínio deles é o próprio texto, porque o que é gravado é o rótulo
+  // (ver o bloco em `dominio.ts` sobre por que eles não viram `z.enum`).
+  // A versão com `.valor` comparava `undefined` com a string e mandava
+  // TODO curso para "Outro", em silêncio: o `tsc` não verifica `.jsx`.
+  if (opcoes.includes(valor)) {
+    definirEscolha(valor)
+    return
+  }
+
+  definirEscolha(OUTRO)
+  definirTexto(valor)
+}
+
+/** O cupom da URL, ou `''`. */
+function cupomDaUrl() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get(PARAM_CUPOM) ?? ''
+}
+
+/**
+ * Tira o token da barra de endereço depois de usado.
+ *
+ * ⚠️ ISTO NÃO INVALIDA O TOKEN, e não deve invalidar: quem fechou a aba
+ * sem terminar precisa poder voltar pelo mesmo e-mail. O que sai daqui é
+ * só a CÓPIA que estava na barra de endereço — a que seria copiada,
+ * encaminhada ou espalhada num compartilhamento distraído desta página.
+ *
+ * `replaceState` e não `pushState`: troca a entrada atual do histórico em
+ * vez de criar uma nova. Com `pushState`, o botão "voltar" do navegador
+ * devolveria a URL com o token — o oposto exato do que esta função faz.
+ *
+ * Os outros parâmetros ficam. Campanha (`utm_*`) e afins não são segredo,
+ * e apagá-los junto quebraria a atribuição de quem trouxe a pessoa.
+ */
+function limparTokenDaUrl() {
+  if (typeof window === 'undefined' || !window.history?.replaceState) return
+
+  const url = new URL(window.location.href)
+  url.searchParams.delete(PARAM_CONVITE)
+  // O cupom sai junto: ele é parte do mesmo convite, e deixá-lo na barra
+  // de endereço depois de já ter sido lido só aumenta a chance de o link
+  // ser compartilhado com o desconto dentro.
+  url.searchParams.delete(PARAM_CUPOM)
+  window.history.replaceState(null, '', url.toString())
+}
 
 // ⚠️ derivado: nenhum <fieldset> existia no projeto. O <legend> herda o
 // token do LABEL sem alteração — é o mesmo papel visual. O reset
@@ -81,6 +187,7 @@ export default function InscricaoModal({ onFechar }) {
   const nivelId = `${id}-nivel`
   const cursoId = `${id}-curso`
   const periodoId = `${id}-periodo`
+  const cupomId = `${id}-cupom`
   const consentId = `${id}-consentimento`
   // Alvo do `aria-labelledby` da caixa de consentimento — ver o bloco do
   // consentimento no formulário para o porquê de o nome acessível não
@@ -113,6 +220,46 @@ export default function InscricaoModal({ onFechar }) {
   // fechadas a modal prometeria "sua vaga está reservada" para todo
   // mundo, que é a pior mentira que esta tela pode contar.
   const [safra, setSafra] = useState(null)
+
+  // ============================================================
+  // QUAL TELA DE SUCESSO — e a resposta vem INTEIRA do servidor
+  // ============================================================
+  //
+  // 'espera'   → entrou na lista de espera.
+  // 'pendente' → a inscrição foi gravada numa safra e o pagamento vai
+  //              chegar por e-mail (a fila da D-15).
+  //
+  // ⚠️ ELE NÃO É DERIVADO DE `inscricaoAberta`, e a diferença é uma
+  // mentira a menos. `inscricaoAberta` é o que a modal soube quando abriu;
+  // entre aquele GET e este POST a Giovanna pode ter fechado a safra, ou a
+  // última vaga pode ter acabado (D-08) — e nos dois casos o servidor
+  // grava lista de espera enquanto esta tela ainda acha que reservou vaga.
+  // O `modo` da resposta é o que o banco de fato registrou. Mesma regra do
+  // resto do projeto: nenhuma decisão de negócio vem do cliente.
+  const [modoSucesso, setModoSucesso] = useState('espera')
+
+  // ============================================================
+  // O CONVITE (D-10) — o contato de quem chegou pelo link do e-mail
+  // ============================================================
+  //
+  // `null` no fluxo limpo, que é o caso normal: quem vem do Instagram, de
+  // busca ou de qualquer link público preenche o formulário do zero. Só
+  // quem recebeu o e-mail dirigido à base atual chega com `?convite=`.
+  //
+  // ⚠️ ELE CARREGA CONTATO E NADA MAIS — nome, e-mail, telefone. O perfil
+  // (nível, curso, período, disponibilidade) NÃO vem, e a ausência é
+  // decisão: o perfil descreve a pessoa NAQUELA safra (`008`), e quem
+  // estava no 3º período em janeiro está no 5º em julho. Apresentar uma
+  // resposta desatualizada já marcada é a forma mais eficiente de gravar
+  // dado errado — a pessoa confirma sem ler, porque o campo já estava
+  // preenchido.
+  const [convite, setConvite] = useState(null)
+
+  // ⚠️ Lido UMA VEZ, na montagem, e não a cada render: o `limparTokenDaUrl`
+  // apaga o parâmetro assim que o convite é resolvido, e uma leitura tardia
+  // devolveria vazio. O `useState` com inicializador preserva o valor que
+  // existia quando a modal abriu.
+  const [cupomDoConvite] = useState(() => cupomDaUrl())
 
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
@@ -177,18 +324,86 @@ export default function InscricaoModal({ onFechar }) {
   useEffect(() => {
     let cancelado = false
 
-    fetch('/api/safra-ativa', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((body) => {
-        if (cancelado) return
-        setSafra(body?.safra ?? null)
-        setStatus('idle')
-      })
-      .catch(() => {
-        if (cancelado) return
-        setSafra(null)
-        setStatus('idle')
-      })
+    // ------------------------------------------------------------
+    // ⚠️ AS DUAS RESPOSTAS CHEGAM ANTES DE O FORMULÁRIO EXISTIR, e essa
+    // ordem é o que faz o pré-preenchimento funcionar.
+    //
+    // Os campos de nome e e-mail são NÃO CONTROLADOS (`defaultValue`), e
+    // `defaultValue` só é lido na PRIMEIRA renderização daquele input.
+    // Como o formulário só aparece depois de `status` sair de
+    // 'carregando', resolver o convite antes dessa troca é o que garante
+    // que o valor esteja lá quando o campo nascer. Preencher depois
+    // exigiria transformar os dois em controlados — mais estado, e um
+    // `value` que brigaria com quem estivesse digitando.
+    //
+    // `allSettled` e não `all`: o convite falhando não pode impedir a
+    // modal de abrir. Sem safra a pessoa cai em lista de espera; sem
+    // convite ela digita o próprio nome. Nenhum dos dois é motivo para
+    // não mostrar o formulário.
+    // ------------------------------------------------------------
+    const token = tokenDaUrl()
+
+    Promise.allSettled([
+      fetch('/api/safra-ativa', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null)),
+      token
+        ? fetch(`/api/pessoa/${encodeURIComponent(token)}`, { cache: 'no-store' }).then((res) =>
+            res.ok ? res.json() : null,
+          )
+        : Promise.resolve(null),
+    ]).then(([resSafra, resConvite]) => {
+      if (cancelado) return
+
+      setSafra(resSafra.status === 'fulfilled' ? (resSafra.value?.safra ?? null) : null)
+
+      const pessoa =
+        resConvite.status === 'fulfilled' ? (resConvite.value?.pessoa ?? null) : null
+
+      if (pessoa) {
+        setConvite(pessoa)
+
+        // ------------------------------------------------------------
+        // O PERFIL — só chega quando há pendência na safra ABERTA (D-15)
+        //
+        // ⚠️ QUEM ABANDONOU O CHECKOUT JÁ PREENCHEU ISTO, PARA ESTA TURMA.
+        // Fazê-la digitar tudo de novo é exatamente o atrito que a D-15
+        // existe para tirar — "sem a pessoa preencher nada de novo". Quem
+        // vem da lista de espera recebe `perfil: null` e preenche, porque
+        // ali o perfil seria de outra safra (`008`): quem estava no 3º
+        // período em janeiro está no 5º em julho.
+        //
+        // ⚠️ QUEM DECIDE É O SERVIDOR. A modal não sabe se existe
+        // pendência nem qual safra está aberta — ela obedece ao que veio.
+        // ------------------------------------------------------------
+        if (pessoa.perfil) {
+          setNivel(pessoa.perfil.nivel_ingles)
+          setDias(pessoa.perfil.disponibilidade)
+          escolherOuOutro(pessoa.perfil.curso, CURSOS, setCurso, setCursoOutro)
+          escolherOuOutro(pessoa.perfil.periodo, PERIODOS, setPeriodo, setPeriodoOutro)
+        }
+        // ⚠️ `paraNacional` E NÃO `mascararTelefone`, e a diferença era um
+        // bug: o valor do banco é E.164 (`+5521987654321`, TREZE dígitos),
+        // e mascarar direto produzia `(55) 21987-64321` — o código do país
+        // virando DDD. Pior que feio: `telefoneEhValido` exige onze
+        // dígitos, então a pessoa chegava pelo convite e era barrada com
+        // "digite um celular válido" num campo que ela não digitou.
+        setTelefone(paraNacional(pessoa.telefone))
+      }
+
+      // ⚠️ O TOKEN SAI DA BARRA DE ENDEREÇO ASSIM QUE É USADO, e não é
+      // zelo: uma URL é copiada, encaminhada e fica no histórico do
+      // navegador para sempre — é o raciocínio da D-15 sobre por que o
+      // link não carrega `inscricao_id` cru, aplicado ao próprio token.
+      // Ele continua válido no banco (quem fechou a aba precisa poder
+      // voltar pelo e-mail), mas deixa de ser espalhado por um
+      // compartilhamento distraído desta página.
+      //
+      // `replaceState` e não `pushState`: trocar a entrada atual em vez
+      // de criar uma nova, senão o "voltar" do navegador devolveria a URL
+      // com o token.
+      if (token) limparTokenDaUrl()
+
+      setStatus('idle')
+    })
 
     return () => {
       cancelado = true
@@ -283,6 +498,11 @@ export default function InscricaoModal({ onFechar }) {
     const name = String(dados.get('name') ?? '').trim()
     const email = String(dados.get('email') ?? '').trim()
     const website = String(dados.get('website') ?? '')
+    // ⚠️ `trim` aqui e `trim` no schema, e a duplicação é de propósito: o
+    // servidor não pode confiar no cliente, e o cliente não pode mandar
+    // espaço para o servidor recusar. Ver o `z.string().trim()` em
+    // `schemas.ts` — quem VALIDA é ele; isto é higiene do que sai daqui.
+    const cupom = String(dados.get('cupom') ?? '').trim()
 
     // ------------------------------------------------------------
     // ⚠️ AQUI HAVIA `const escolha = inscricaoAberta ? 'agora' : 'depois'`,
@@ -348,6 +568,18 @@ export default function InscricaoModal({ onFechar }) {
       setErro('Digite o seu período.')
       return
     }
+    // ⚠️ SÓ O TAMANHO, E NÃO SE O CUPOM EXISTE. Esta validação é de FORMA;
+    // "existe, está ativo, não expirou, não esgotou e vale nesta safra" é
+    // pergunta para o banco, e a resposta muda de um minuto para o outro —
+    // quem responde é `cupomInvalidoPorque`, no servidor, e a mensagem
+    // específica dele volta no corpo do 400 e cai no mesmo `aria-live`
+    // logo abaixo. Uma cópia da regra aqui seria a segunda versão dela,
+    // desatualizada no dia em que a Giovanna desligasse o cupom.
+    if (cupom.length > 60) {
+      setErro('Confira o código do cupom.')
+      return
+    }
+
     // Mesmo espírito da mensagem de consentimento: é erro que se corrige
     // com um clique, e um "confira seus dados" genérico mandaria a pessoa
     // revisar campos que estão certos.
@@ -377,6 +609,12 @@ export default function InscricaoModal({ onFechar }) {
           disponibilidade: dias,
           consent: consentimento,
           website,
+          // ⚠️ A CHAVE SÓ VIAJA QUANDO HÁ CUPOM. O schema declara
+          // `cupom` como `.optional()` com `min(1)`: mandar string vazia
+          // seria um cupom inválido de um campo que a pessoa nem
+          // preencheu, e o POST inteiro voltaria 400 por causa de um
+          // input em branco. Ausência é a forma de dizer "não tem".
+          ...(cupom ? { cupom } : {}),
         }),
       })
       const body = await res.json().catch(() => null)
@@ -411,19 +649,42 @@ export default function InscricaoModal({ onFechar }) {
       }
 
       if (res.ok && body?.ok) {
-        // TODO: `c35` — o redirecionamento para o Stripe Checkout entra
-        // exatamente aqui.
+        // ------------------------------------------------------------
+        // O CHECKOUT (`c38`) — este ponto só OBEDECE
         //
-        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é mais "a pessoa
+        // ⚠️ QUEM DECIDE NÃO É O CLIENTE. A condição não é "a pessoa
         // escolheu pagar agora" — essa pergunta morreu (D-11). É o
         // servidor que, tendo relido a safra no ato da escrita, devolve
-        // `{ modo: 'checkout', url }`; este ponto só obedece, com
-        // `window.location.assign(body.url)`. `{ modo: 'lista_espera' }`
-        // continua caindo na tela de sucesso como agora.
+        // `{ modo: 'checkout', url }`; aqui só se navega para lá.
         //
         // A ramificação vive no servidor porque entre o GET que desenhou
-        // esta modal e este POST a Giovana pode ter fechado a safra
-        // (Fluxo 1). Um `if` daqui decidiria com informação velha.
+        // esta modal e este POST a Giovanna pode ter fechado a safra, ou a
+        // última vaga pode ter acabado (D-08). Um `if` daqui decidiria com
+        // informação velha — e decidiria justamente a pergunta que mais
+        // custa errar, que é se alguém vai pagar ou não.
+        //
+        // ⚠️ `assign` E NÃO `replace`, de propósito: o Stripe tem um
+        // "voltar" próprio (o `cancel_url`), mas o botão do NAVEGADOR
+        // também precisa funcionar. Com `replace`, quem desistir na tela
+        // do cartão volta para a página anterior à landing e some do
+        // site. O histórico é da pessoa, não nosso.
+        //
+        // ⚠️ E O `status` FICA EM 'submitting' ATÉ A NAVEGAÇÃO ACONTECER.
+        // `assign` não é instantâneo — há uma requisição no meio —, e
+        // devolver o formulário ao estado normal aqui deixaria o botão
+        // clicável por alguns instantes, com a inscrição JÁ GRAVADA. Um
+        // segundo clique criaria uma segunda sessão de checkout para a
+        // mesma pessoa.
+        // ------------------------------------------------------------
+        if (body.modo === 'checkout' && body.url) {
+          window.location.assign(body.url)
+          return
+        }
+
+        // 'fila' é o caso em que a inscrição foi gravada e o checkout NÃO
+        // abriu — a pessoa está numa safra, sem ter pago, e o link vai por
+        // e-mail (D-15). Qualquer outra coisa é lista de espera.
+        setModoSucesso(body.modo === 'fila' ? 'pendente' : 'espera')
         setStatus('success')
         return
       }
@@ -503,12 +764,12 @@ export default function InscricaoModal({ onFechar }) {
           <TelaDeSucesso
             tituloId={tituloId}
             tituloRef={tituloSucessoRef}
-            inscricaoAberta={inscricaoAberta}
-            /* Sem `??` e sem default: `inscricaoAberta` só é `true` quando
-               `safra` existe (é `safra?.inscricoes_abertas === true`), e é
-               só nesse ramo que a tela de sucesso imprime a data. O `?.`
-               aqui existe para o ramo de lista de espera, onde `safra`
-               pode ser null e a data não é lida. */
+            modo={modoSucesso}
+            /* Sem `??` e sem default: só o ramo 'pendente' imprime a data,
+               e ele só acontece quando o servidor gravou uma inscrição em
+               safra — o que exige `safra` existir. O `?.` aqui existe para
+               o ramo de lista de espera, onde `safra` pode ser null e a
+               data não é lida. */
             dataInicioAulas={safra?.data_inicio_aulas}
             onFechar={pedirFechamento}
           />
@@ -563,6 +824,7 @@ export default function InscricaoModal({ onFechar }) {
                   minLength={2}
                   maxLength={100}
                   autoComplete="name"
+                  defaultValue={convite?.nome ?? ''}
                   placeholder="Seu nome completo"
                   disabled={submitting}
                   className={FIELD}
@@ -581,6 +843,7 @@ export default function InscricaoModal({ onFechar }) {
                   required
                   maxLength={255}
                   autoComplete="email"
+                  defaultValue={convite?.email ?? ''}
                   placeholder="voce@exemplo.com"
                   disabled={submitting}
                   className={FIELD}
@@ -736,6 +999,67 @@ export default function InscricaoModal({ onFechar }) {
                 </div>
               </fieldset>
 
+              {/* ============================================================
+                  CUPOM — só quando há o que descontar
+                  ============================================================
+
+                  ⚠️ ELE APARECE SÓ COM AS INSCRIÇÕES ABERTAS, e a condição
+                  não é economia de pixel: sem checkout não há cobrança, e
+                  um campo de desconto numa tela de LISTA DE ESPERA promete
+                  um preço que ninguém vai pagar hoje. O servidor ignora o
+                  campo em silêncio nesse modo (não há o que descontar), e
+                  mostrá-lo faria a pessoa digitar um código para nada.
+
+                  ⚠️ NENHUMA MEDIDA NOVA NESTE BLOCO. É o mesmo `FIELD` e o
+                  mesmo `LABEL` dos campos acima, na mesma casca de
+                  `flex flex-col gap-2`. Não existe Figma deste campo, e a
+                  regra do repositório é que valor de layout vem do Dev
+                  Mode — a saída honesta é não inventar valor nenhum e
+                  reusar o que já foi medido.
+
+                  ⚠️ SEM `autoCapitalize` E SEM `toUpperCase`, de propósito.
+                  `bemvinda`, `BemVinda` e `BEMVINDA` são o mesmo cupom, e
+                  quem garante isso é o índice funcional
+                  `cupons_codigo_upper_idx` da `013` — propriedade do banco,
+                  não uma linha de código que alguém pode esquecer de
+                  chamar (REPORT §9.9). Transformar a caixa aqui criaria
+                  uma segunda declaração da mesma regra e, pior, mudaria na
+                  tela o que a pessoa digitou.
+
+                  ⚠️ A VALIDAÇÃO DE VERDADE ACONTECE NO ENVIO, e não a cada
+                  tecla. Um endpoint que responde "este cupom existe?" a
+                  cada digitação é um oráculo de códigos: dá para varrer
+                  palavras até achar um desconto que ninguém te deu. No
+                  envio, a resposta custa um formulário inteiro preenchido
+                  e passa pelo rate limit da rota — e a inscrição NÃO é
+                  gravada quando o cupom é recusado, então a pessoa corrige
+                  o código e reenvia com tudo como estava. */}
+              {inscricaoAberta && (
+                <div className="flex flex-col gap-2 text-left">
+                  <label htmlFor={cupomId} className={LABEL}>
+                    Cupom de desconto (opcional)
+                  </label>
+                  {/* ⚠️ `defaultValue` e não `value`: o campo continua NÃO
+                      CONTROLADO. Quem chegou pelo convite encontra o código
+                      preenchido e pode apagá-lo; quem chegou pelo link
+                      limpo encontra vazio. Um `value` travaria a digitação
+                      de quem quisesse trocar o cupom. */}
+                  <input
+                    id={cupomId}
+                    name="cupom"
+                    type="text"
+                    maxLength={60}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    defaultValue={cupomDoConvite}
+                    placeholder="Tem um código? Digite aqui"
+                    disabled={submitting}
+                    className={FIELD}
+                  />
+                </div>
+              )}
+
               {/* CONSENTIMENTO — desmarcado por padrão, e é assim que fica.
                   Consentimento pré-marcado não é consentimento (LGPD).
 
@@ -838,19 +1162,70 @@ export default function InscricaoModal({ onFechar }) {
                     )}
                   </button>
 
-                  {/* A frase que sustenta o "Garantir minha vaga" logo
-                      acima. Sem ela o botão promete uma transação que a
-                      página não faz — dizer o que de fato acontece é o que
-                      torna o rótulo forte defensável.
+                  {/* ============================================================
+                      A FRASE QUE PREPARA A TELA DO STRIPE
+                      ============================================================
 
-                      Não cita mais `data_primeira_cobranca`: a data virava
-                      compromisso com dia marcado, e o envio do link passou a
-                      acompanhar o início da turma. Os outros dois canais
-                      entram aqui porque é por eles que o aviso realmente
-                      sai. */}
+                      Ela sustenta o "Garantir minha vaga" logo acima: sem
+                      ela o botão promete uma transação que a página não
+                      explica.
+
+                      ⚠️ ELA ESTAVA ERRADA ATÉ AQUI, e o erro sobreviveu ao
+                      `c38`. O texto anterior dizia "o link de pagamento é
+                      enviado por e-mail mais perto do início da turma" —
+                      verdade no mundo SEM checkout, mentira a partir do
+                      momento em que o botão passou a levar direto ao
+                      Stripe. Prometia um e-mail que não vem.
+
+                      ⚠️ E ELA EXISTE, AGORA, PARA DESARMAR O "N DIAS
+                      GRÁTIS" DA PRÓXIMA TELA.
+
+                      O Stripe monta o cabeçalho dele sozinho a partir do
+                      trial (D-04) e escreve "Testar <turma>" com "17 dias
+                      grátis". Nenhum dos dois é configurável, e os dois
+                      dizem a coisa errada: isto não é período de avaliação,
+                      é matrícula com o cartão guardado. Medido na primeira
+                      inscrição de verdade.
+
+                      Quem chega àquela tela avisado lê "grátis" como "ainda
+                      não cobraram"; quem chega desavisado lê como "posso
+                      cancelar antes e não pago nada". A diferença entre as
+                      duas leituras é uma frase, e ela custa zero.
+
+                      ⚠️ A DATA SAI SECA, e é a única do modelo que pode:
+                      cobrança tem dia exato. É o oposto de
+                      `data_inicio_aulas`, que a D-14 manda dizer por semana
+                      porque cada grupo começa num dia diferente. O `?.`
+                      cobre o caso de a safra não ter vindo — sem data, a
+                      frase encolhe em vez de imprimir `undefined`. */}
                   <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                    Nada é cobrado agora. O link de pagamento é enviado por e-mail mais perto
-                    do início da turma, e também avisamos pelo WhatsApp e nas redes sociais.
+                    Nada é cobrado hoje. Na próxima tela você guarda o cartão
+                    {safra?.data_primeira_cobranca ? (
+                      <>
+                        , e a primeira mensalidade é debitada em{' '}
+                        <strong className="font-semibold text-ink">
+                          {formatarDataPorExtenso(paraDataUTC(safra.data_primeira_cobranca))}
+                        </strong>
+                      </>
+                    ) : (
+                      ', e a primeira mensalidade só é debitada quando a turma começa'
+                    )}
+                    .
+                  </p>
+
+                  {/* ⚠️ ESTA SEGUNDA LINHA NOMEIA O MAL-ENTENDIDO em vez de
+                      torcer para ele não acontecer. Parece defensivo e é o
+                      contrário: a palavra "grátis" vai aparecer na próxima
+                      tela de qualquer jeito, e quem a explica primeiro é
+                      quem controla o que ela significa.
+
+                      Se um dia o mecanismo mudar (`billing_cycle_anchor` no
+                      lugar do `trial_end`, por exemplo), esta linha sai
+                      junto — ela descreve uma tela específica, e não uma
+                      regra do produto. */}
+                  <p className="text-center font-sans text-[12px] leading-[18px] text-muted">
+                    A tela do Stripe chama esse intervalo de “período grátis”. É só o tempo
+                    até essa data — sua vaga não é um teste.
                   </p>
                 </>
               ) : (
@@ -991,7 +1366,13 @@ function TelaDeCarregamento({ tituloId }) {
 // `Hero`: um `'2026-09-01'` de reserva aqui seria o literal que este
 // passo remove, voltando invisível e ativado justo quando o dado real
 // faltasse.
-function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, onFechar }) {
+function TelaDeSucesso({ tituloId, tituloRef, modo, dataInicioAulas, onFechar }) {
+  // ⚠️ `modo` VEIO NO LUGAR DE `inscricaoAberta` NO `c38`, e não é
+  // renomeação: o booleano descrevia o que a MODAL sabia ao abrir, e este
+  // campo descreve o que o SERVIDOR gravou. Com checkout no fluxo, os dois
+  // divergem — safra aberta mais última vaga esgotada grava lista de
+  // espera, e a tela precisa contar a história do banco.
+  const pendente = modo === 'pendente'
   return (
     <div className="flex flex-col items-center pt-6 text-center">
       <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-rose-100 text-brand">
@@ -1006,11 +1387,11 @@ function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, 
         tabIndex={-1}
         className="mt-5 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]"
       >
-        {inscricaoAberta ? 'Inscrição confirmada!' : 'Recebemos seus dados!'}
+        {pendente ? 'Recebemos sua inscrição!' : 'Recebemos seus dados!'}
       </h2>
 
       <p className="mt-4 font-display text-[16px] leading-[25.6px] text-[#345372]">
-        {inscricaoAberta ? (
+        {pendente ? (
           /* Três frases, três acontecimentos, nesta ordem: o que já é
              verdade, o que chega por e-mail e quando, e o que chega
              depois. O texto anterior dizia "enviamos os próximos passos"
@@ -1025,11 +1406,23 @@ function TelaDeSucesso({ tituloId, tituloRef, inscricaoAberta, dataInicioAulas, 
              prometia outra coisa — duas promessas diferentes sobre o
              mesmo evento, para a mesma pessoa, com dois minutos de
              diferença. A data de início das aulas fica, que é fato de
-             calendário e não promessa de cobrança. */
+             calendário e não promessa de cobrança.
+
+             ⚠️ ESTE RAMO MUDOU DE DONO NO `c38`, E A FRASE PERDEU UMA
+             PROMESSA. Ele era o "safra aberta" e abria com "Sua vaga está
+             reservada" — o que, com checkout no fluxo, passou a ser
+             mentira: quem chega aqui agora é justamente quem NÃO pagou,
+             porque a sessão do Stripe não abriu (D-15). Quem paga não vê
+             esta tela; vê a página de retorno do Stripe.
+
+             O resto do texto sobreviveu porque já estava certo: ele foi
+             escrito num mundo sem checkout, onde o link de pagamento vinha
+             por e-mail — que é exatamente o que a fila da D-15 faz. A
+             frase não precisou ser inventada, precisou perder a promessa
+             de vaga reservada. */
           <>
-            Sua vaga está reservada. O link de pagamento é enviado por e-mail mais perto do
-            início da turma, e também avisamos pelo WhatsApp e nas redes sociais. As aulas
-            começam{' '}
+            O link de pagamento chega no seu e-mail — e também avisamos pelo WhatsApp e nas
+            redes sociais. As aulas começam{' '}
             {/* ⚠️ VOLTOU A SAIR DA `data_inicio_aulas`, e desta vez sem mentir.
                 O texto era o literal "primeira semana de setembro de 2026", e o
                 comentário que estava aqui explicava por quê: a turma começa num

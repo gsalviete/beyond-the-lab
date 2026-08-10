@@ -36,6 +36,25 @@ import {
 } from '@/config/dominio'
 import type { Safra } from '@/lib/supabase'
 
+/**
+ * O que os dois e-mails de fato leem da safra: o nome e a data de início.
+ *
+ * ⚠️ ERA `Safra` INTEIRA, E ESTREITOU NO `c42`, por necessidade e não por
+ * capricho. Quem passa este objeto deixou de ser só a rota de inscrição —
+ * o webhook do Stripe também manda a confirmação, depois do pagamento, e
+ * ele teria que carregar oito colunas de `safras` para preencher um tipo
+ * que usa duas. `valor_mensal` e `duracao_meses` são o caso mais claro:
+ * pela D-06 o que vale para quem pagou é o valor TRAVADO na inscrição, e
+ * um campo com o preço atual da safra viajando até aqui é um número certo
+ * para a pessoa errada esperando alguém imprimi-lo por engano.
+ *
+ * `Pick` sobre `Safra` e não um tipo solto: assim ele continua derivado do
+ * schema, e renomear uma coluna quebra este arquivo em vez de o deixar
+ * mentindo. É o corte de fronteira do REPORT §9.6 aplicado ao e-mail —
+ * carregar o mínimo, com o corte explícito no ponto onde acontece.
+ */
+export type SafraDoEmail = Pick<Safra, 'nome' | 'data_inicio_aulas'>
+
 // Nenhuma com prefixo NEXT_PUBLIC_, de propósito: o Next só expõe ao cliente
 // as variáveis com esse prefixo. Sem ele, elas nunca saem do servidor.
 const RESEND_API_KEY = process.env.RESEND_API_KEY
@@ -207,7 +226,7 @@ function linkWhatsApp(e164: string): string {
  * acabou de se inscrever numa safra aberta — dizer "não há turma" a quem
  * tem vaga é pior que não mandar e-mail nenhum e ver o erro no log.
  */
-function semanaDeInicioDaSafra(safra: Safra | null): string | null {
+function semanaDeInicioDaSafra(safra: SafraDoEmail | null): string | null {
   if (!safra) return null
   return formatarSemanaDeInicio(safra.data_inicio_aulas)
 }
@@ -229,7 +248,15 @@ async function enviar(opts: {
   texto: string
   /** Identificador da inscrição, só para o log. */
   ref: string
-  /** Qual dos dois e-mails é este, só para o log. */
+  /**
+   * Qual e-mail é este, só para o log.
+   *
+   * ⚠️ ERAM DOIS ('admin' e 'confirmacao') E HOJE SÃO QUATRO — o `c55`
+   * acrescentou 'convite' e 'pendente'. O tipo continua `string` e não uma
+   * união fechada de propósito: ele não decide nada, não é lido por
+   * ninguém além do `console`, e fechá-lo criaria uma lista para manter em
+   * dia sem nenhum comportamento amarrado a ela.
+   */
   tipo: string
 }): Promise<boolean> {
   const { para, assunto, html, texto, ref, tipo } = opts
@@ -337,7 +364,7 @@ function linhaDado(rotulo: string, valorHtml: string): string {
 // ------------------------------------------------------------
 // E-MAIL 1 — para a Giovanna. Operacional: densidade acima de enfeite.
 // ------------------------------------------------------------
-function montarAdmin(inscricao: InscricaoEmail, turma: Safra | null) {
+function montarAdmin(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
   const {
     name, email, phone, nivel_ingles, curso, periodo, disponibilidade,
   } = inscricao
@@ -404,7 +431,7 @@ Data e hora: ${quando}
 // na lista de espera não existe data de início nem vaga garantida, e
 // prometer qualquer uma das duas seria mentira.
 // ------------------------------------------------------------
-function montarInscrita(inscricao: InscricaoEmail, turma: Safra | null) {
+function montarInscrita(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
   const { name, email, phone, nivel_ingles, curso, periodo, disponibilidade } = inscricao
 
   // Uma coisa só, e continua sendo duas: o TEXTO da semana de início e o
@@ -557,6 +584,174 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 }
 
 // ============================================================
+// O CONVITE — um mecanismo, dois usos (D-10 e D-15)
+// ============================================================
+//
+// O MESMO e-mail serve a duas situações, e a única coisa que muda entre
+// elas é o texto:
+//
+//   'convite'  → D-10. A base atual, que se cadastrou quando não havia
+//                nada para comprar. O link poupa a pessoa de digitar
+//                nome, e-mail e telefone de novo.
+//   'pendente' → D-15. Quem abriu o checkout e não concluiu, e está presa
+//                em `pendente_pagamento` sem saber. Ela não tem como sair
+//                sozinha: refazer o formulário devolveria "você já está
+//                inscrita". O link é a saída.
+//
+// ⚠️ O LINK É O MESMO NOS DOIS CASOS, e é o token da `017` — nunca um
+// `inscricao_id` cru. Uma URL é copiada, encaminhada, indexada e fica em
+// histórico de navegador para sempre; um id que abre checkout é, na
+// prática, uma credencial sem expiração, exatamente o que a D-10 proíbe.
+// O token expira, identifica a pessoa e NÃO autoriza: chegando por ele, o
+// servidor procura a inscrição pendente daquela pessoa.
+//
+// ⚠️ ESTA FUNÇÃO MANDA PARA UMA PESSOA, E NUNCA PARA UMA LISTA. Não há
+// laço aqui, e a ausência é decisão: o disparo para a base inteira sai do
+// CSV de `supabase/operacao/gerar_convites.sql`, revisado à mão. Um
+// mecanismo que manda e-mail sozinho para todo mundo é a coisa mais fácil
+// de errar neste projeto, e o erro não tem desfazer.
+
+/** O que o convite precisa saber. Contato, link e — se houver — o cupom. */
+export type ConviteEmail = {
+  nome: string
+  email: string
+  /** A URL completa, com `?convite=<token>`. Montada por quem chama. */
+  link: string
+  /**
+   * O desconto que acompanha este convite, já descrito em português.
+   *
+   * ⚠️ `codigo` VAI JUNTO MESMO COM O LINK PRÉ-PREENCHENDO O CAMPO. Não é
+   * redundância: cliente de e-mail que bloqueia HTML, link copiado sem os
+   * parâmetros, ou a pessoa entrando pelo site direto num outro dia — nos
+   * três casos o código escrito é o que salva. Um desconto que só existe
+   * dentro de uma URL é um desconto que some quando a URL some.
+   */
+  cupom?: { codigo: string; descricao: string } | null
+}
+
+export type MotivoDoConvite = 'convite' | 'pendente'
+
+function montarConvite(
+  convite: ConviteEmail,
+  turma: SafraDoEmail | null,
+  motivo: MotivoDoConvite,
+) {
+  const primeiroNome = convite.nome.trim().split(/\s+/)[0]
+  const semanaDeInicio = semanaDeInicioDaSafra(turma)
+  const pendente = motivo === 'pendente'
+
+  // As frases que mudam entre os dois modos ficam juntas aqui, e não
+  // espalhadas por ternários no meio do HTML — dá para ler o que cada modo
+  // promete sem montar a mensagem de cabeça. É a mesma forma de
+  // `montarInscrita`.
+  const assunto = pendente
+    ? 'Sua inscrição está esperando o pagamento — Beyond The Lab'
+    : 'As inscrições abriram — Beyond The Lab'
+
+  const titulo = pendente
+    ? `${primeiroNome}, faltou só o pagamento`
+    : `${primeiroNome}, chegou a sua vez`
+
+  // ⚠️ NENHUM DOS DOIS TEXTOS PROMETE VAGA, PREÇO OU DESCONTO.
+  //
+  // O modo 'convite' vai para quem está na lista de espera há meses, e a
+  // tentação de escrever "sua vaga está garantida" é grande — seria
+  // mentira: vaga é limite mole (D-08) e quem entra é quem paga (D-02).
+  // O modo 'pendente' vai para quem já viu um preço na tela do Stripe, e
+  // repetir o número aqui abriria a chance de os dois divergirem depois de
+  // uma edição da safra. Quem mostra o valor é o checkout, que lê o
+  // contrato travado da própria inscrição (D-06).
+  const abertura = pendente
+    ? `Você começou sua inscrição no Beyond The Lab e o pagamento não chegou a ser concluído. Sua inscrição continua guardada — é só terminar pelo link abaixo, sem preencher nada de novo.`
+    : `As inscrições da próxima turma do Beyond The Lab estão abertas, e você está na nossa lista desde antes de existir turma. O link abaixo já abre o formulário com os seus dados preenchidos.`
+
+  const rotuloBotao = pendente ? 'Concluir meu pagamento' : 'Quero minha vaga'
+
+  // ⚠️ O BLOCO DO CUPOM SÓ EXISTE QUANDO HÁ CUPOM. Uma seção "seu
+  // desconto" vazia, ou com um traço, seria pior que ausência: ela
+  // promete e não entrega, e quem lê rápido só registra a promessa.
+  const cupom = convite.cupom ?? null
+
+  // A data de início entra quando existe safra, pela mesma regra de
+  // sempre: derivada de `data_inicio_aulas` e nunca seca (D-14).
+  const quando = semanaDeInicio
+    ? `As aulas começam <strong style="color:${COR.ink};">${esc(semanaDeInicio)}</strong>.`
+    : ''
+
+  const quandoTexto = semanaDeInicio ? `As aulas começam ${semanaDeInicio}.` : ''
+
+  // ⚠️ O LINK APARECE DUAS VEZES: como botão e como URL escrita por
+  // extenso logo abaixo. Não é redundância — cliente de e-mail que bloqueia
+  // HTML mostra só a segunda, e é ela que a pessoa copia e cola. Um convite
+  // que só funciona com imagens habilitadas é um convite que não chega para
+  // parte da lista.
+  const html = moldura(`
+<tr><td style="padding:28px 24px 0 24px;font-family:${FONTE};">
+<p style="margin:0;font-size:13px;color:${COR.brand};text-transform:uppercase;letter-spacing:1px;font-weight:600;">Beyond The Lab</p>
+<h1 style="margin:8px 0 0 0;font-size:24px;line-height:1.3;color:${COR.ink};font-weight:700;">${esc(titulo)}</h1>
+<p style="margin:14px 0 0 0;font-size:15px;line-height:1.6;color:${COR.body};">${abertura}</p>
+${quando ? `<p style="margin:12px 0 0 0;font-size:15px;line-height:1.6;color:${COR.body};">${quando}</p>` : ''}
+</td></tr>
+
+${
+  cupom
+    ? `<tr><td style="padding:20px 24px 0 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${COR.rose100};border-radius:10px;">
+<tr><td style="padding:16px 18px;font-family:${FONTE};text-align:center;">
+<p style="margin:0;font-size:14px;line-height:1.5;color:${COR.body};">Você tem <strong style="color:${COR.ink};">${esc(cupom.descricao)}</strong></p>
+<p style="margin:10px 0 0 0;font-size:20px;line-height:1.2;color:${COR.ink};font-weight:700;letter-spacing:1px;">${esc(cupom.codigo)}</p>
+<p style="margin:8px 0 0 0;font-size:13px;line-height:1.5;color:${COR.muted};">O código já vem preenchido pelo botão abaixo. Se precisar, digite no formulário.</p>
+</td></tr>
+</table>
+</td></tr>`
+    : ''
+}
+
+<tr><td style="padding:24px 24px 0 24px;font-family:${FONTE};">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+<td style="background-color:${COR.brand};border-radius:999px;">
+<a href="${esc(convite.link)}" style="display:inline-block;padding:14px 28px;font-family:${FONTE};font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;">${esc(rotuloBotao)}</a>
+</td></tr></table>
+<p style="margin:14px 0 0 0;font-size:13px;line-height:1.6;color:${COR.muted};word-break:break-all;">
+Se o botão não funcionar, copie e cole este endereço no navegador:<br>${esc(convite.link)}
+</p>
+</td></tr>
+
+<tr><td style="padding:22px 24px 28px 24px;font-family:${FONTE};border-top:1px solid ${COR.borda};">
+<p style="margin:18px 0 0 0;font-size:13px;line-height:1.5;color:${COR.muted};">
+Este link é pessoal e tem prazo de validade. Se ele expirar, é só se inscrever normalmente pelo site — nada se perde.
+</p>
+<p style="margin:16px 0 0 0;font-size:14px;line-height:1.6;color:${COR.body};">
+Até logo,<br>
+<strong style="color:${COR.ink};">Giovanna</strong><br>
+<span style="color:${COR.muted};">Beyond The Lab</span>
+</p>
+<p style="margin:14px 0 0 0;font-size:13px;line-height:1.5;color:${COR.muted};">
+Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
+</p>
+</td></tr>`)
+
+  const texto = `${titulo}
+
+${abertura}
+${quandoTexto ? `\n${quandoTexto}\n` : ''}${
+    cupom ? `\nSEU DESCONTO: ${cupom.descricao}\nCódigo: ${cupom.codigo}\n` : ''
+  }
+${rotuloBotao}: ${convite.link}
+
+Este link é pessoal e tem prazo de validade. Se ele expirar, é só se
+inscrever normalmente pelo site — nada se perde.
+
+Até logo,
+Giovanna
+Beyond The Lab
+
+Dúvida? Responda este e-mail — ele chega direto para a Giovanna.`
+
+  return { assunto, html, texto }
+}
+
+// ============================================================
 // API PÚBLICA
 //
 // As duas seguem o mesmo contrato: recebem a inscrição e a turma (ou
@@ -566,7 +761,7 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 /** Avisa a Giovanna de uma inscrição nova. Não lança. */
 export async function notificarAdmin(
   inscricao: InscricaoEmail,
-  turma: Safra | null,
+  turma: SafraDoEmail | null,
 ): Promise<void> {
   try {
     if (!EMAIL_ADMIN) {
@@ -586,7 +781,7 @@ export async function notificarAdmin(
 /** Confirma para quem se inscreveu. Não lança. */
 export async function confirmarInscricao(
   inscricao: InscricaoEmail,
-  turma: Safra | null,
+  turma: SafraDoEmail | null,
 ): Promise<void> {
   try {
     const { assunto, html, texto } = montarInscrita(inscricao, turma)
@@ -600,5 +795,127 @@ export async function confirmarInscricao(
     })
   } catch (err) {
     console.error(`[email] confirmacao erro ao montar (${inscricao.email})`, err)
+  }
+}
+
+/**
+ * Convida UMA pessoa. Não lança — mesmo contrato das outras duas.
+ *
+ * ⚠️ Quem monta o `link` é o chamador, e não esta função. O token vem do
+ * banco (`pessoas.token_acesso`) e a base da URL depende do ambiente —
+ * juntar os dois aqui dentro exigiria que este módulo conhecesse
+ * `NEXT_PUBLIC_SITE_URL`, e ele não conhece nem precisa.
+ */
+export async function convidarParaInscricao(
+  convite: ConviteEmail,
+  turma: SafraDoEmail | null,
+  motivo: MotivoDoConvite,
+): Promise<void> {
+  try {
+    const { assunto, html, texto } = montarConvite(convite, turma, motivo)
+    await enviar({
+      para: convite.email,
+      assunto,
+      html,
+      texto,
+      ref: convite.email,
+      tipo: motivo === 'pendente' ? 'pendente' : 'convite',
+    })
+  } catch (err) {
+    // Rede a função `enviar` já cobre. Este catch pega o improvável: erro
+    // na MONTAGEM da mensagem. Sem ele, um dado inesperado viraria uma
+    // rejeição não tratada em quem chamar.
+    console.error(`[email] convite erro ao montar (${convite.email})`, err)
+  }
+}
+
+/**
+ * Avisa a Giovanna de uma cobrança recusada (`c56`). Não lança.
+ *
+ * ============================================================
+ * ⚠️ É O ÚNICO EVENTO DESTE SISTEMA QUE GRITA, E POR ISSO ELE EXISTE
+ * ============================================================
+ *
+ * Cobrança recusada é a única coisa do fluxo de pagamento que EXIGE uma
+ * pessoa fazer alguma coisa — e a Giovanna não tem como descobrir
+ * sozinha: o Stripe avisa por e-mail a ALUNA, não a professora. Sem este
+ * alerta, uma inadimplência só aparece quando alguém abre o painel por
+ * outro motivo, ou quando a aluna some da aula.
+ *
+ * ⚠️ ELE NÃO VAI PARA A ALUNA. O Stripe já manda o aviso de cobrança
+ * recusada para ela, com o link para atualizar o cartão — um segundo
+ * e-mail nosso sobre o mesmo assunto, com outra redação, faria duas
+ * fontes falarem do mesmo problema e a pessoa não saber qual seguir.
+ *
+ * ⚠️ E ELE NÃO DIZ O QUE FAZER. "Cobre pelo WhatsApp", "cancele a
+ * inscrição", "espere a retentativa" — nenhuma dessas decisões é do
+ * código. O e-mail informa; quem decide é ela, e é para isso que o painel
+ * existe (D-07).
+ */
+export async function alertarCobrancaFalhada(
+  inscricao: Pick<InscricaoEmail, 'name' | 'email' | 'phone'>,
+  turma: SafraDoEmail | null,
+): Promise<void> {
+  try {
+    if (!EMAIL_ADMIN) {
+      console.error(
+        `[email] alerta não enviado (${inscricao.email}): EMAIL_ADMIN ausente no ambiente`,
+      )
+      return
+    }
+
+    const telefone = telefoneLegivel(inscricao.phone)
+    const turmaTexto = turma ? turma.nome : 'sem turma registrada'
+    const assunto = `⚠️ Cobrança recusada — ${inscricao.name}`
+
+    const html = moldura(`
+<tr><td style="padding:28px 24px 0 24px;font-family:${FONTE};">
+<p style="margin:0;font-size:13px;color:${COR.brand};text-transform:uppercase;letter-spacing:1px;font-weight:600;">Beyond The Lab</p>
+<h1 style="margin:8px 0 0 0;font-size:22px;line-height:1.3;color:${COR.ink};font-weight:700;">Uma cobrança foi recusada</h1>
+<p style="margin:14px 0 0 0;font-size:15px;line-height:1.6;color:${COR.body};">
+O cartão de <strong style="color:${COR.ink};">${esc(inscricao.name)}</strong> foi recusado, e a inscrição dela está marcada como inadimplente no painel.
+</p>
+</td></tr>
+
+<tr><td style="padding:22px 24px 0 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${COR.rose100};border-radius:10px;">
+<tr><td style="padding:16px 18px;font-family:${FONTE};">
+${linhaDado('Aluna', `<strong style="color:${COR.ink};">${esc(inscricao.name)}</strong>`)}
+${linhaDado('E-mail', `<strong style="color:${COR.ink};">${esc(inscricao.email)}</strong>`)}
+${linhaDado('WhatsApp', `<a href="${linkWhatsApp(inscricao.phone)}" style="color:${COR.brand};text-decoration:underline;font-weight:600;">${esc(telefone)}</a>`)}
+${linhaDado('Turma', `<strong style="color:${COR.ink};">${esc(turmaTexto)}</strong>`)}
+</td></tr>
+</table>
+</td></tr>
+
+<tr><td style="padding:22px 24px 28px 24px;font-family:${FONTE};border-top:1px solid ${COR.borda};">
+<p style="margin:18px 0 0 0;font-size:14px;line-height:1.6;color:${COR.body};">
+O Stripe já avisou a aluna e vai tentar cobrar de novo automaticamente nos próximos dias. Este aviso é só para você saber que aconteceu.
+</p>
+</td></tr>`)
+
+    const texto = `COBRANÇA RECUSADA
+
+O cartão de ${inscricao.name} foi recusado, e a inscrição dela está
+marcada como inadimplente no painel.
+
+Aluna: ${inscricao.name}
+E-mail: ${inscricao.email}
+WhatsApp: ${telefone}
+Turma: ${turmaTexto}
+
+O Stripe já avisou a aluna e vai tentar cobrar de novo automaticamente
+nos próximos dias. Este aviso é só para você saber que aconteceu.`
+
+    await enviar({
+      para: EMAIL_ADMIN,
+      assunto,
+      html,
+      texto,
+      ref: inscricao.email,
+      tipo: 'alerta',
+    })
+  } catch (err) {
+    console.error(`[email] alerta erro ao montar (${inscricao.email})`, err)
   }
 }

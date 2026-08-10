@@ -104,10 +104,16 @@ export type { NivelIngles, DiaDaSemana }
  *
  * É um `Pick`, e não `Tables<'safras'>` inteiro, de propósito: a lista
  * de colunas aqui é exatamente a do `select` lá embaixo. Tipar com a
- * `Row` completa afirmaria que `slug` e `stripe_price_id` chegaram,
- * quando não chegaram — é o mesmo princípio de toda travessia de
- * fronteira deste projeto (REPORT §7): carregar o mínimo, com o corte
- * explícito no ponto onde acontece.
+ * `Row` completa afirmaria que `slug` chegou, quando não chegou — é o
+ * mesmo princípio de toda travessia de fronteira deste projeto (REPORT
+ * §7): carregar o mínimo, com o corte explícito no ponto onde acontece.
+ *
+ * ⚠️ `stripe_price_id` ESTAVA NESTA LISTA DE AUSENTES ATÉ O `c35`, e
+ * entrou porque o mínimo mudou: quem monta a Checkout Session precisa
+ * saber se já existe um `price` que represente esta safra, e a
+ * alternativa era uma segunda consulta à mesma linha um instante depois.
+ * Ele NÃO atravessa para o navegador — quem corta é
+ * `app/api/safra-ativa/route.ts`, que monta a resposta sem o campo.
  *
  * Sobre o `valor_mensal`, que é `number`: **medido na resposta real do
  * PostgREST — vem `299.99`, número JSON, não string.** O tipo gerado
@@ -134,6 +140,7 @@ export type Safra = Pick<
   | 'duracao_meses'
   | 'inscricoes_abertas'
   | 'vagas_total'
+  | 'stripe_price_id'
 >
 
 /**
@@ -378,7 +385,7 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   const { data, error } = await supabase()
     .from('safras')
     .select(
-      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total',
+      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total,stripe_price_id',
     )
     .order('data_inicio_aulas', { ascending: false })
     .limit(1)
@@ -421,14 +428,31 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   // antes do `c36`, que é quando a contagem passa a alimentar o painel e
   // a primeira `cancelada` vira possível. Escolher aqui, por conta
   // própria, seria inventar a regra no lugar de perguntá-la.
-  const { count, error: erroContagem } = await supabase()
+  const {
+    count,
+    error: erroContagem,
+    status: statusContagem,
+  } = await supabase()
     .from('inscricoes')
     .select('id', { count: 'exact', head: true })
     .eq('safra_id', safra.id)
 
   if (erroContagem) {
+    // ⚠️ O STATUS HTTP ENTRA NA MENSAGEM, e é a única coisa que sobra
+    // quando esta consulta falha: ela é `head: true`, e resposta HEAD não
+    // tem corpo — o SDK não consegue extrair código nem texto do erro
+    // (ver o bloco de `contarPorStatus`). Sem o status, a falha chega como
+    // `sem código —` e nada mais, que é indiagnosticável.
+    //
+    // ⚠️ ESTA CONTAGEM CONTINUA COM `head: true`, ao contrário da do
+    // painel, e a diferença é onde ela roda: aqui é o caminho PÚBLICO, que
+    // decide se alguém vê checkout ou lista de espera. Trocar o mecanismo
+    // num caminho que funciona, por causa de um problema que apareceu em
+    // outro, é mexer no que está de pé. O que dá para melhorar sem risco é
+    // o diagnóstico, e é o que esta linha faz.
     throw new Error(
-      `inscricoes(count): ${erroContagem.code ?? 'sem código'} — ${erroContagem.message}`,
+      `inscricoes(count): HTTP ${statusContagem} — ${erroContagem.code ?? 'sem código'} — ` +
+        `${erroContagem.message || 'sem mensagem'}`,
     )
   }
 
@@ -530,22 +554,79 @@ export async function buscarSafraDeVitrine(): Promise<SafraVitrine | null> {
 }
 
 /**
+ * O contrato travado de uma inscrição (D-06), do lado do TypeScript.
+ *
+ * Os três andam SEMPRE juntos — tudo-ou-nada, e quem obriga é o
+ * `inscricoes_travados_tudo_ou_nada_check` da `015`. Modelá-los como um
+ * objeto só, em vez de três campos opcionais lado a lado, é o que torna
+ * "valor sem duração" impossível de escrever aqui em cima: um contrato
+ * pela metade deixa de ser um estado representável antes de chegar ao
+ * banco.
+ */
+export type ContratoTravado = {
+  valorMensal: number
+  duracaoMeses: number
+  /** `'YYYY-MM-DD'` — dia de calendário, sem fuso. Ver `paraDataUTC`. */
+  dataPrimeiraCobranca: string
+}
+
+/**
  * O que a escrita da inscrição devolve.
  *
- * `criada` é o booleano da RPC: `true` = inscrição nova, `false` = essa
- * pessoa já tem inscrição nesta safra.
+ * `criada`: `true` = inscrição nova, `false` = essa pessoa já tem
+ * inscrição nesta safra.
  *
  * ⚠️ `criada: false` NÃO É FALHA, e é por isso que ele mora dentro do
- * ramo `ok: true`. A união anterior tinha `{ ok: false; duplicate: true }`
+ * ramo `ok: true`. A união original tinha `{ ok: false; duplicate: true }`
  * — duplicata como uma espécie de erro —, e aquilo era herança de o
  * mecanismo ser uma unique violation. Com a RPC, "já existia" é uma
  * resposta que a função dá de propósito, e colapsá-la de novo em erro
  * faria a rota degradar (e responder 500) para alguém cujo cadastro está
  * perfeitamente gravado no banco.
+ *
+ * ⚠️ `inscricaoId` PODE SER `null` COM `ok: true`, e o caso é real: com
+ * `on conflict do nothing`, o conflito com uma transação AINDA NÃO
+ * COMMITADA não insere e também não deixa a outra linha visível para a
+ * releitura da `016`. Exige duas submissões da mesma pessoa no mesmo
+ * instante, e é recuperável — a tentativa seguinte enxerga a linha. Quem
+ * chama trata: sem id não há sessão de checkout, e a resposta é a de
+ * duplicata. O que não se pode fazer é fingir que o id existe.
+ *
+ * ⚠️ `contrato` é o da LINHA QUE EXISTE, não o que foi enviado. Na
+ * duplicata ele é o da PRIMEIRA vez (D-06), e é ele que a sessão de
+ * checkout tem que cobrar — ver `precoDoContrato` em `src/lib/stripe.ts`.
  */
 export type ResultadoInscricao =
-  | { ok: true; criada: boolean }
+  | {
+      ok: true
+      criada: boolean
+      inscricaoId: string | null
+      contrato: ContratoTravado | null
+    }
   | { ok: false; status: number; detail: string }
+
+/**
+ * ⚠️ O ESCAPE DE NULIDADE DE ARGUMENTO — um lugar só, e é este.
+ *
+ * `supabase gen types` não expressa nulidade de ARGUMENTO de função (só
+ * de coluna): os três parâmetros travados chegam tipados como
+ * `p_valor_mensal_travado: number`, sem `| null`, apesar de a coluna ser
+ * nullable e de a lista de espera PRECISAR mandar null nos três.
+ *
+ * ⚠️ E MANDAR `undefined` NÃO É ALTERNATIVA, é um defeito. Omitir os três
+ * produz um corpo com exatamente as dez chaves da sobrecarga ANTIGA
+ * (`011b`), e o PostgREST resolveria a chamada para ela — que devolve um
+ * booleano onde este módulo espera uma linha. A inscrição seria gravada e
+ * a rota responderia falha. É a razão pela qual os três não têm `default`
+ * no SQL, e está escrita no cabeçalho da `016`.
+ *
+ * Então o `null` viaja explícito, e esta função é o único ponto onde o
+ * tipo é dobrado — nomeada, comentada e grep-ável, em vez de um `as
+ * number` solto em três linhas que ninguém liga uma à outra.
+ */
+function nulavel<T>(valor: T | null): T {
+  return valor as T
+}
 
 /**
  * Cria a inscrição: pessoa + inscrição, numa transação só.
@@ -571,11 +652,20 @@ export type ResultadoInscricao =
  * ⚠️ `.rpc()` CASA PARÂMETRO POR NOME
  * ============================================================
  *
- * Os dez nomes abaixo são a assinatura da função no banco, não uma
+ * Os treze nomes abaixo são a assinatura da função no banco, não uma
  * convenção nossa. Errar um deles é erro em tempo de execução — o
  * PostgREST responde "function not found" porque a assinatura não bate —,
  * e é o tipo de erro que só aparece quando alguém real se inscreve.
  * Renomear um parâmetro no SQL é mudar este objeto junto, no mesmo commit.
+ *
+ * ⚠️ E AQUI O CONJUNTO DE NOMES FAZ MAIS DO QUE CASAR: ELE ESCOLHE A
+ * FUNÇÃO. Existem DUAS `criar_inscricao` no banco enquanto a `018` não
+ * roda — a de dez argumentos da `011b`, que o build em produção chama
+ * entre a migração e o deploy, e a de treze da `016`. O PostgREST resolve
+ * sobrecarga pelo CONJUNTO DE CHAVES do corpo JSON. Mandar os treze é o
+ * que faz esta chamada cair na função certa; mandar dez cairia na antiga,
+ * que devolve um booleano onde este módulo espera uma linha. Ver
+ * `nulavel` acima.
  *
  * ============================================================
  * O QUE **NÃO** É PARÂMETRO, E NÃO É ESQUECIMENTO
@@ -599,20 +689,30 @@ export type ResultadoInscricao =
  *     não chega aqui: quem o corta é a rota, na fronteira.
  *
  * ============================================================
- * O QUE ELA DEVOLVE: UM BOOLEANO. SÓ.
+ * O QUE ELA DEVOLVE, E O QUE CONTINUA NÃO ATRAVESSANDO
  * ============================================================
  *
- * Nenhum dado pessoal atravessa de volta — nem id de pessoa, nem id de
- * inscrição, nem nome, nem status, nem contagem. É o mesmo corte de
- * fronteira do resto do projeto (REPORT §9.6), aplicado à RPC.
+ * ⚠️ ATÉ O CORTE 1 ERA UM BOOLEANO E SÓ, e o comentário que ocupava este
+ * lugar dizia, com razão, que "nenhum dado pessoal atravessa de volta —
+ * nem id de pessoa, nem id de inscrição, nem nome, nem status, nem
+ * contagem". O corte de fronteira do REPORT §9.6 é "carregar o mínimo,
+ * com o corte explícito" — não "carregar um booleano para sempre". O
+ * mínimo mudou porque o chamador mudou: quem monta a Checkout Session
+ * precisa saber QUAL inscrição pagar (`client_reference_id`) e QUANTO ela
+ * deve pagar (D-06).
  *
- * É também o que o `Prefer: return=minimal` fazia no insert que existia
- * aqui antes, e vale registrar como o mecanismo mudou: aquele efeito não
- * vinha de um cabeçalho nosso, vinha do **default do PostgREST** para um
- * POST sem `Prefer` — bastava encadear `.select()` para a linha inteira
- * voltar. Encadear por reflexo, "porque é assim que se faz", desfazia o
- * corte em silêncio. Agora o corte está do lado de lá, escrito no
- * `returns boolean` da função, e nem um `.select()` distraído o desfaz.
+ * O que continua fora é o que importa: nome, e-mail, telefone, status,
+ * consentimento, contagem. Nada de dado pessoal atravessa de volta, e o
+ * que não sai não vaza depois por um spread distraído três camadas acima.
+ *
+ * Vale registrar como o mecanismo do corte mudou ao longo do projeto,
+ * porque o caminho explica a forma atual: no `fetch` cru original o corte
+ * vinha do **default do PostgREST** para um POST sem `Prefer` — bastava
+ * encadear `.select()` para a linha inteira voltar, e encadear por
+ * reflexo desfazia o corte em silêncio. Depois ele passou a estar escrito
+ * do lado de lá, no `returns` da função, onde nenhum descuido daqui o
+ * desfaz. Continua assim: o que a `016` não projeta, esta camada não tem
+ * como pedir.
  *
  * A service_role key ignora RLS — é por isso que `pessoas` e `inscricoes`
  * podem ficar com RLS ligada e ZERO policies, e é por isso que a função
@@ -657,6 +757,23 @@ export async function criarInscricao(dados: {
    * andam juntos ou o insert é recusado pelo CHECK da `009`.
    */
   safra_id: string | null
+  /**
+   * O contrato a travar na inscrição (D-06), ou `null` para lista de
+   * espera.
+   *
+   * ⚠️ ELE ANDA COLADO EM `safra_id`, e o banco obriga: contrato com
+   * `safra_id` nulo é recusado pelo `inscricoes_espera_sem_travado_check`
+   * da `015` — seria um preço acordado numa safra que não existe. O
+   * inverso (safra sem contrato) é permitido de propósito, porque
+   * `pendente_pagamento` ficou de fora da exigência do CHECK.
+   *
+   * ⚠️ E ELE NÃO É O QUE VAI SER COBRADO NA DUPLICATA. Quem já tem
+   * inscrição mantém o contrato da primeira vez — a `016` não sobrescreve
+   * —, e é o `contrato` DE VOLTA, no resultado, que a sessão de checkout
+   * tem que usar. Mandar um e cobrar o outro é o desalinhamento que a
+   * `015` existe para impedir.
+   */
+  travados: ContratoTravado | null
 }): Promise<ResultadoInscricao> {
   const { data, error, status } = await supabase().rpc('criar_inscricao', {
     p_nome: dados.nome,
@@ -693,6 +810,19 @@ export async function criarInscricao(dados: {
     //      `009` significa `lista_espera` — um estado afirmado, decidido
     //      pela rota depois de ler `inscricoes_abertas` no banco.
     p_safra_id: dados.safra_id ?? undefined,
+
+    // ⚠️ `null` EXPLÍCITO, e nunca `undefined` — o oposto exato da linha
+    // acima, e a assimetria tem motivo. `p_safra_id` TEM `default null`
+    // no SQL, então omiti-lo é a forma de dizer "sem safra". Estes três
+    // NÃO têm default, de propósito: é a ausência de default que impede a
+    // chamada de dez argumentos da `011b` de cair na função de treze. Se
+    // eles fossem omitidos aqui, o corpo teria exatamente as dez chaves da
+    // sobrecarga antiga e o PostgREST resolveria para ela. Ver `nulavel`.
+    p_valor_mensal_travado: nulavel(dados.travados?.valorMensal ?? null),
+    p_duracao_meses_travada: nulavel(dados.travados?.duracaoMeses ?? null),
+    p_data_primeira_cobranca_travada: nulavel(
+      dados.travados?.dataPrimeiraCobranca ?? null,
+    ),
   })
 
   if (error) {
@@ -705,28 +835,1690 @@ export async function criarInscricao(dados: {
     return { ok: false, status, detail }
   }
 
-  // ⚠️ `data` não-booleano é FALHA, e não "provavelmente deu certo".
+  // ============================================================
+  // ⚠️ RESPOSTA COM FORMA INESPERADA É FALHA, E NÃO "PROVAVELMENTE DEU
+  //    CERTO"
+  // ============================================================
   //
-  // A função declara `returns boolean` e sempre devolve um. Um `null`
-  // aqui significa que a resposta não tem a forma que a assinatura
-  // promete — schema divergente, função substituída, PostgREST devolvendo
-  // outra coisa — e é exatamente a classe de incidente da migração `004`:
-  // o banco andou, a aplicação não, e nada reclamou.
+  // A função declara `returns table (...)` e devolve SEMPRE exatamente uma
+  // linha — inclusive na duplicata. Um array vazio, um booleano ou um
+  // `null` aqui significam que a resposta não tem a forma que a assinatura
+  // promete: schema divergente, função substituída, ou — o caso concreto e
+  // provável — a chamada tendo caído na SOBRECARGA DE DEZ ARGUMENTOS da
+  // `011b`, que devolve `boolean`. É exatamente a classe de incidente da
+  // migração `004`: o banco andou, a aplicação não, e nada reclamou.
   //
-  // Assumir `true` faria a rota mandar e-mail de confirmação por uma
-  // inscrição que talvez não exista. Assumir `false` diria "você já está
-  // cadastrada" para quem não está. As duas mentem; só o erro não mente.
+  // Assumir `criada: true` faria a rota mandar e-mail de confirmação por
+  // uma inscrição que talvez não exista. Assumir `false` diria "você já
+  // está cadastrada" para quem não está. As duas mentem; só o erro não
+  // mente.
   //
   // Se a linha TIVER sido gravada, o custo é a pessoa ver "tente de novo"
   // e tentar — e a segunda tentativa cai no caminho de duplicata, que
-  // responde a verdade. É o desfecho menos ruim dos três.
-  if (typeof data !== 'boolean') {
+  // agora devolve o id e abre o checkout dela. É o desfecho menos ruim
+  // dos três, e ficou melhor do que era no corte 1.
+  const linha = Array.isArray(data) ? data[0] : undefined
+
+  if (!linha || typeof linha.criada !== 'boolean') {
     return {
       ok: false,
       status,
-      detail: `criar_inscricao devolveu ${data === null ? 'null' : typeof data}, esperado boolean`,
+      detail:
+        `criar_inscricao devolveu ${data === null ? 'null' : typeof data}` +
+        `${Array.isArray(data) ? ` (array de ${data.length})` : ''}, ` +
+        'esperado uma linha com `criada` booleano — a chamada pode ter caído ' +
+        'na sobrecarga de dez argumentos da 011b',
     }
   }
 
-  return { ok: true, criada: data }
+  // ⚠️ O CONTRATO SÓ EXISTE SE OS TRÊS EXISTIREM, e a checagem não é
+  // paranoia: é o `inscricoes_travados_tudo_ou_nada_check` da `015`
+  // reafirmado do lado de cá, na fronteira onde o dado deixa de ser linha
+  // de banco e vira objeto. Meio contrato aqui viraria um `cancel_at`
+  // calculado sobre `undefined` lá na frente — e a conta de prazo é a
+  // única deste projeto cujo erro só aparece seis meses depois.
+  const contrato: ContratoTravado | null =
+    linha.valor_mensal_travado !== null &&
+    linha.duracao_meses_travada !== null &&
+    linha.data_primeira_cobranca_travada !== null
+      ? {
+          valorMensal: linha.valor_mensal_travado,
+          duracaoMeses: linha.duracao_meses_travada,
+          dataPrimeiraCobranca: linha.data_primeira_cobranca_travada,
+        }
+      : null
+
+  return {
+    ok: true,
+    criada: linha.criada,
+    // `null` no caso raro de conflito com transação não commitada — ver o
+    // bloco de `ResultadoInscricao` e a seção 2.3 da `016`.
+    inscricaoId: linha.inscricao_id ?? null,
+    contrato,
+  }
+}
+
+/**
+ * Grava em `safras.stripe_price_id` o `price` recém-criado no Stripe.
+ *
+ * ============================================================
+ * ⚠️ ESTA ESCRITA PODE FALHAR DEPOIS DE O `price` JÁ EXISTIR LÁ,
+ *    E ISSO É ACEITO — porque a alternativa é pior.
+ * ============================================================
+ *
+ * Não há transação entre o Stripe e o Postgres, e não existe forma de
+ * haver: são dois sistemas, duas requisições, dois destinos. A janela é
+ * real — criar o `price` pode dar certo e este `update` falhar logo em
+ * seguida.
+ *
+ * O estado resultante é um `price` órfão no Stripe: um objeto que existe
+ * lá e que a nossa coluna não conhece. Ele **não cobra ninguém** —
+ * `price` sozinho não é assinatura, não tem cliente e não move um
+ * centavo. É lixo, e lixo silencioso é o pior desfecho que este caminho
+ * produz.
+ *
+ * A próxima chamada de `precoDaSafra` cria outro `price` idêntico e
+ * tenta gravar de novo. Repetir isso muitas vezes acumularia `price`
+ * inertes no Dashboard — feio, e barato perto das alternativas:
+ *
+ *   - reverter no Stripe (`price` não se apaga; só se arquiva) exigiria
+ *     tratar a falha do arquivamento, que tem a mesma janela;
+ *   - guardar a intenção antes de chamar o Stripe transformaria toda
+ *     inscrição em duas escritas no banco para cobrir um caso que não
+ *     cobra ninguém quando acontece.
+ *
+ * ⚠️ NÃO ENGOLIR O ERRO. Quem chama precisa saber que a coluna não
+ * acompanhou, para decidir — no fluxo de checkout, o `priceId` devolvido
+ * pelo Stripe continua válido e a sessão PODE ser aberta com ele mesmo
+ * sem a coluna atualizada. Quem decide isso é a rota, não este módulo.
+ */
+export async function salvarStripePriceId(safraId: string, priceId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('safras')
+    .update({ stripe_price_id: priceId })
+    .eq('id', safraId)
+
+  if (error) {
+    throw new Error(`safras(stripe_price_id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+// ============================================================
+// O PAINEL — leituras e escritas que SÓ a Giovanna faz
+// ============================================================
+//
+// ⚠️ TUDO DAQUI PARA BAIXO É ALCANÇÁVEL SÓ POR `/api/admin/*`, e cada uma
+// dessas rotas começa com `exigirAdmin`. Nenhuma destas funções tem
+// verificação de acesso própria, de propósito: autorização é decisão de
+// ROTA, feita uma vez, num lugar que dá para auditar lendo a primeira
+// linha do handler. Espalhá-la aqui dentro criaria a ilusão de defesa em
+// profundidade e, na prática, dois lugares para alguém esquecer.
+
+/** Uma safra como o painel a lista. */
+export type SafraDoPainel = Pick<
+  Tables<'safras'>,
+  'id' | 'nome' | 'data_inicio_aulas' | 'inscricoes_abertas'
+>
+
+/**
+ * Todas as safras, da mais recente para a mais antiga.
+ *
+ * ⚠️ SEM PAGINAÇÃO, e é uma escolha com prazo de validade escrito: safra é
+ * semestral. Vinte anos de produto são quarenta linhas. No dia em que isso
+ * deixar de ser verdade, este comentário é o aviso de que ninguém pensou
+ * no assunto — e não de que alguém decidiu que não precisava.
+ */
+export async function listarSafras(): Promise<SafraDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('safras')
+    .select('id,nome,data_inicio_aulas,inscricoes_abertas')
+    .order('data_inicio_aulas', { ascending: false })
+
+  if (error) {
+    throw new Error(`safras(painel): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Os contadores da tela de hoje (`c64`).
+ *
+ * ⚠️ CINCO CONSULTAS `head: true` E NENHUMA LINHA TRAFEGANDO. O PostgREST
+ * responde só o cabeçalho `Content-Range` quando `head` é verdadeiro — é o
+ * que evita arrastar a lista inteira de inscritas, com dado pessoal
+ * dentro, para exibir um número. A tela de contagem não tem por que
+ * carregar quem está sendo contado.
+ *
+ * ⚠️ `pendentes` É A FILA DA D-15, e é o contador que existe para ser
+ * OLHADO: quem está em `pendente_pagamento` não tem como sair sozinha — não
+ * sabe que está pendente, e refazer o formulário devolve "você já está
+ * inscrita". Sem este número na cara dela, o estado é invisível.
+ */
+export type ContagensDoPainel = {
+  listaEspera: number
+  pendentes: number
+  confirmadas: number
+  ativas: number
+  inadimplentes: number
+}
+
+export async function contarPorStatus(): Promise<ContagensDoPainel> {
+  // ============================================================
+  // ⚠️ UMA CONSULTA COMUM, E NÃO CINCO `head: true` EM PARALELO
+  // ============================================================
+  //
+  // A versão anterior fazia cinco `select('id', { count: 'exact', head:
+  // true })`, uma por status, num `Promise.all`. Ela quebrou em uso real
+  // com a mensagem mais inútil possível — `inscricoes(count ativa): sem
+  // código —`, sem código e sem texto — e a causa está no SDK:
+  //
+  //   `PostgrestBuilder` trata resposta não-2xx lendo `res.text()` para
+  //   extrair o erro. Numa requisição **HEAD não existe corpo**, então o
+  //   `JSON.parse('')` estoura, cai no `catch`, e o erro vira
+  //   `{ message: '' }` — sem `code`, sem `message`, sem `details`.
+  //
+  // ⚠️ ISSO NÃO É UM BUG DO SDK QUE DÁ PARA CONTORNAR COM `try/catch`: é
+  // uma propriedade de HEAD. Enquanto a contagem for feita assim, QUALQUER
+  // falha chega indistinguível de qualquer outra — e um painel que não
+  // sabe dizer por que não contou é um painel que ninguém consegue
+  // consertar.
+  //
+  // Uma consulta comum devolve corpo, então erro chega com código e texto.
+  // E, de quebra: uma viagem em vez de cinco, e nenhuma concorrência.
+  //
+  // ⚠️ O QUE ELA CARREGA, E POR QUE ISSO NÃO REABRE O PROBLEMA QUE O
+  // `head: true` RESOLVIA: só a coluna `status`. O motivo de usar `head`
+  // era "evitar arrastar a lista inteira de inscritas, COM DADO PESSOAL
+  // DENTRO, por um número" — e uma coluna de sete valores possíveis não
+  // tem dado pessoal nenhum. O que se paga é uma string por inscrição, na
+  // escala de dezenas por safra.
+  //
+  // Se um dia isso deixar de ser desprezível, o caminho certo NÃO é voltar
+  // ao `head: true`: é uma view ou uma RPC que faça `group by status` no
+  // banco e devolva cinco linhas.
+  // ============================================================
+  const { data, error, status } = await supabase().from('inscricoes').select('status')
+
+  if (error) {
+    throw new Error(
+      `inscricoes(contagem): HTTP ${status} — ${error.code ?? 'sem código'} — ` +
+        `${error.message || 'sem mensagem'}`,
+    )
+  }
+
+  // `null` não vira "tudo zero": significaria resposta sem corpo, e exibir
+  // zeros afirmaria "não há ninguém" a partir de algo que não disse nada.
+  // É o mesmo erro de sempre, com sinal trocado — e num painel ele é pior,
+  // porque um zero é exatamente o que faz a Giovanna não olhar de novo.
+  if (!data) throw new Error(`inscricoes(contagem): HTTP ${status} — resposta sem corpo`)
+
+  const conta = (alvo: StatusInscricao) => data.filter((l) => l.status === alvo).length
+
+  return {
+    listaEspera: conta('lista_espera'),
+    pendentes: conta('pendente_pagamento'),
+    confirmadas: conta('confirmada'),
+    ativas: conta('ativa'),
+    inadimplentes: conta('inadimplente'),
+  }
+}
+
+/**
+ * Uma safra inteira, como o painel a edita (`c65`).
+ *
+ * ⚠️ `Row` COMPLETA aqui, e não um `Pick`, e a diferença em relação a
+ * `Safra`/`SafraVitrine` é o propósito: aquelas atravessam uma fronteira
+ * (para a landing, para a modal) e carregam o mínimo. Esta NÃO atravessa —
+ * ela alimenta um formulário que edita a linha, e um `Pick` aqui
+ * significaria uma coluna que a Giovanna não consegue ver nem corrigir
+ * pelo painel, que é exatamente o que a D-07 existe para impedir.
+ */
+export type SafraCompleta = Tables<'safras'>
+
+export async function listarSafrasCompletas(): Promise<SafraCompleta[]> {
+  const { data, error } = await supabase()
+    .from('safras')
+    .select('*')
+    .order('data_inicio_aulas', { ascending: false })
+
+  if (error) {
+    throw new Error(`safras(completas): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Quantas inscrições desta safra JÁ TÊM CONTRATO (`c66`, D-06).
+ *
+ * ⚠️ É O NÚMERO QUE O AVISO DE PREÇO TRAVADO PRECISA. A D-06 obriga: "o
+ * painel avisa na cara da Giovanna, ao editar uma safra que já tem
+ * inscrição paga, que a mudança só vale para quem vier depois". Sem este
+ * número o aviso teria que ser genérico — e um aviso que aparece sempre é
+ * um aviso que ninguém lê.
+ *
+ * ⚠️ OS QUATRO STATUS SÃO OS DO CHECK `inscricoes_paga_tem_travado_check`
+ * da `015`, e a coincidência não é acidente: são exatamente os estados em
+ * que existe contrato travado. `pendente_pagamento` fica de fora porque
+ * quem abandonou o checkout não acordou preço nenhum — e incluí-la faria o
+ * aviso disparar por gente que nunca vai pagar.
+ */
+export async function contarComContrato(safraId: string): Promise<number> {
+  const { count, error } = await supabase()
+    .from('inscricoes')
+    .select('id', { count: 'exact', head: true })
+    .eq('safra_id', safraId)
+    .in('status', ['confirmada', 'ativa', 'inadimplente', 'concluida'])
+
+  if (error) {
+    throw new Error(`inscricoes(contrato): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  // `null` não vira zero: exibir 0 afirmaria "ninguém pagou ainda" a partir
+  // de uma resposta que não disse nada — e é justamente esse zero que faria
+  // o aviso da D-06 não aparecer.
+  if (count === null) throw new Error('inscricoes(contrato): sem contagem')
+
+  return count
+}
+
+/**
+ * `Setembro 2026` → `setembro-2026`.
+ *
+ * ============================================================
+ * ⚠️ ELE É DERIVADO DO NOME, E SÓ NA CRIAÇÃO
+ * ============================================================
+ *
+ * `slug` é "identificador estável e legível" (`002`), usado como
+ * referência humana em log e suporte. Duas consequências, e as duas são
+ * decisão:
+ *
+ *   NÃO É CAMPO DO FORMULÁRIO. Pedir à Giovanna que digite um
+ *     identificador técnico ao lado do nome é pedir que ela invente uma
+ *     regra que o sistema já sabe aplicar — e um dia ela digitaria
+ *     `Setembro 2026`, com espaço e maiúscula, num campo que o resto do
+ *     sistema trata como chave.
+ *
+ *   ⚠️ NÃO MUDA NUM RENAME. `atualizarSafra` não toca no slug, de
+ *     propósito: "estável" é a metade do contrato dele. Corrigir um erro
+ *     de digitação no nome não pode invalidar a referência que está num
+ *     log de três meses atrás ou numa conversa de suporte.
+ *
+ * ⚠️ COLISÃO É POSSÍVEL e é tratada pelo banco: duas safras com o mesmo
+ * nome geram o mesmo slug, e o unique levanta `23505`. A mensagem do
+ * painel diz "já existe uma turma com esse nome", que é verdade e é
+ * acionável — melhor do que um sufixo numérico automático, que produziria
+ * `setembro-2026-2` sem ninguém entender de onde veio.
+ *
+ * `normalize('NFD')` + remoção de diacríticos: `Março` vira `marco`, e
+ * não `mar-o`. Sem isso, todo nome com acento perderia uma letra.
+ */
+export function paraSlug(nome: string): string {
+  const slug = nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  // Um nome só de símbolos produziria slug vazio, e o `not null` do banco
+  // recusaria com uma mensagem que não ajuda ninguém. Falhar aqui deixa a
+  // rota dizer o que fazer.
+  if (!slug) throw new Error('O nome da turma precisa ter pelo menos uma letra ou número.')
+
+  return slug
+}
+
+/** Os campos que a Giovanna edita. Nenhum deles é derivado. */
+export type SafraParaSalvar = {
+  nome: string
+  data_inicio_aulas: string
+  data_primeira_cobranca: string
+  valor_mensal: number
+  duracao_meses: number
+  vagas_total: number | null
+}
+
+/**
+ * Cria uma safra.
+ *
+ * ⚠️ ELA NASCE COM `inscricoes_abertas = false`, SEMPRE, e isso não é
+ * parâmetro. Abrir inscrições é um ato separado e visível (`c67`) — se
+ * fosse um checkbox no formulário de criação, uma safra recém-cadastrada
+ * com o preço ainda errado poderia sair vendendo no mesmo clique. Criar e
+ * publicar são decisões diferentes e o painel as separa.
+ *
+ * ⚠️ `stripe_price_id` também não entra: ele é consequência, não escolha.
+ * Nasce nulo e é preenchido pelo primeiro checkout, que espelha o valor no
+ * Stripe (D-07). Deixar a Giovanna digitar um `price_...` seria abrir a
+ * porta para a safra apontar para um preço que não é o dela.
+ */
+export async function criarSafra(dados: SafraParaSalvar): Promise<SafraCompleta> {
+  const { data, error } = await supabase()
+    .from('safras')
+    // ⚠️ O `slug` É DERIVADO DO NOME, E SÓ NA CRIAÇÃO — ver `paraSlug`.
+    .insert({ ...dados, slug: paraSlug(dados.nome) })
+    .select('*')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`safras(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) throw new Error('safras(insert): nenhuma linha devolvida')
+
+  return linha
+}
+
+/**
+ * Salva a edição.
+ *
+ * ⚠️ MUDAR O PREÇO AQUI NÃO MEXE EM QUEM JÁ ASSINOU, e é a D-06
+ * funcionando de graça: o valor que vale para cada inscrição está copiado
+ * em `valor_mensal_travado`, na própria linha dela, desde o checkout. Do
+ * lado do Stripe é igual — `price` é imutável e a assinatura cobra o que
+ * foi acordado na criação.
+ *
+ * O que este `update` muda é o preço de QUEM VIER DEPOIS. Quem avisa isso
+ * na tela é o `c66`, com a contagem de `contarComContrato`.
+ *
+ * ⚠️ E ELE NÃO TOCA `inscricoes_abertas`. Abrir e fechar é outro ato, com
+ * outra função — misturar os dois faria salvar uma correção de digitação
+ * no nome abrir as inscrições por efeito colateral.
+ */
+export async function atualizarSafra(safraId: string, dados: SafraParaSalvar): Promise<void> {
+  const { error } = await supabase().from('safras').update(dados).eq('id', safraId)
+
+  if (error) {
+    throw new Error(`safras(update): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Abre ou fecha as inscrições de uma safra (`c67`).
+ *
+ * ============================================================
+ * ⚠️ O BANCO SÓ DEIXA UMA SAFRA ABERTA POR VEZ
+ * ============================================================
+ *
+ * `safras_uma_aberta_idx` é um índice único PARCIAL sobre
+ * `inscricoes_abertas` (migração `005`): abrir a segunda levanta `23505`.
+ *
+ * ⚠️ E ESTA FUNÇÃO NÃO FECHA A OUTRA POR CONTA PRÓPRIA. A tentação é
+ * óbvia — "fecha a anterior e abre esta, numa transação" — e ela está
+ * errada por duas razões:
+ *
+ *   1. NÃO EXISTE TRANSAÇÃO AQUI. O PostgREST expõe uma requisição HTTP
+ *      por comando; fechar e abrir seriam duas, e entre elas existe um
+ *      instante com ZERO safras abertas. Quem carregasse a landing nesse
+ *      instante veria "inscrições fechadas".
+ *   2. FECHAR UMA TURMA É DECISÃO DELA, não efeito colateral de abrir
+ *      outra. Uma safra aberta pode ter gente no meio do checkout.
+ *
+ * Então o erro sobe, e o painel diz "já existe uma turma aberta — feche a
+ * outra primeiro". Duas ações explícitas, na ordem que ela escolher.
+ */
+export async function alternarInscricoes(safraId: string, abertas: boolean): Promise<void> {
+  const { error } = await supabase()
+    .from('safras')
+    .update({ inscricoes_abertas: abertas })
+    .eq('id', safraId)
+
+  if (error) {
+    // ⚠️ O código é preservado para o chamador poder distinguir "já existe
+    // uma aberta" de "o banco caiu". Sem ele, as duas viram a mesma
+    // mensagem genérica e a Giovanna não sabe se tenta de novo ou se fecha
+    // a outra.
+    const e = new Error(`safras(abertas): ${error.code ?? 'sem código'} — ${error.message}`)
+    ;(e as Error & { codigoPg?: string }).codigoPg = error.code
+    throw e
+  }
+}
+
+// ------------------------------------------------------------
+// GRUPOS — horário dentro da safra (`c68`)
+//
+// ⚠️ GRUPO NÃO TEM CALENDÁRIO NEM PREÇO (D-01). Ele é só um horário
+// (segunda 19h, quarta 19h) dentro de uma safra, e a decisão PROÍBE
+// qualquer coluna de data, valor ou duração aqui. O pool de aulas começa
+// no mesmo dia para todo mundo; a divisão por dia da semana é logística de
+// agenda, não de contrato.
+// ------------------------------------------------------------
+
+export type GrupoDoPainel = Tables<'grupos'>
+
+export async function listarGrupos(safraId: string): Promise<GrupoDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('grupos')
+    .select('*')
+    .eq('safra_id', safraId)
+    .order('dia_semana')
+    .order('horario')
+
+  if (error) {
+    throw new Error(`grupos(lista): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+export async function criarGrupo(dados: {
+  safraId: string
+  diaSemana: string
+  horario: string
+  capacidade: number | null
+}): Promise<void> {
+  const { error } = await supabase().from('grupos').insert({
+    safra_id: dados.safraId,
+    dia_semana: dados.diaSemana,
+    horario: dados.horario,
+    capacidade: dados.capacidade,
+  })
+
+  if (error) {
+    throw new Error(`grupos(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Liga e desliga um horário.
+ *
+ * ⚠️ NÃO É `delete`, e a razão é a FK: `inscricoes.grupo_id` aponta para
+ * cá, e apagar um grupo com aluna alocada esbarraria no `on delete
+ * restrict` — ou, pior, num `cascade` que alguém acrescentasse "para
+ * resolver", apagando a alocação de gente real. Desligar tira o horário
+ * das opções novas e mantém o histórico de quem está nele.
+ */
+export async function alternarGrupo(grupoId: string, ativo: boolean): Promise<void> {
+  const { error } = await supabase().from('grupos').update({ ativo }).eq('id', grupoId)
+
+  if (error) {
+    throw new Error(`grupos(ativo): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+// ------------------------------------------------------------
+// ALUNAS — a lista (`c69`), a ficha (`c70`) e a alocação (`c71`, `c72`)
+// ------------------------------------------------------------
+
+/** Uma linha da lista de alunas. */
+export type AlunaDaLista = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  status: StatusInscricao
+  criada_em: string
+  safra_id: string | null
+  safra_nome: string | null
+  grupo_id: string | null
+}
+
+/**
+ * A lista, com filtros (`c69`).
+ *
+ * ⚠️ OS FILTROS SÃO OPCIONAIS E SE COMBINAM. Sem nenhum, ela devolve tudo
+ * — o que na escala deste produto (dezenas por safra) é uma tela que
+ * carrega. Se um dia isso deixar de ser verdade, este comentário é o aviso
+ * de que ninguém pensou em paginação, e não de que alguém decidiu que não
+ * precisava.
+ *
+ * ⚠️ O `select` É UMA STRING LITERAL. O SDK infere o tipo do resultado a
+ * partir do TEXTO — quebrar em pedaços com `+` produz `string`, a
+ * inferência desiste, e o erro é críptico. Ver `buscarInscricaoParaEmail`.
+ */
+export async function listarAlunas(filtros: {
+  safraId?: string | null
+  status?: StatusInscricao | null
+}): Promise<AlunaDaLista[]> {
+  let query = supabase()
+    .from('inscricoes')
+    .select('id,status,created_at,safra_id,grupo_id,pessoas(id,nome,email,telefone),safras(nome)')
+    .order('created_at', { ascending: false })
+
+  if (filtros.safraId) query = query.eq('safra_id', filtros.safraId)
+  if (filtros.status) query = query.eq('status', filtros.status)
+
+  const { data, error } = await query
+
+  if (error) {
+    throw new Error(`inscricoes(alunas): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return (data ?? [])
+    .filter((l) => l.pessoas)
+    .map((l) => ({
+      inscricao_id: l.id,
+      pessoa_id: l.pessoas!.id,
+      nome: l.pessoas!.nome,
+      email: l.pessoas!.email,
+      telefone: l.pessoas!.telefone,
+      status: l.status as StatusInscricao,
+      criada_em: l.created_at,
+      safra_id: l.safra_id,
+      safra_nome: l.safras?.nome ?? null,
+      grupo_id: l.grupo_id,
+    }))
+}
+
+/** A ficha (`c70`) — tudo que se sabe sobre uma inscrição. */
+export type FichaDaAluna = {
+  inscricao: Tables<'inscricoes'>
+  pessoa: Tables<'pessoas'>
+  safra: Pick<Tables<'safras'>, 'id' | 'nome' | 'data_inicio_aulas'> | null
+  grupo: Pick<Tables<'grupos'>, 'id' | 'dia_semana' | 'horario'> | null
+  assinatura: Pick<
+    Tables<'assinaturas'>,
+    'status_stripe' | 'ciclos_pagos' | 'trial_end' | 'cancel_at' | 'stripe_subscription_id'
+  > | null
+}
+
+/**
+ * A ficha inteira, numa consulta.
+ *
+ * ⚠️ ELA CARREGA O CONSENTIMENTO — `consent`, `consent_at`, `consent_text`
+ * — e isso é o ponto, não um descuido. É a única tela do sistema onde a
+ * prova de consentimento é legível por gente, e ela existe porque um dia
+ * alguém vai perguntar "quando ela aceitou, e o quê?". Sob LGPD, não
+ * conseguir responder é o mesmo que não ter a prova.
+ *
+ * ⚠️ `consent` NULO É UM VALOR, e a ficha tem que mostrá-lo como "não
+ * sabemos" — nunca como "não aceitou". São as linhas herdadas da `010`,
+ * onde nunca houve backfill de propósito: `null` significa que o registro
+ * é anterior ao sistema de consentimento, e falsificá-lo seria destruir a
+ * própria prova que a coluna existe para guardar.
+ */
+export async function buscarFicha(inscricaoId: string): Promise<FichaDaAluna | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('*,pessoas(*),safras(id,nome,data_inicio_aulas),grupos(id,dia_semana,horario),assinaturas(status_stripe,ciclos_pagos,trial_end,cancel_at,stripe_subscription_id)')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(ficha): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const l = data?.[0]
+  if (!l || !l.pessoas) return null
+
+  const { pessoas, safras, grupos, assinaturas, ...inscricao } = l
+
+  return {
+    inscricao: inscricao as Tables<'inscricoes'>,
+    pessoa: pessoas,
+    safra: safras ?? null,
+    grupo: grupos ?? null,
+    // `assinaturas` é 1:1 pelo unique de `inscricao_id` (`012`), mas o
+    // PostgREST devolve o embed conforme a cardinalidade que ele infere.
+    // O `Array.isArray` cobre as duas formas sem apostar em uma.
+    assinatura: Array.isArray(assinaturas) ? (assinaturas[0] ?? null) : (assinaturas ?? null),
+  }
+}
+
+/**
+ * Move uma aluna de horário (`c72`).
+ *
+ * ============================================================
+ * ⚠️ ELA NÃO TOCA NO STRIPE — D-03, e é a decisão inteira
+ * ============================================================
+ *
+ * "Arrastar uma aluna de segunda para quarta no painel não dispara,
+ * cancela ou altera nada no Stripe." A razão: ela já pagou antes de ser
+ * alocada. Separar as duas coisas é o que torna o kanban seguro de usar —
+ * a Giovanna pode reorganizar a semana inteira sem medo.
+ *
+ * A D-03 PROÍBE "qualquer chamada ao Stripe nos handlers de alocação", e
+ * `tests/admin-alocacao.test.ts` verifica isso lendo este módulo e a rota
+ * como texto.
+ *
+ * ⚠️ QUEM GARANTE QUE O GRUPO É DA MESMA SAFRA É O BANCO, não esta
+ * função. O trigger `inscricao_grupo_da_mesma_safra` da `009` recusa a
+ * escrita — a FK sozinha só sabe dizer "este grupo existe", e não que ele
+ * pertence à safra da inscrição. Repetir a regra aqui criaria uma segunda
+ * cópia dela, e um dia as duas discordam (REPORT §9.9).
+ *
+ * ⚠️ `null` É UM DESTINO VÁLIDO: tirar de todos os horários. Uma inscrição
+ * nasce sem grupo e pode voltar a ficar sem — "ainda não alocada" é um
+ * estado legítimo, não um erro.
+ */
+export async function moverParaGrupo(inscricaoId: string, grupoId: string | null): Promise<void> {
+  const { error } = await supabase()
+    .from('inscricoes')
+    .update({ grupo_id: grupoId })
+    .eq('id', inscricaoId)
+
+  if (error) {
+    const e = new Error(`inscricoes(grupo): ${error.code ?? 'sem código'} — ${error.message}`)
+    ;(e as Error & { codigoPg?: string }).codigoPg = error.code
+    throw e
+  }
+}
+
+/**
+ * A fila de pagamento pendente (D-15, `c75`).
+ *
+ * ============================================================
+ * ⚠️ POR QUE ESTA CONSULTA EXISTE, E POR QUE ELA VEM SEPARADA
+ * ============================================================
+ *
+ * Inscrição em `pendente_pagamento` é um BECO SEM SAÍDA para quem está
+ * dentro dele. A pessoa não sabe que está pendente — ninguém contou —, e
+ * refazer o formulário devolve "você já está inscrita". Sem esta tela, a
+ * única saída seria a Giovanna abrir o Supabase Studio, o que a D-07
+ * proíbe.
+ *
+ * ⚠️ E ELA MOSTRA HÁ QUANTO TEMPO CADA UMA ESTÁ PARADA, porque a D-15
+ * obriga. Não é enfeite: é a diferença entre "alguém abandonou o checkout
+ * agora e talvez volte sozinha" e "alguém está esperando há três semanas".
+ * As duas pedem ações diferentes.
+ *
+ * ⚠️ O `created_at` É O DA INSCRIÇÃO, e não o da pessoa: quem esteve na
+ * lista de espera por meses e abriu o checkout ontem está parada há um
+ * dia, não há meses.
+ *
+ * `token_expira_em` vem junto para a tela poder dizer se já existe convite
+ * vivo — reenviar tem que mandar o MESMO link que está na caixa de entrada
+ * dela, e não um novo que invalide o primeiro.
+ */
+export type PendenteDoPainel = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  criada_em: string
+  safra_nome: string | null
+  token_expira_em: string | null
+}
+
+export async function listarPendentes(): Promise<PendenteDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em),safras(nome)')
+    .eq('status', 'pendente_pagamento')
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw new Error(`inscricoes(pendentes): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  // ⚠️ Linha sem pessoa é IGNORADA em silêncio, e o silêncio é justificado:
+  // a FK de `inscricoes.pessoa_id` é `not null` (`008`), então o caso é
+  // impossível — e o `filter` existe só porque o tipo gerado não sabe
+  // disso. Transformá-lo em erro derrubaria a tela inteira por causa de
+  // uma linha que não pode existir.
+  return (data ?? [])
+    .filter((linha) => linha.pessoas)
+    .map((linha) => ({
+      inscricao_id: linha.id,
+      pessoa_id: linha.pessoas!.id,
+      nome: linha.pessoas!.nome,
+      email: linha.pessoas!.email,
+      telefone: linha.pessoas!.telefone,
+      criada_em: linha.created_at,
+      safra_nome: linha.safras?.nome ?? null,
+      token_expira_em: linha.pessoas!.token_expira_em,
+    }))
+}
+
+/**
+ * A lista de espera, com quem está esperando desde quando.
+ *
+ * ============================================================
+ * ⚠️ "HÁ QUANTO TEMPO" É DERIVADO DE `created_at`, NUNCA UMA FLAG (D-16)
+ * ============================================================
+ *
+ * A D-16 dá o desconto de "primeira semana" a quem entrou primeiro, e
+ * exige que isso seja DERIVADO: "uma coluna `primeira_semana boolean`
+ * depende de alguém lembrar de ligá-la no insert certo, e um dia não
+ * lembra; pior, ela pode ser ligada depois, à mão, para quem não é".
+ *
+ * Esta consulta devolve o carimbo cru e ordena por ele. Quem decide o
+ * corte é a Giovanna, olhando a data na tela — e a data que ela olha é a
+ * mesma que o banco guarda, sem intermediário que possa mentir.
+ *
+ * ⚠️ ⚠️ A DATA DE CORTE DA D-16 CONTINUA SEM SER DEFINIDA, e enquanto
+ * ela não existir o critério operacional é o que a própria decisão manda:
+ * "toda inscrição `lista_espera` migrada pela `010`" — um conjunto
+ * fechado e conhecido, porque a `010` recusa rodar duas vezes.
+ */
+export type EsperandoDoPainel = {
+  inscricao_id: string
+  pessoa_id: string
+  nome: string
+  email: string
+  telefone: string
+  criada_em: string
+  token_expira_em: string | null
+}
+
+export async function listarListaDeEspera(): Promise<EsperandoDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em)')
+    .eq('status', 'lista_espera')
+    .order('created_at', { ascending: true })
+
+  if (error) {
+    throw new Error(`inscricoes(espera): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return (data ?? [])
+    .filter((l) => l.pessoas)
+    .map((l) => ({
+      inscricao_id: l.id,
+      pessoa_id: l.pessoas!.id,
+      nome: l.pessoas!.nome,
+      email: l.pessoas!.email,
+      telefone: l.pessoas!.telefone,
+      criada_em: l.created_at,
+      token_expira_em: l.pessoas!.token_expira_em,
+    }))
+}
+
+/**
+ * Garante um convite vivo para esta pessoa e devolve o token.
+ *
+ * ============================================================
+ * ⚠️⚠️ TOKEN AINDA VÁLIDO NÃO É SOBRESCRITO — e esta é a linha que mais
+ *      importa desta função
+ * ============================================================
+ *
+ * Regenerar o token de quem já recebeu o convite INVALIDA o link que está
+ * na caixa de entrada dela. Ela clica, cai no fluxo limpo, e preenche o
+ * formulário inteiro de novo — exatamente o que o convite existe para
+ * evitar. E como o e-mail já foi disparado, não há como avisar: o link
+ * morto continua lá.
+ *
+ * É a mesma regra do `supabase/operacao/gerar_convites.sql`, e ela vale
+ * aqui com mais força: o botão do painel é feito para ser apertado duas
+ * vezes por engano.
+ *
+ * ⚠️ LER E DEPOIS ESCREVER É UMA CORRIDA, e ela é aceita: o único
+ * chamador é uma pessoa clicando num botão. Dois cliques simultâneos da
+ * mesma Giovanna produziriam dois tokens, o segundo vencendo — e o
+ * desfecho é um e-mail com link morto, que ela reenvia. Um lock aqui
+ * custaria mais do que o problema que resolve (D-08 aplicada a outro
+ * objeto).
+ *
+ * ⚠️ 32 BYTES, e é a ENTROPIA que defende a URL — não um rate limit. É a
+ * premissa do parágrafo de `GET /api/pessoa/:token` que explica por que
+ * não há rate limit lá. Se este número encolher, aquela análise morre
+ * junto.
+ */
+export async function garantirConvite(
+  pessoaId: string,
+  validadeEmDias: number,
+): Promise<{ token: string; expiraEm: string; reaproveitado: boolean }> {
+  const { data, error } = await supabase()
+    .from('pessoas')
+    .select('token_acesso,token_expira_em')
+    .eq('id', pessoaId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`pessoas(convite): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const atual = data?.[0]
+
+  if (atual?.token_acesso && atual.token_expira_em && new Date(atual.token_expira_em) > new Date()) {
+    return { token: atual.token_acesso, expiraEm: atual.token_expira_em, reaproveitado: true }
+  }
+
+  // `randomBytes` do Node e não `Math.random`: este valor é um segredo, e
+  // `Math.random` não é criptográfico — é previsível a partir de saídas
+  // anteriores. base64url porque `+`, `/` e `=` mudam de forma ao passar
+  // por uma URL, e um token que muda de forma não casa com nada quando
+  // volta.
+  const { randomBytes } = await import('node:crypto')
+  const token = randomBytes(32).toString('base64url')
+  const expiraEm = new Date(Date.now() + validadeEmDias * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error: erroUpdate } = await supabase()
+    .from('pessoas')
+    .update({ token_acesso: token, token_expira_em: expiraEm })
+    .eq('id', pessoaId)
+
+  if (erroUpdate) {
+    throw new Error(`pessoas(token): ${erroUpdate.code ?? 'sem código'} — ${erroUpdate.message}`)
+  }
+
+  return { token, expiraEm, reaproveitado: false }
+}
+
+/** Cupom na listagem do painel — a linha inteira, que é dela mesmo. */
+export type CupomDoPainel = Tables<'cupons'>
+
+export async function listarCupons(): Promise<CupomDoPainel[]> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('*')
+    .order('criado_em', { ascending: false })
+
+  if (error) {
+    throw new Error(`cupons(painel): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Cria o cupom no NOSSO banco. O espelho no Stripe é do chamador.
+ *
+ * ⚠️ A DIREÇÃO É UMA SÓ (D-07): nasce aqui, é espelhado lá. Cupom criado
+ * pelo Dashboard do Stripe não existe para o sistema — não aparece no
+ * painel, não tem contagem de uso, e a Giovanna não teria como saber que
+ * ele existe.
+ *
+ * ⚠️ ESTA FUNÇÃO NÃO CHAMA O STRIPE, e a separação é o que torna o estado
+ * intermediário honesto. A criação lá é uma chamada de rede que pode
+ * falhar depois de a linha estar gravada; `stripe_coupon_id` nulo
+ * significa exatamente isso — "existe aqui, ainda não existe lá" — e o
+ * painel mostra "não publicado" em vez de fingir que está pronto. Fundir
+ * as duas obrigaria a inventar uma transação que atravessa a fronteira do
+ * banco, que é o que não existe.
+ *
+ * ⚠️ NENHUMA VALIDAÇÃO DE DOMÍNIO AQUI. Percentual acima de 100, valor
+ * negativo, tipo inventado e `usos_atuais > usos_max` são recusados pelos
+ * CHECKs da `013`. Repetir as regras nesta camada criaria uma segunda
+ * cópia delas, e um dia as duas discordam — constraint no banco vence
+ * validação na aplicação (REPORT §9.9).
+ */
+export async function criarCupom(dados: {
+  codigo: string
+  tipo: string
+  valor: number
+  safraId: string | null
+  usosMax: number | null
+  expiraEm: string | null
+}): Promise<CupomDoPainel> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .insert({
+      codigo: dados.codigo,
+      tipo: dados.tipo,
+      valor: dados.valor,
+      safra_id: dados.safraId,
+      usos_max: dados.usosMax,
+      expira_em: dados.expiraEm,
+    })
+    .select('*')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons(insert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) throw new Error('cupons(insert): nenhuma linha devolvida')
+
+  return linha
+}
+
+/**
+ * Liga e desliga um cupom.
+ *
+ * ⚠️ É O BOTÃO DE PÂNICO DA GIOVANNA, e por isso ele é um `update` de uma
+ * coluna e não um `delete`. O cupom vazou num grupo de WhatsApp e ela
+ * precisa parar AGORA — sem apagar o histórico de quem já usou, que é
+ * informação financeira, e sem quebrar a FK de `assinaturas.cupom_id`.
+ *
+ * ⚠️ E DESLIGAR NÃO MEXE NO STRIPE. O `coupon` de lá continua existindo,
+ * inerte: quem decide se um desconto se aplica é `cupomInvalidoPorque`,
+ * do nosso lado, ANTES de a sessão ser criada. Apagar no Stripe não
+ * cancelaria desconto de assinatura nenhuma que já o tenha — só tiraria a
+ * nossa capacidade de reativar.
+ */
+export async function alternarCupom(cupomId: string, ativo: boolean): Promise<void> {
+  const { error } = await supabase().from('cupons').update({ ativo }).eq('id', cupomId)
+
+  if (error) {
+    throw new Error(`cupons(ativo): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+// ============================================================
+// O TOKEN DE ACESSO — identifica, e NÃO autoriza (D-10, D-15)
+// ============================================================
+
+/**
+ * O contato de quem chegou pelo link do convite. `null` quando o token
+ * não existe.
+ *
+ * ⚠️ ELA NÃO OLHA A VALIDADE, e a separação é a mesma de `buscarCupom` e
+ * `cupomInvalidoPorque`: a leitura tem uma resposta (existe ou não), o
+ * julgamento tem outra (venceu ou não), e o `token_expira_em` volta junto
+ * para quem chamou decidir. Fundir as duas produziria um `null` que
+ * significa duas coisas e um log que não sabe dizer qual delas aconteceu
+ * — "ninguém achou o token" e "o convite venceu" pedem respostas
+ * diferentes de quem opera.
+ *
+ * ⚠️ E ELA DEVOLVE DADO PESSOAL PARA QUEM TEM O TOKEN. É exatamente o que
+ * a D-10 pede — o link do convite pré-preenche a modal para que quem já
+ * se cadastrou não digite tudo de novo —, e é por isso que o token é um
+ * segredo de 32 bytes e não um id de banco: o que destranca este retorno
+ * precisa ser impossível de adivinhar.
+ *
+ * ⚠️ O QUE NÃO VOLTA: o perfil (`nivel_ingles`, `curso`, `periodo`,
+ * `disponibilidade`). Não é esquecimento — é a `008` sendo respeitada. O
+ * perfil descreve a pessoa NAQUELA safra, e por isso mora em `inscricoes`
+ * e não em `pessoas`: quem estava no 3º período em janeiro está no 5º em
+ * julho. Pré-preencher o perfil a partir de uma inscrição antiga
+ * apresentaria à pessoa uma resposta desatualizada JÁ MARCADA, que é a
+ * forma mais eficiente de gravar um dado errado — ela confirma sem ler,
+ * porque o campo já estava preenchido.
+ */
+export type PessoaDoToken = {
+  /**
+   * ⚠️ O `id` VEM PARA A DECISÃO, E NÃO PARA A RESPOSTA. Ele é o que
+   * permite procurar a inscrição pendente daquela pessoa (D-15) — e o
+   * corte que o impede de atravessar para o navegador é explícito, na
+   * montagem da resposta de `GET /api/pessoa/:token`. Um spread do objeto
+   * inteiro ali devolveria um id de banco a quem tem o token.
+   */
+  id: string
+  nome: string
+  email: string
+  telefone: string
+  token_expira_em: string | null
+}
+
+export async function buscarPessoaPorToken(token: string): Promise<PessoaDoToken | null> {
+  const { data, error } = await supabase()
+    .from('pessoas')
+    .select('id,nome,email,telefone,token_expira_em')
+    .eq('token_acesso', token)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`pessoas(token): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * O perfil que a pessoa já preencheu para a safra ABERTA, se houver
+ * inscrição pendente nela.
+ *
+ * ============================================================
+ * ⚠️ POR QUE O PERFIL VOLTA AQUI E NÃO EM `buscarPessoaPorToken`
+ * ============================================================
+ *
+ * `buscarPessoaPorToken` devolve só contato, e o comentário dela explica:
+ * o perfil descreve a pessoa NAQUELA safra (`008`), e pré-preencher a
+ * partir de uma inscrição antiga apresentaria uma resposta desatualizada
+ * já marcada — a forma mais eficiente de gravar dado errado, porque ela
+ * confirma sem ler.
+ *
+ * ⚠️ ISSO CONTINUA VERDADE PARA O CONVITE DA LISTA DE ESPERA, E É FALSO
+ * PARA QUEM ESTÁ EM `pendente_pagamento`. Quem abandonou o checkout
+ * preencheu o perfil PARA ESTA SAFRA, dias atrás — não há nada de velho
+ * nele. Fazê-la digitar tudo de novo é exatamente o atrito que a D-15
+ * existe para tirar ("sem a pessoa preencher nada de novo").
+ *
+ * A distinção, então, não é "convite sim, convite não": é **existe
+ * inscrição pendente NA SAFRA QUE ESTÁ ABERTA?**. Se existe, o perfil é
+ * atual por construção. Se não existe — lista de espera, ou pendência numa
+ * safra que já passou —, ele não volta, e ela preenche.
+ *
+ * `null` quando não há inscrição pendente naquela safra, que é o caso
+ * normal de quem vem pelo convite da D-10.
+ */
+export type PerfilPendente = {
+  nivel_ingles: string
+  curso: string
+  periodo: string
+  disponibilidade: string[]
+}
+
+export async function buscarPerfilPendente(
+  pessoaId: string,
+  safraId: string,
+): Promise<PerfilPendente | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('nivel_ingles,curso,periodo,disponibilidade')
+    .eq('pessoa_id', pessoaId)
+    .eq('safra_id', safraId)
+    .eq('status', 'pendente_pagamento')
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(perfil): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const l = data?.[0]
+
+  // ⚠️ Perfil incompleto não vira perfil pela metade. Um `curso` sem
+  // `periodo` preencheria metade do formulário e deixaria a outra vazia,
+  // e a pessoa não teria como saber que faltou — ela veria campos cheios
+  // e assumiria que estava tudo lá. Ou vem inteiro, ou não vem.
+  if (!l?.nivel_ingles || !l.curso || !l.periodo || !l.disponibilidade) return null
+
+  return {
+    nivel_ingles: l.nivel_ingles,
+    curso: l.curso,
+    periodo: l.periodo,
+    disponibilidade: l.disponibilidade,
+  }
+}
+
+/**
+ * O token venceu? `true` também quando não há data — ver abaixo.
+ *
+ * ⚠️ FUNÇÃO PURA, com `agora` POR PARÂMETRO, pelo mesmo motivo de
+ * `cupomInvalidoPorque`: uma função que lê o relógio por dentro só pode
+ * ser testada esperando o tempo passar.
+ *
+ * ⚠️ `token_expira_em` NULO CONTA COMO VENCIDO, e a escolha é deliberada.
+ * O CHECK `pessoas_token_tudo_ou_nada_check` da `017` torna esse par
+ * impossível de escrever — token sem validade é exatamente o link eterno
+ * que a D-10 proíbe —, então chegar aqui com nulo significa que alguém
+ * contornou o CHECK. Tratar como válido seria conceder acesso perpétuo
+ * justamente no caso em que o mecanismo falhou; tratar como vencido faz o
+ * link cair no fluxo limpo, que é o pior desfecho aceitável: a pessoa
+ * preenche o formulário do zero.
+ */
+export function tokenVenceu(pessoa: PessoaDoToken, agora: Date): boolean {
+  if (!pessoa.token_expira_em) return true
+  return new Date(pessoa.token_expira_em) <= agora
+}
+
+// ============================================================
+// CUPOM — nasce no nosso banco, é espelhado no Stripe (D-07)
+// ============================================================
+//
+// A direção é uma só, e nunca a inversa. Cupom criado pelo Dashboard do
+// Stripe não existe para o sistema: não aparece no painel, não tem
+// contagem de uso, e a Giovanna não teria como saber que ele existe.
+// Ver o cabeçalho da `013`.
+
+/** O recorte de `cupons` que a validação e o espelho precisam. */
+export type Cupom = Pick<
+  Tables<'cupons'>,
+  'id' | 'codigo' | 'tipo' | 'valor' | 'stripe_coupon_id' | 'safra_id' | 'usos_max' | 'usos_atuais' | 'expira_em' | 'ativo'
+>
+
+/**
+ * Acha o cupom pelo código digitado. `null` quando não existe.
+ *
+ * ⚠️ A BUSCA É POR `upper(codigo)`, e a normalização não é aqui — é o
+ * índice `cupons_codigo_upper_idx` da `013` que a torna propriedade do
+ * banco. A aluna digita `bemvinda`, `BemVinda` ou `BEMVINDA` e as três são
+ * o mesmo cupom. O `.toUpperCase()` desta função é o que faz a consulta
+ * casar com o índice funcional; a UNICIDADE continua sendo do banco, e não
+ * desta linha (REPORT §9.9).
+ *
+ * ⚠️ ESTA FUNÇÃO NÃO DECIDE SE O CUPOM VALE. Ela devolve a linha como
+ * está — inclusive expirada, esgotada ou inativa. Quem julga é
+ * `cupomAplicavel`, e a separação é deliberada: a leitura tem uma resposta
+ * (existe ou não), o julgamento tem várias (expirado, esgotado, de outra
+ * safra), e misturá-los produziria um `null` que significa cinco coisas
+ * diferentes e uma mensagem de erro que não sabe qual delas dizer.
+ */
+export async function buscarCupom(codigo: string): Promise<Cupom | null> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('id,codigo,tipo,valor,stripe_coupon_id,safra_id,usos_max,usos_atuais,expira_em,ativo')
+    .ilike('codigo', codigo.trim())
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons: ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * O mesmo cupom, pelo id. É o que o webhook tem em mãos.
+ *
+ * ⚠️ DUAS FUNÇÕES E NÃO UMA COM DOIS FILTROS, e a razão é o SDK: o tipo do
+ * resultado é inferido do TEXTO do `select`, que precisa ser um literal —
+ * uma constante compartilhada viraria `string` e a inferência desistiria
+ * (ver a nota em `buscarInscricaoParaEmail`). As duas listas de colunas
+ * são idênticas de propósito, e é o `Cupom` acima que as amarra: mudar uma
+ * sem a outra quebra o tipo.
+ */
+export async function buscarCupomPorId(id: string): Promise<Cupom | null> {
+  const { data, error } = await supabase()
+    .from('cupons')
+    .select('id,codigo,tipo,valor,stripe_coupon_id,safra_id,usos_max,usos_atuais,expira_em,ativo')
+    .eq('id', id)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`cupons(id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/** Grava o espelho do Stripe. Mesma janela de `salvarStripePriceId`. */
+export async function salvarStripeCouponId(cupomId: string, stripeCouponId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('cupons')
+    .update({ stripe_coupon_id: stripeCouponId })
+    .eq('id', cupomId)
+
+  if (error) {
+    throw new Error(`cupons(stripe_coupon_id): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Soma um uso. Devolve `false` quando alguém somou antes.
+ *
+ * Mesmo compare-and-swap de `contarCicloPago`, pela mesma razão: o
+ * PostgREST não sabe expressar `usos_atuais = usos_atuais + 1`, e ler para
+ * depois escrever abre a corrida clássica.
+ *
+ * ⚠️ O USO É CONTADO NO PAGAMENTO, E NÃO NA ABERTURA DO CHECKOUT. Contar
+ * ao criar a sessão gastaria o cupom de quem abriu a tela e desistiu — um
+ * cupom de 10 usos se esgotaria com 10 pessoas curiosas e zero vendas.
+ * Quem conta é o webhook, depois de `checkout.session.completed`.
+ *
+ * ⚠️ E ISSO ACEITA UM ESTOURO CONHECIDO: entre a validação (que só lê) e o
+ * pagamento não há trava, então onze pessoas podem concluir um cupom de
+ * dez. É a mesma escolha da D-08 para vagas — na escala do produto, um
+ * lock distribuído não se paga —, com uma diferença a favor: o CHECK
+ * `cupons_usos_check` da `013` recusa `usos_atuais > usos_max`, então o
+ * décimo primeiro uso falha no banco e vira log em vez de contagem
+ * mentirosa. O desconto já foi dado; o que não acontece é o número ficar
+ * errado.
+ */
+export async function contarUsoDeCupom(cupomId: string, usosLidos: number): Promise<boolean> {
+  const { count, error } = await supabase()
+    .from('cupons')
+    .update({ usos_atuais: usosLidos + 1 }, { count: 'exact' })
+    .eq('id', cupomId)
+    .eq('usos_atuais', usosLidos)
+
+  if (error) {
+    throw new Error(`cupons(usos_atuais): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return count === 1
+}
+
+/**
+ * Por que um cupom não vale — ou `null` quando ele vale.
+ *
+ * ⚠️ FUNÇÃO PURA, E É DE PROPÓSITO: ela não lê banco, não chama Stripe e
+ * não depende de relógio que não lhe seja passado. É a única parte da
+ * regra de cupom que dá para testar sem dublê nenhum, e é onde estão as
+ * quatro formas de um desconto não valer. O resto do caminho é
+ * encanamento.
+ *
+ * As quatro, e cada uma com o motivo de existir:
+ *
+ *   INATIVO      → a Giovanna desligou. É o botão de pânico dela: o cupom
+ *                  vazou num grupo de WhatsApp e ela precisa parar agora,
+ *                  sem apagar o histórico de quem já usou.
+ *   EXPIRADO     → `expira_em` passou. Campanha tem fim.
+ *   ESGOTADO     → `usos_max` atingido.
+ *   OUTRA SAFRA  → `safra_id` preenchido e diferente. ⚠️ `safra_id` NULO
+ *                  significa "vale em qualquer safra" — não é ausência de
+ *                  dado, é um valor de negócio (o cupom de campanha que
+ *                  funciona na turma que estiver aberta, `013`).
+ *
+ * ⚠️ NÃO ESPELHADO NO STRIPE **TAMBÉM** É MOTIVO. `stripe_coupon_id` nulo
+ * significa que o cupom existe aqui e ainda não existe lá — estado real e
+ * transitório, porque a criação no Stripe é uma chamada de rede que pode
+ * falhar depois de a linha estar gravada. O checkout tenta espelhar antes
+ * de aplicar; se ainda assim não houver espelho, o desconto não pode ser
+ * aplicado, e fingir que pode cobraria o valor cheio de quem viu "cupom
+ * aplicado" na tela.
+ *
+ * ⚠️ `agora` É PARÂMETRO, e não `new Date()` aqui dentro. Uma função que
+ * lê o relógio por conta própria só pode ser testada esperando o tempo
+ * passar — e o teste de expiração viraria um teste que passa hoje e falha
+ * em 2027.
+ */
+export type MotivoCupomInvalido =
+  | 'inexistente'
+  | 'inativo'
+  | 'expirado'
+  | 'esgotado'
+  | 'outra_safra'
+  | 'sem_espelho'
+
+export function cupomInvalidoPorque(
+  cupom: Cupom | null,
+  safraId: string,
+  agora: Date,
+): MotivoCupomInvalido | null {
+  if (!cupom) return 'inexistente'
+  if (!cupom.ativo) return 'inativo'
+  if (cupom.expira_em !== null && new Date(cupom.expira_em) <= agora) return 'expirado'
+  if (cupom.usos_max !== null && cupom.usos_atuais >= cupom.usos_max) return 'esgotado'
+  if (cupom.safra_id !== null && cupom.safra_id !== safraId) return 'outra_safra'
+  if (!cupom.stripe_coupon_id) return 'sem_espelho'
+  return null
+}
+
+// ============================================================
+// O LADO DO BANCO DO WEBHOOK
+// ============================================================
+//
+// Tudo daqui para baixo é escrito por `app/api/stripe/webhook/route.ts` e
+// por mais ninguém. Nenhuma destas funções é alcançável pelo formulário
+// público.
+
+/**
+ * Os sete estados de uma inscrição, direto do CHECK da `009`.
+ *
+ * Escrito à mão e não derivado dos tipos gerados de propósito: o
+ * `supabase gen types` traz `status: string`, porque um CHECK de coluna
+ * não vira enum de TypeScript. Sem esta união, `mudarStatusInscricao(id,
+ * 'aprovda')` compilaria e falharia no banco, em produção, no meio de um
+ * webhook — que é o pior lugar para descobrir um erro de digitação.
+ *
+ * ⚠️ NÃO EXISTE 'aprovada' NEM 'rejeitada' (D-02). Não há entrevista,
+ * análise ou triagem: quem conclui o checkout está dentro.
+ */
+export type StatusInscricao =
+  | 'lista_espera'
+  | 'pendente_pagamento'
+  | 'confirmada'
+  | 'ativa'
+  | 'inadimplente'
+  | 'concluida'
+  | 'cancelada'
+
+/** O código do Postgres para violação de unique. Ver o uso abaixo. */
+const UNIQUE_VIOLATION = '23505'
+
+/**
+ * Reserva o evento. `true` = é nosso, processe. `false` = já processado.
+ *
+ * ============================================================
+ * ⚠️ O INSERT **É** O TESTE — não há `select` antes
+ * ============================================================
+ *
+ * O Stripe reentrega: se o endpoint demorar, cair, devolver 500, ou se a
+ * resposta se perder no caminho de volta, o mesmo evento chega de novo — e
+ * pode chegar várias vezes, em qualquer ordem, dias depois. Duas entregas
+ * do mesmo evento podem chegar SIMULTANEAMENTE, em duas instâncias
+ * serverless diferentes.
+ *
+ * Um `select` seguido de `insert` tem uma janela entre os dois comandos, e
+ * nessa janela as duas leem "não existe" e as duas processam. A janela é
+ * de milissegundos e é exatamente onde a reentrega cai, porque reentrega
+ * em rajada é o caso normal quando o endpoint fica lento. Com a PK, a
+ * segunda requisição recebe `23505`, que aqui significa, sem ambiguidade
+ * nenhuma, "outra instância já pegou este evento". Ver o cabeçalho da
+ * `014`.
+ *
+ * ⚠️ QUALQUER OUTRO CÓDIGO DE ERRO É FALHA, e não "provavelmente
+ * duplicata". `23505` só pode vir da PK — é a única unique da tabela.
+ */
+export async function reservarEventoStripe(evento: {
+  id: string
+  tipo: string
+  payload: unknown
+}): Promise<boolean> {
+  const { error } = await supabase().from('eventos_stripe').insert({
+    stripe_event_id: evento.id,
+    tipo: evento.tipo,
+    // ⚠️ O payload guarda o evento inteiro, cru, e ele CONTÉM DADO
+    // PESSOAL — e-mail, nome, últimos quatro dígitos do cartão. É dado
+    // pessoal sob LGPD como qualquer outro (ver a `014`). Ele existe para
+    // permitir reprocessar um evento à mão quando um handler tiver bug,
+    // sem depender de o Stripe ainda ter aquele evento na fila de
+    // reentrega — a janela dele é de dias.
+    payload: evento.payload as never,
+  })
+
+  if (!error) return true
+  if (error.code === UNIQUE_VIOLATION) return false
+
+  throw new Error(`eventos_stripe: ${error.code ?? 'sem código'} — ${error.message}`)
+}
+
+/**
+ * Devolve o evento para a fila, apagando a reserva.
+ *
+ * ============================================================
+ * ⚠️ ESTA FUNÇÃO EXISTE POR CAUSA DE UMA ARMADILHA REAL, E ELA É A
+ *    CONSEQUÊNCIA DIRETA DE "O INSERT VEM PRIMEIRO"
+ * ============================================================
+ *
+ * A `014` manda gravar o evento ANTES de qualquer efeito, e a razão é a
+ * corrida descrita acima. Só que as duas regras — "grava antes" e
+ * "reentrega não conta duas vezes" — juntas produzem um terceiro
+ * comportamento que ninguém pediu:
+ *
+ *   evento gravado → efeito falha → devolvemos 500 → o Stripe reentrega
+ *   → a reserva encontra o evento JÁ GRAVADO → nós pulamos o
+ *   processamento → **o efeito nunca acontece.**
+ *
+ * Uma cobrança confirmada que não vira `ativa`, para sempre, sem erro
+ * nenhum aparecendo em lugar nenhum depois da primeira tentativa. É o pior
+ * tipo de falha que este projeto pode ter: silenciosa, financeira, e
+ * indistinguível de sucesso.
+ *
+ * A saída é a reserva ser CANCELÁVEL. Quem processa apaga a linha antes de
+ * devolver 500, e a reentrega volta a ser um evento novo. O intervalo em
+ * que a linha existe sem efeito correspondente é o intervalo de uma
+ * requisição — e ele é exatamente o que impede a outra instância de
+ * processar em paralelo, que é para o que ele foi criado.
+ *
+ * ⚠️ NÃO ENGOLIR O ERRO DAQUI seria pior do que engoli-lo: se o delete
+ * falhar, o 500 já vai ser devolvido de qualquer forma, e trocar a causa
+ * real (o handler quebrou) por uma consequência (o delete quebrou) faz o
+ * log apontar para o lugar errado. Quem chama registra as duas coisas.
+ */
+export async function liberarEventoStripe(eventoId: string): Promise<void> {
+  const { error } = await supabase()
+    .from('eventos_stripe')
+    .delete()
+    .eq('stripe_event_id', eventoId)
+
+  if (error) {
+    throw new Error(`eventos_stripe(delete): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/**
+ * Cria ou atualiza a assinatura espelhada. Idempotente pelo
+ * `stripe_subscription_id`.
+ *
+ * ⚠️ `upsert` COM `onConflict` NO ID DO STRIPE, e não `insert`. O mesmo
+ * evento pode ser processado depois de uma liberação (ver acima), e o
+ * `c43` chama isto de novo a cada fatura paga para manter `status_stripe`
+ * fresco. Um `insert` puro falharia com `23505` na segunda vez e
+ * transformaria uma reentrega normal num 500 eterno.
+ *
+ * ⚠️ `ciclos_pagos` NÃO ESTÁ AQUI, e a ausência é a decisão. Ele "só anda
+ * por `invoice.paid`" (`012`), e um upsert que o incluísse o
+ * SOBRESCREVERIA com o valor que o chamador supõe — zerando a contagem de
+ * quem já pagou três meses toda vez que o status da assinatura mudasse.
+ * Quem o move é `contarCicloPago`, e só ele.
+ */
+export async function registrarAssinatura(dados: {
+  inscricaoId: string
+  stripeCustomerId: string
+  stripeSubscriptionId: string
+  stripeCheckoutSessionId: string | null
+  statusStripe: string
+  trialEnd: string | null
+  cancelAt: string | null
+  cupomId: string | null
+}): Promise<void> {
+  const { error } = await supabase()
+    .from('assinaturas')
+    .upsert(
+      {
+        inscricao_id: dados.inscricaoId,
+        stripe_customer_id: dados.stripeCustomerId,
+        stripe_subscription_id: dados.stripeSubscriptionId,
+        stripe_checkout_session_id: dados.stripeCheckoutSessionId,
+        status_stripe: dados.statusStripe,
+        trial_end: dados.trialEnd,
+        cancel_at: dados.cancelAt,
+        cupom_id: dados.cupomId,
+        atualizado_em: new Date().toISOString(),
+      },
+      { onConflict: 'stripe_subscription_id' },
+    )
+
+  if (error) {
+    throw new Error(`assinaturas(upsert): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+}
+
+/** O recorte de `assinaturas` que os handlers do webhook precisam. */
+export type AssinaturaEspelhada = Pick<
+  Tables<'assinaturas'>,
+  'id' | 'inscricao_id' | 'ciclos_pagos' | 'cancel_at'
+>
+
+/**
+ * A assinatura, pelo id do Stripe. `null` quando não conhecemos.
+ *
+ * ⚠️ `null` É UM CASO REAL E NÃO É ERRO: `invoice.paid` pode chegar ANTES
+ * de `checkout.session.completed` — o Stripe não garante ordem de
+ * entrega, e as duas coisas acontecem no mesmo segundo do lado de lá.
+ * Quem trata é o handler, devolvendo 500 para o evento ser reentregue
+ * depois, quando a linha já existir. Tratar como erro fatal ou como "não
+ * faz nada" resolveria a mesma coisa de duas formas erradas: a primeira
+ * enche o log de falha que se resolve sozinha, a segunda perde a fatura.
+ */
+export async function buscarAssinaturaPorSubscription(
+  stripeSubscriptionId: string,
+): Promise<AssinaturaEspelhada | null> {
+  const { data, error } = await supabase()
+    .from('assinaturas')
+    .select('id,inscricao_id,ciclos_pagos,cancel_at')
+    .eq('stripe_subscription_id', stripeSubscriptionId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`assinaturas(select): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * Soma um ciclo pago. Devolve `false` quando alguém somou antes.
+ *
+ * ============================================================
+ * ⚠️ COMPARE-AND-SWAP, E NÃO `ciclos_pagos = ciclos_pagos + 1`
+ * ============================================================
+ *
+ * O PostgREST não sabe expressar um `update` relativo a uma coluna: tudo
+ * que atravessa é um valor literal. Ler e escrever em seguida abre a
+ * corrida clássica — duas instâncias leem 3, as duas escrevem 4, e um mês
+ * de curso desaparece da contagem.
+ *
+ * O `.eq('ciclos_pagos', cicloLido)` no `update` é o que fecha a janela: o
+ * Postgres avalia a condição no momento da escrita, então só UMA das duas
+ * encontra a linha com o valor que leu. A outra atualiza zero linhas e
+ * descobre isso pelo `count`, sem erro nenhum. É a mesma ideia da unique
+ * do evento — a barreira é o próprio comando, não uma verificação antes
+ * dele.
+ *
+ * ⚠️ E O `false` NÃO É FALHA. Quem chama já sabe que o efeito foi
+ * aplicado por outra tentativa; refazer seria contar duas vezes o mesmo
+ * mês, que é exatamente o que a `014` existe para impedir. Devolver erro
+ * aqui faria o webhook responder 500 e o Stripe reentregar um evento que
+ * já produziu todo o efeito que tinha para produzir.
+ *
+ * A idempotência da `014` já torna isto raro; ele é a segunda tranca, para
+ * o caso de uma reserva liberada e reprocessada em paralelo.
+ */
+export async function contarCicloPago(
+  assinaturaId: string,
+  ciclosLidos: number,
+): Promise<boolean> {
+  const { count, error } = await supabase()
+    .from('assinaturas')
+    .update(
+      { ciclos_pagos: ciclosLidos + 1, atualizado_em: new Date().toISOString() },
+      { count: 'exact' },
+    )
+    .eq('id', assinaturaId)
+    .eq('ciclos_pagos', ciclosLidos)
+
+  if (error) {
+    throw new Error(`assinaturas(ciclos_pagos): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return count === 1
+}
+
+/** O contrato travado de uma inscrição, do jeito que o banco o guarda. */
+export type TravadosDaInscricao = Pick<
+  Tables<'inscricoes'>,
+  'valor_mensal_travado' | 'duracao_meses_travada' | 'data_primeira_cobranca_travada'
+>
+
+/**
+ * Os três travados de uma inscrição. `null` quando a inscrição não existe.
+ *
+ * ⚠️ QUEM PRECISA DISTO É O WEBHOOK, e a razão é a D-05 no lugar onde ela
+ * de fato acontece. `cancel_at` = `data_primeira_cobranca + duracao_meses`,
+ * e as duas parcelas dessa conta têm que sair da INSCRIÇÃO, nunca da
+ * safra: entre o checkout e o webhook a Giovanna pode ter mudado o preço
+ * ou a duração da safra, e a assinatura que está sendo criada é a do
+ * contrato que a pessoa aceitou (D-06). Ler da safra aqui faria uma
+ * assinatura terminar num mês que ninguém combinou com ninguém.
+ *
+ * Os três podem vir nulos numa linha legítima — lista de espera nunca tem
+ * travado (CHECK da `015`) —, e por isso quem chama precisa tratar o caso.
+ * No caminho do webhook, travado nulo significa que a inscrição chegou a
+ * `confirmada` sem contrato, que é estado impossível pelo próprio CHECK: é
+ * falha, não ausência.
+ */
+export async function buscarTravadosDaInscricao(
+  inscricaoId: string,
+): Promise<TravadosDaInscricao | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('valor_mensal_travado,duracao_meses_travada,data_primeira_cobranca_travada')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(travados): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0] ?? null
+}
+
+/**
+ * Tudo que o e-mail de confirmação precisa saber, numa consulta só.
+ *
+ * ⚠️ ESTE É O RECORTE MAIS LARGO DE DADO PESSOAL DO PROJETO, e ele existe
+ * por uma razão específica: o e-mail de confirmação da aluna deixou de ser
+ * disparado no insert (ele diria "confirmada" para quem não pagou, e pela
+ * D-02 é pagar que faz entrar) e passou a sair do webhook. Só que o
+ * webhook recebe um evento do Stripe — ele não sabe o nome de ninguém.
+ *
+ * O corte continua explícito e continua sendo o mínimo: nome, e-mail,
+ * telefone e o perfil, que é literalmente o que o corpo da mensagem
+ * imprime. Fora ficam `consent_text`, `consent_at`, `status`, os travados
+ * e os ids — nada disso é lido para escrever o e-mail.
+ *
+ * ⚠️ E ELE NÃO ATRAVESSA PARA NAVEGADOR NENHUM. O único chamador é
+ * `app/api/stripe/webhook/route.ts`, que usa o resultado para chamar
+ * `confirmarInscricao` e joga fora. Se um dia isto for parar numa rota que
+ * responde a um cliente, a pergunta certa antes de aceitar é por que uma
+ * tela precisa do telefone de alguém.
+ */
+export type InscricaoParaEmail = {
+  nome: string
+  email: string
+  telefone: string
+  nivel_ingles: NivelIngles
+  curso: string
+  periodo: string
+  disponibilidade: DiaDaSemana[]
+  safra: { nome: string; data_inicio_aulas: string } | null
+}
+
+/**
+ * A inscrição com a pessoa e a safra embutidas. `null` quando não dá para
+ * escrever o e-mail.
+ *
+ * ⚠️ `null` AQUI NÃO É ERRO, E TAMBÉM NÃO É ROTINA. Ele acontece quando o
+ * perfil está incompleto — o que é possível nas linhas HERDADAS da `010`,
+ * onde `consent` e perfil podem ser nulos porque `null` significa "não
+ * sabemos" e não houve backfill. Uma dessas linhas não pode virar e-mail:
+ * faltaria o nível de inglês, o curso, o período. Quem chama registra e
+ * segue — um e-mail que não sai não pode derrubar um pagamento que
+ * aconteceu.
+ *
+ * ⚠️ O `join` é feito pelo PostgREST (`pessoas(...)`, `safras(...)`), e não
+ * por duas consultas seguidas. Duas consultas seriam duas leituras
+ * separadas no tempo, e entre elas a Giovanna pode ter editado a safra —
+ * o e-mail sairia com o nome de uma safra e a data de outra. Uma consulta
+ * é um instante só.
+ */
+export async function buscarInscricaoParaEmail(
+  inscricaoId: string,
+): Promise<InscricaoParaEmail | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    // ⚠️ UMA STRING LITERAL, e não uma concatenação por mais legível que
+    // ela pareça. O SDK do Supabase INFERE O TIPO DO RESULTADO a partir do
+    // texto deste `select` — é um parser de tipos sobre o literal. Quebrar
+    // a string em pedaços com `+` produz `string` em vez de um literal, a
+    // inferência desiste, e o retorno vira um tipo de erro onde nenhuma
+    // coluna existe. O erro que aparece é críptico (`Property 'pessoas'
+    // does not exist on type '{ error: true } & String'`) e não menciona a
+    // causa.
+    .select('nivel_ingles,curso,periodo,disponibilidade,pessoas(nome,email,telefone),safras(nome,data_inicio_aulas)')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(email): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const linha = data?.[0]
+  if (!linha) return null
+
+  const { pessoas, safras, nivel_ingles, curso, periodo, disponibilidade } = linha
+
+  // O perfil é tudo-ou-nada para efeito de e-mail: sem qualquer um destes
+  // a mensagem sairia com um buraco no meio. Ver o ⚠️ acima sobre as
+  // linhas herdadas da `010`.
+  if (!pessoas || !nivel_ingles || !curso || !periodo || !disponibilidade) return null
+
+  return {
+    nome: pessoas.nome,
+    email: pessoas.email,
+    telefone: pessoas.telefone,
+    // ⚠️ Os dois `as` são a mesma limitação de sempre: `supabase gen types`
+    // traz `text` como `string`, porque um CHECK de coluna não vira união
+    // de TypeScript. Quem garante o domínio é o CHECK da `002`/`009`, e a
+    // conversão aqui é a fronteira onde o dado do banco vira dado do
+    // domínio — o mesmo lugar onde ela sempre esteve, e não um `any`
+    // espalhado adiante.
+    nivel_ingles: nivel_ingles as NivelIngles,
+    curso,
+    periodo,
+    disponibilidade: disponibilidade as DiaDaSemana[],
+    safra: safras ?? null,
+  }
+}
+
+/**
+ * Move o estado da inscrição. É a única escrita de `status` do sistema
+ * fora da criação.
+ *
+ * ⚠️ NENHUMA VALIDAÇÃO DE TRANSIÇÃO AQUI, e a ausência é decisão. Uma
+ * máquina de estados escrita nesta camada seria a segunda cópia de uma
+ * regra que o banco já tem em parte (o CHECK da `009` amarra o par
+ * safra/status) e que a ordem de entrega do Stripe não respeita: uma
+ * `invoice.paid` pode chegar antes de `checkout.session.completed`, e um
+ * guarda que recusasse `pendente_pagamento → ativa` bloquearia um
+ * pagamento verdadeiro por causa da ordem em que dois pacotes chegaram
+ * pela rede.
+ *
+ * O que protege contra escrita torta é o par (evento verificado,
+ * idempotência) — não uma tabela de transições permitidas que teria que
+ * prever toda ordem possível de entrega.
+ */
+export async function mudarStatusInscricao(
+  inscricaoId: string,
+  status: StatusInscricao,
+): Promise<void> {
+  const { error } = await supabase()
+    .from('inscricoes')
+    .update({ status })
+    .eq('id', inscricaoId)
+
+  if (error) {
+    throw new Error(`inscricoes(status): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
 }

@@ -14,6 +14,137 @@ export type Database = {
   }
   public: {
     Tables: {
+      assinaturas: {
+        Row: {
+          atualizado_em: string
+          cancel_at: string | null
+          ciclos_pagos: number
+          criado_em: string
+          cupom_id: string | null
+          id: string
+          inscricao_id: string
+          status_stripe: string
+          stripe_checkout_session_id: string | null
+          stripe_customer_id: string
+          stripe_subscription_id: string
+          trial_end: string | null
+        }
+        Insert: {
+          atualizado_em?: string
+          cancel_at?: string | null
+          ciclos_pagos?: number
+          criado_em?: string
+          cupom_id?: string | null
+          id?: string
+          inscricao_id: string
+          status_stripe: string
+          stripe_checkout_session_id?: string | null
+          stripe_customer_id: string
+          stripe_subscription_id: string
+          trial_end?: string | null
+        }
+        Update: {
+          atualizado_em?: string
+          cancel_at?: string | null
+          ciclos_pagos?: number
+          criado_em?: string
+          cupom_id?: string | null
+          id?: string
+          inscricao_id?: string
+          status_stripe?: string
+          stripe_checkout_session_id?: string | null
+          stripe_customer_id?: string
+          stripe_subscription_id?: string
+          trial_end?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assinaturas_cupom_id_fkey"
+            columns: ["cupom_id"]
+            isOneToOne: false
+            referencedRelation: "cupons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "assinaturas_inscricao_id_fkey"
+            columns: ["inscricao_id"]
+            isOneToOne: true
+            referencedRelation: "inscricoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cupons: {
+        Row: {
+          ativo: boolean
+          codigo: string
+          criado_em: string
+          expira_em: string | null
+          id: string
+          safra_id: string | null
+          stripe_coupon_id: string | null
+          tipo: string
+          usos_atuais: number
+          usos_max: number | null
+          valor: number
+        }
+        Insert: {
+          ativo?: boolean
+          codigo: string
+          criado_em?: string
+          expira_em?: string | null
+          id?: string
+          safra_id?: string | null
+          stripe_coupon_id?: string | null
+          tipo: string
+          usos_atuais?: number
+          usos_max?: number | null
+          valor: number
+        }
+        Update: {
+          ativo?: boolean
+          codigo?: string
+          criado_em?: string
+          expira_em?: string | null
+          id?: string
+          safra_id?: string | null
+          stripe_coupon_id?: string | null
+          tipo?: string
+          usos_atuais?: number
+          usos_max?: number | null
+          valor?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cupons_safra_id_fkey"
+            columns: ["safra_id"]
+            isOneToOne: false
+            referencedRelation: "safras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      eventos_stripe: {
+        Row: {
+          payload: Json
+          recebido_em: string
+          stripe_event_id: string
+          tipo: string
+        }
+        Insert: {
+          payload: Json
+          recebido_em?: string
+          stripe_event_id: string
+          tipo: string
+        }
+        Update: {
+          payload?: Json
+          recebido_em?: string
+          stripe_event_id?: string
+          tipo?: string
+        }
+        Relationships: []
+      }
       grupos: {
         Row: {
           ativo: boolean
@@ -59,7 +190,9 @@ export type Database = {
           consent_text: string | null
           created_at: string
           curso: string | null
+          data_primeira_cobranca_travada: string | null
           disponibilidade: string[] | null
+          duracao_meses_travada: number | null
           grupo_id: string | null
           id: string
           nivel_ingles: string | null
@@ -67,6 +200,7 @@ export type Database = {
           pessoa_id: string
           safra_id: string | null
           status: string
+          valor_mensal_travado: number | null
         }
         Insert: {
           consent?: boolean | null
@@ -74,7 +208,9 @@ export type Database = {
           consent_text?: string | null
           created_at?: string
           curso?: string | null
+          data_primeira_cobranca_travada?: string | null
           disponibilidade?: string[] | null
+          duracao_meses_travada?: number | null
           grupo_id?: string | null
           id?: string
           nivel_ingles?: string | null
@@ -82,6 +218,7 @@ export type Database = {
           pessoa_id: string
           safra_id?: string | null
           status: string
+          valor_mensal_travado?: number | null
         }
         Update: {
           consent?: boolean | null
@@ -89,7 +226,9 @@ export type Database = {
           consent_text?: string | null
           created_at?: string
           curso?: string | null
+          data_primeira_cobranca_travada?: string | null
           disponibilidade?: string[] | null
+          duracao_meses_travada?: number | null
           grupo_id?: string | null
           id?: string
           nivel_ingles?: string | null
@@ -97,6 +236,7 @@ export type Database = {
           pessoa_id?: string
           safra_id?: string | null
           status?: string
+          valor_mensal_travado?: number | null
         }
         Relationships: [
           {
@@ -129,6 +269,8 @@ export type Database = {
           id: string
           nome: string
           telefone: string
+          token_acesso: string | null
+          token_expira_em: string | null
         }
         Insert: {
           created_at?: string
@@ -136,6 +278,8 @@ export type Database = {
           id?: string
           nome: string
           telefone: string
+          token_acesso?: string | null
+          token_expira_em?: string | null
         }
         Update: {
           created_at?: string
@@ -143,6 +287,8 @@ export type Database = {
           id?: string
           nome?: string
           telefone?: string
+          token_acesso?: string | null
+          token_expira_em?: string | null
         }
         Relationships: []
       }
@@ -258,21 +404,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      criar_inscricao: {
-        Args: {
-          p_consent_at: string
-          p_consent_text: string
-          p_curso: string
-          p_disponibilidade: string[]
-          p_email: string
-          p_nivel_ingles: string
-          p_nome: string
-          p_periodo: string
-          p_safra_id?: string
-          p_telefone: string
-        }
-        Returns: boolean
-      }
+      criar_inscricao:
+        | {
+            Args: {
+              p_consent_at: string
+              p_consent_text: string
+              p_curso: string
+              p_disponibilidade: string[]
+              p_email: string
+              p_nivel_ingles: string
+              p_nome: string
+              p_periodo: string
+              p_safra_id?: string
+              p_telefone: string
+            }
+            Returns: boolean
+          }
+        | {
+            Args: {
+              p_consent_at: string
+              p_consent_text: string
+              p_curso: string
+              p_data_primeira_cobranca_travada: string
+              p_disponibilidade: string[]
+              p_duracao_meses_travada: number
+              p_email: string
+              p_nivel_ingles: string
+              p_nome: string
+              p_periodo: string
+              p_safra_id?: string
+              p_telefone: string
+              p_valor_mensal_travado: number
+            }
+            Returns: {
+              criada: boolean
+              data_primeira_cobranca_travada: string
+              duracao_meses_travada: number
+              inscricao_id: string
+              valor_mensal_travado: number
+            }[]
+          }
     }
     Enums: {
       [_ in never]: never

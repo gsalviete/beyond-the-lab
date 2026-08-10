@@ -288,6 +288,84 @@ esteja.
 
 ---
 
+## D-15 · Pagamento pendente é uma fila que a Giovanna trabalha à mão
+
+Decidida em **08/08/2026**.
+
+Inscrição em `pendente_pagamento` — alguém que abriu o checkout e não
+concluiu, ou que se cadastrou antes de existir checkout — **aparece no
+painel numa fila própria, com aviso**. A Giovanna vê a pendência e
+dispara um e-mail para a pessoa. Esse e-mail leva um link que abre o
+pagamento **daquela inscrição**, direto, sem a pessoa preencher nada de
+novo.
+
+*Por quê:* o estado `pendente_pagamento` é um beco sem saída para quem
+está dentro dele. A pessoa não tem como sair sozinha — não sabe que está
+pendente, e refazer o formulário devolve "você já está inscrita". Sem
+esta decisão, a única saída é a Giovanna abrir o Supabase Studio, o que
+a D-07 proíbe. A fila transforma um estado morto numa ação que ela sabe
+tomar.
+
+**Obriga:** o painel separa `pendente_pagamento` dos demais e mostra há
+quanto tempo cada uma está parada.
+
+⚠️ **O LINK NÃO CARREGA O `inscricao_id` CRU, e isto não é detalhe de
+implementação — é a decisão.**
+
+A ideia original era mandar o id da inscrição na URL. Ele não serve:
+uma URL é copiada, encaminhada, indexada e fica em histórico de
+navegador para sempre. Um id que abre checkout é, na prática, uma
+credencial — e uma credencial sem expiração, exatamente o que a **D-10**
+proíbe ("token em URL postada publicamente; token sem expiração").
+
+O mecanismo é o **token de acesso da D-10** (`pessoas.token_acesso` +
+`token_expira_em`, migração `017`, `c51`), que já existe no plano para o
+convite da base atual. Ele expira, identifica a pessoa e **não
+autoriza** — chegando por ele, o servidor procura a inscrição pendente
+daquela pessoa e abre a sessão. Um mecanismo, dois usos; nenhuma
+credencial eterna em e-mail.
+
+**Proíbe:** `inscricao_id` ou qualquer id de banco como parâmetro que
+destranque pagamento.
+
+---
+
+## D-16 · Quem entrou na primeira semana tem desconto, e "primeira semana" é derivado
+
+Decidida em **08/08/2026**.
+
+As pessoas que já estão na base — a lista de espera que o corte 1
+migrou — **aparecem no painel com o mesmo aviso de pendência da D-15** e
+**têm desconto** quando forem convidadas a pagar.
+
+*Por quê:* elas se cadastraram quando não havia nada para comprar,
+algumas esperando há meses. São a base mais interessada que o produto
+tem, e foram as únicas a quem o sistema não pôde oferecer nada.
+
+**Obriga — o desconto é um CUPOM, não um preço especial.** Ele passa por
+`cupons` e pelo espelho no Stripe (D-07), como qualquer outro. Um
+segundo caminho de preço criaria uma inscrição cujo valor não vem nem da
+safra nem de um cupom, e nada no painel saberia explicar de onde saiu.
+
+**Obriga — "primeira semana" é DERIVADO de `inscricoes.created_at`,
+nunca uma flag.** Uma coluna `primeira_semana boolean` depende de alguém
+lembrar de ligá-la no insert certo, e um dia não lembra; pior, ela pode
+ser ligada depois, à mão, para quem não é. Derivar de um carimbo que já
+existe e que ninguém escreve à mão é a diferença entre mecanismo e
+disciplina (`REPORT.md` §8.3).
+
+⚠️ **A DATA DE CORTE AINDA NÃO FOI DEFINIDA, e sem ela a decisão não
+executa.** Falta responder: primeira semana **a partir de quando** — do
+primeiro cadastro da base, da abertura da lista de espera, ou de uma
+data escolhida a dedo? O valor entra como constante única, com o
+raciocínio ao lado, e **não** espalhado em query.
+
+⚠️ Enquanto a data não existir, o critério operacional é "toda inscrição
+`lista_espera` migrada pela `010`" — que é um conjunto fechado e
+conhecido, porque a `010` recusa rodar duas vezes.
+
+---
+
 ## O que NÃO muda
 
 Direto do `REPORT.md` §9, e continua valendo:

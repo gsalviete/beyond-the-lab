@@ -16,15 +16,7 @@
 // que importam. Ver "AS DUAS PONTAS" no fim.
 // ============================================================
 import { describe, expect, it } from 'vitest'
-import {
-  DDDS_VALIDOS,
-  E164_BR_REGEX,
-  e164EhValido,
-  mascararTelefone,
-  paraE164,
-  somenteDigitos,
-  telefoneEhValido,
-} from '@/lib/telefone'
+import { DDDS_VALIDOS, E164_BR_REGEX, e164EhValido, mascararTelefone, paraE164, paraNacional, somenteDigitos, telefoneEhValido } from '@/lib/telefone'
 
 /** Um celular plausível para um DDD: nono dígito 9 + 8 dígitos. */
 const celular = (ddd: number | string, resto = '98765432') =>
@@ -279,5 +271,61 @@ describe('as duas pontas concordam (D7)', () => {
       // O que o banco guarda volta a ser o que a tela mostrava.
       expect(mascararTelefone(e164!.slice(3))).toBe(mascarado)
     }
+  })
+})
+
+// ============================================================
+// `paraNacional` — o caminho de volta, e o bug que ele conserta
+//
+// ⚠️ ELE NASCEU DE UMA FALHA EM USO REAL (10/08/2026). O convite (D-10,
+// D-15) pré-preenche o telefone a partir do banco, que guarda E.164
+// (`+5521987654321`, TREZE dígitos). Mascarar isso direto produzia
+// `(55) 21987-64321` — o código do país virando DDD.
+//
+// E o estrago não era cosmético: `telefoneEhValido` exige exatamente onze
+// dígitos, então a pessoa abria o link, encontrava o campo preenchido, e
+// era barrada com "digite um celular válido" num campo que ela não
+// digitou.
+// ============================================================
+describe('paraNacional', () => {
+  it('E.164 do banco vira a máscara nacional', () => {
+    expect(paraNacional('+5521987654321')).toBe('(21) 98765-4321')
+  })
+
+  // ⚠️ O par que prova o conserto: o resultado precisa PASSAR na validação.
+  // Era exatamente isso que falhava — o campo vinha preenchido e inválido.
+  it('e o resultado é aceito por `telefoneEhValido`', () => {
+    expect(telefoneEhValido(paraNacional('+5521987654321'))).toBe(true)
+  })
+
+  // ⚠️ CONTROLE NEGATIVO: a função antiga produzia algo INVÁLIDO a partir
+  // do mesmo valor. Sem esta asserção, "passa na validação" não
+  // distinguiria conserto de coincidência.
+  //
+  // ⚠️ E ELE É PIOR DO QUE PARECE: `somenteDigitos` corta em ONZE, então os
+  // dois últimos dígitos do celular SOMEM. `+5521987654321` vira
+  // `(55) 21987-6543` — um telefone plausível, truncado, de outra pessoa.
+  // Se a validação tivesse deixado passar, o número gravado seria de
+  // alguém que não é ela.
+  it('controle negativo: mascarar o E.164 direto trunca e invalida', () => {
+    expect(mascararTelefone('+5521987654321')).toBe('(55) 21987-6543')
+    expect(telefoneEhValido(mascararTelefone('+5521987654321'))).toBe(false)
+  })
+
+  // ⚠️ O `+55` sai por PREFIXO, e não por "corta dois dígitos": um número
+  // que já é nacional não pode ser mutilado.
+  it('número já nacional passa intacto', () => {
+    expect(paraNacional('21987654321')).toBe('(21) 98765-4321')
+    expect(paraNacional('(21) 98765-4321')).toBe('(21) 98765-4321')
+  })
+
+  // `55` como DDD não existe no Brasil, mas o teste trava a regra: só o
+  // PREFIXO sai, e o resto do número fica.
+  it('remove o país só uma vez', () => {
+    expect(paraNacional('5521987654321')).toBe('(21) 98765-4321')
+  })
+
+  it('vazio continua vazio', () => {
+    expect(paraNacional('')).toBe('')
   })
 })

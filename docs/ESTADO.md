@@ -1,0 +1,485 @@
+# ESTADO — fonte única operativa
+
+**Escrito em 08/08/2026. Atualizado em 09/08/2026, no fim da sessão do
+corte 2.** Este arquivo diz o que é verdade *agora* e o que falta fazer.
+Ele existe porque os documentos do pacote original descrevem
+majoritariamente o corte 1 — que já está em produção — e porque dois deles se
+contradizem em pontos que a implementação atravessa.
+
+## Ordem de leitura para uma sessão nova
+
+| Ler | Por quê |
+|---|---|
+| `CLAUDE.md` | as regras que não mudam: git, banco, comentários |
+| **`docs/ESTADO.md`** (este) | estado real + o que falta |
+| `docs/00-DECISOES.md` | **operativo e intacto.** D-01…D-16 |
+| o código | onde o conhecimento realmente mora |
+
+O prompt de entrada para uma sessão nova está em **`docs/BRIEFING.md`**.
+
+**Os demais (`01`…`05`, `CHECKLIST-LANCAMENTO.md`, `REPORT.md`) são
+históricos.** Consulte para entender *por que* algo é como é; não os use como
+especificação. Onde divergirem deste arquivo, **este vence**.
+
+⚠️ **`00-DECISOES.md` não se renumera nem se apaga.** Há **107 referências a
+`D-01`…`D-14`** espalhadas por mais de 20 arquivos de código, migração e teste
+(`src/lib/supabase.ts` sozinho tem 13). Decisão nova entra por *append*: D-15,
+D-16, D-17…
+
+---
+
+## 1. Estado real
+
+### Em produção, funcionando
+
+**O corte 1 está no ar e aceito.** Migrações `005`→`011b` rodadas em staging e
+em produção, `019_contagens.sql` com `ACEITE: OK`, query de retardatários
+vazia. Nenhuma superfície do sistema afirma preço, duração ou data que não
+venha do banco. A tensão 8.1 do `REPORT.md` está fechada.
+
+### Os cortes 2 e 3 estão IMPLEMENTADOS e NÃO ESTÃO DEPLOYADOS
+
+Todo o código do `c34` ao `c79` existe, compila e tem teste. **O que falta é o
+aceite manual e o deploy** — ver a seção 4.
+
+⚠️ **Nada disso foi exercitado contra banco, Stripe ou navegador.** Os testes
+provam que o código concorda consigo mesmo; nenhum deles abre conexão. A lista
+do que só o uso real prova está na seção 4.
+
+⚠️ **O aceite do corte 2 não pode ser delegado ao agente:** ele exige uma
+inscrição de ponta a ponta em modo teste do Stripe, com cartão salvo, **zero
+débito imediato** e `trial_end` na data certa. O agente não executa nada
+contra o banco nem contra o Stripe.
+
+### Migrações rodadas
+
+`000`(só staging) · `001`–`004`(históricas) · `005`–`011b` · `012`–`015` ·
+**`016`–`017`** — todas em staging **e** em produção.
+
+A `016` e a `017` foram conferidas com as consultas do próprio arquivo:
+`linhas_com_travado = 0` e `pessoas_com_token = 0`, que é o esperado (nenhuma
+das duas escreve dado).
+
+### Validação atual
+
+`npx tsc --noEmit` limpo, **423 testes verdes** em 14 arquivos.
+
+---
+
+## 2. Contradições resolvidas — não reabrir
+
+### 2.1 Quando os valores travados passam a existir
+
+`01-MODELO-DADOS.md` diz "travados presentes ⟺ status ≥ `confirmada`".
+`02-FLUXOS.md`, passo ⑨, copia os travados já em `pendente_pagamento`.
+
+**Resolvido para o lado conservador**, e implementado assim na
+`015_inscricoes_travadas.sql`: tudo-ou-nada entre os três; lista de espera
+nunca tem travado; `confirmada`/`ativa`/`inadimplente`/`concluida` têm que
+ter. **`pendente_pagamento` e `cancelada` ficam de fora da exigência.**
+
+### 2.2 Onde o checkout é criado
+
+O plano diz `c35 feat(api): POST /api/checkout`. O `02-FLUXOS.md` desenha o
+passo ⑩ **dentro** do POST de inscrição.
+
+**Venceu o fluxo: a sessão é criada dentro de `/api/inscricao`**, e é assim
+que está implementado. Rota separada teria que receber do cliente qual
+inscrição pagar, e "nenhuma decisão de negócio vem do cliente" é a regra que
+abre o `02-FLUXOS.md`.
+
+⚠️ **O commit NÃO usou a mensagem do plano.** Ficou
+`feat(api): a sessão de checkout nasce em /api/inscricao — vagas e travados`.
+A versão anterior deste arquivo dizia "o nome do commit fica como está"; foi
+mudado por decisão do dono, porque uma mensagem que nomeia um endpoint
+inexistente manda a próxima pessoa procurar um arquivo que não está lá.
+
+### 2.3 ⚠️ `cancel_at` NÃO existe em `subscription_data` — a D-05 é cumprida no webhook
+
+Decidido em **09/08/2026**, e é a resolução mais importante desta sessão.
+
+A D-05 diz: `cancel_at` "definido no momento da criação". **A API de Checkout
+Session não aceita `cancel_at`** — conferido no SDK instalado (`stripe@22.4.0`,
+`SessionCreateParams.SubscriptionData`). E a assinatura é criada pelo Stripe,
+do lado de lá, quando a pessoa termina o pagamento: não existe "o momento da
+criação" na nossa chamada.
+
+**Onde ele é posto:** no handler de `checkout.session.completed`, primeiro
+instante em que a assinatura existe e tem id. Uma chamada
+`subscriptions.update({ cancel_at })`, declarativa, uma vez só.
+
+**Por que isso NÃO viola a D-05:** o que ela proíbe é código NOSSO AGENDADO —
+algo que precise rodar em julho para a assinatura parar em julho, porque um
+dia ele não roda. Aqui o nosso código roda uma vez, hoje, e depois o Stripe
+cumpre sozinho. A janela entre a assinatura nascer e o webhook processar é de
+segundos, dentro do trial, sem cobrança no meio.
+
+**A rede:** `invoice.paid` reconfere `cancel_at` e o declara se estiver
+faltando. Se todas as reentregas de `completed` falharem, a primeira fatura
+paga é a segunda chance — sem ela, a falha sumiria por seis meses e
+reapareceria como a sétima cobrança.
+
+O fallback nomeado pela própria D-05 (subscription schedule com
+`end_behavior: 'cancel'`) continua disponível e **não foi usado porque não
+precisou**.
+
+### 2.4 O e-mail de confirmação da aluna saiu do insert
+
+Decidido em **09/08/2026**.
+
+Ele era disparado quando a inscrição era criada. Com checkout no fluxo isso
+passou a ser mentira: diria "sua inscrição está confirmada" para alguém que
+ainda ia digitar o cartão, e pela D-02 é pagar que faz entrar.
+
+**Agora ele sai do webhook**, depois de `checkout.session.completed`. O aviso
+para a Giovanna continua saindo no insert nos dois modos — o e-mail dela é
+OPERACIONAL, não promessa, e ela precisa saber que existe gente chegando,
+inclusive quem abandona o checkout e vira fila de pendência (D-15).
+
+### 2.5 O `c54` virou um `.sql`, e não um script Node
+
+Decidido em **09/08/2026**. O plano previa `script(ops)`. Um script Node
+exigiria criar um **segundo** cliente Supabase (o `src/lib/supabase.ts` é
+`server-only` e não pode ser importado de Node puro), quebrando a regra de que
+só um arquivo conhece a `service_role` (REPORT §9.5).
+
+O arquivo é **`supabase/operacao/gerar_convites.sql`** — diretório novo, e ele
+não é `migrations/` de propósito: não muda schema, escreve dado, e roda
+quantas vezes for preciso.
+
+### 2.6 Vagas não são fixas
+
+Respondido pela Giovanna em **08/08/2026**: *"não precisa ter número de vagas
+fixas. Podemos ter mais ou menos alunos dependendo da aderência deles e da
+disponibilidade da professora."*
+
+Consequência: `vagas_total` fica **null** (= sem limite, D-08) na prática. A
+checagem do `c36` existe e só morde se alguém preencher a coluna. A pergunta
+antiga "inscrição cancelada devolve a vaga?" deixa de bloquear — ela só volta
+a importar no dia em que um teto for posto, e o lugar de respondê-la é o
+comentário da contagem em `buscarSafraAtiva`.
+
+### 2.7 Retomada mantém o preço da primeira vez
+
+Respondido pela Giovanna em **08/08/2026**. Quem abriu o checkout, não pagou,
+e volta depois de o preço mudar **paga o valor travado da primeira vez**. A
+`016` não sobrescreve os travados na duplicata, e a sessão é montada com
+`precoDoContrato`, que resolve um `price` para o valor da INSCRIÇÃO — não o da
+safra.
+
+### 2.8 ⚠️ DESVIO TEMPORÁRIO DA D-09 — senha no lugar do Google
+
+**Decidido em 09/08/2026 pelo dono do repositório, por urgência de
+publicação.** A D-09 diz "Google OAuth via Supabase Auth"; o painel entra no ar
+com **e-mail e senha**, e o Google é viabilizado depois.
+
+**O que a D-09 PROÍBE continua inteiro.** A proibição dela é "decidir acesso a
+partir de qualquer coisa que venha do cliente", e a allowlist no servidor não
+mudou uma linha: `sessaoAdmin` chama `getUser()` (que valida o token com o
+Supabase, e não lê o cookie) e confere o e-mail contra `ADMIN_EMAILS` em todo
+request. O raciocínio da decisão — "logou com Google não é autorização, qualquer
+pessoa tem conta Google" — nunca dependeu do Google: vale igual para "digitou
+uma senha".
+
+⚠️ **O que se perde, escrito para não ser esquecido:** o Google carregava 2FA,
+detecção de vazamento e política de senha. Com senha própria, a força da senha é
+a fechadura inteira. **Duas contenções obrigatórias, as duas no Supabase:**
+
+1. **Cadastro público DESLIGADO** — Authentication → Providers → Email →
+   *Enable email signup* off. Ligado, qualquer pessoa cria conta no projeto.
+   Elas não entrariam no painel (a allowlist barra), mas encheriam `auth.users`
+   e o sinal de "alguém tentou" se perderia no ruído.
+2. **Usuário criado à mão**, em Authentication → Users → Add user, com senha
+   forte e única.
+
+**O caminho do Google continua escrito e não é código morto.**
+`app/admin/callback/route.ts` está de pé, dormente. Voltar para a D-09 completa
+é trocar o corpo de `/api/admin/entrar` por `signInWithOAuth` — allowlist,
+guard, middleware e callback não mudam uma linha. O passo a passo da
+configuração do Google está no `.env.example`.
+
+---
+
+## 3. Fatos operacionais que não estão em documento nenhum
+
+Descobertos na implementação. Perdê-los custa caro.
+
+- **A `010` RECUSA rodar duas vezes.** Ela aborta se `pessoas` ou `inscricoes`
+  tiver qualquer linha. Isso fecha "deployar primeiro, migrar depois" para
+  sempre.
+- **A `011` é a única migração que derrubou o formulário** — renomeou
+  `waitlist`. Rodada **depois** do deploy, de propósito.
+- **`cache: 'force-cache'` sem `next.revalidate` congela o dado para sempre.**
+  `export const revalidate` governa a PÁGINA, não o Data Cache.
+- **`export const revalidate` precisa ser literal**, por isso `60` está
+  escrito em dois lugares e um teste amarra os dois.
+- **Teste que lê arquivo como texto tira os comentários antes de comparar.**
+- **`tests/` está no `include` do `tsconfig.json`**: erro de tipo em teste
+  quebra o `next build`. O vitest não typechecka.
+- **`supabase gen types` exige login de conta**, não a chave do projeto.
+- **Não existe chave publicável do Stripe neste projeto**, e a ausência é
+  desenho: o Checkout é hospedado.
+
+### Novos, desta sessão
+
+- ⚠️ **`allowJs` sem `checkJs`: `.jsx` NÃO é verificado pelo `tsc`.** Um
+  identificador fora de escopo num componente é `ReferenceError` em runtime, e
+  nada na suíte pega — não há ESLint no projeto. Aconteceu de verdade nesta
+  sessão (uma substituição casou a ocorrência errada de `inscricaoAberta` e a
+  modal quebrou ao abrir). **A defesa hoje é abrir a página.** Se isso doer de
+  novo, o conserto mecânico é ESLint com `no-undef`, e é decisão do dono.
+- ⚠️ **`invoice.subscription` NÃO EXISTE MAIS.** Foi removido da API do Stripe
+  e substituído por `invoice.parent.subscription_details.subscription`. A
+  versão fixada do projeto (`2026-07-29.dahlia`) é posterior à remoção. Em
+  TypeScript não compila; em JS solto daria `undefined` e todo `invoice.paid`
+  viraria "fatura avulsa, nada a fazer", em silêncio e para sempre.
+- ⚠️ **`subscription_data` não tem `cancel_at`.** Ver §2.3.
+- ⚠️ **`trial_end` precisa estar ≥ 48h no futuro**, ou o Stripe recusa a
+  sessão. Quem se inscrever a menos de dois dias da `data_primeira_cobranca` é
+  cobrada na hora (`trialEhAceitavel` devolve `false` e o campo é omitido). A
+  data **não** é empurrada: isso desalinharia os seis ciclos inteiros.
+- ⚠️ **Existem DUAS `criar_inscricao` no banco** — a de 10 argumentos da
+  `011b` e a de 13 da `016`. O PostgREST resolve sobrecarga pelo CONJUNTO DE
+  CHAVES do corpo JSON, e é por isso que os três parâmetros travados **não têm
+  default**: sem eles, uma chamada de 10 chaves cairia na função nova e
+  devolveria um objeto onde o build antigo espera um booleano. **A `018` dropa
+  a antiga, e só depois do deploy.**
+- ⚠️ **O `select` do SDK do Supabase precisa ser uma STRING LITERAL.** O tipo
+  do resultado é inferido do texto; quebrar a string com `+` produz `string`,
+  a inferência desiste, e o erro é críptico (`Property 'x' does not exist on
+  type '{ error: true } & String'`).
+- ⚠️ **`supabase gen types` não expressa nulidade de ARGUMENTO de função.** Os
+  três travados chegam tipados como não-anuláveis apesar de a lista de espera
+  precisar mandar `null`. O escape é a função `nulavel()` em
+  `src/lib/supabase.ts` — um lugar só, nomeado e grep-ável.
+- ⚠️ **`eventos_stripe` precisa de LIBERAÇÃO, não só de reserva.** "Grava o
+  evento antes do efeito" + "reentrega não conta duas vezes" juntas produzem
+  um terceiro comportamento: evento gravado → efeito falha → 500 → reentrega
+  vê "já processado" → **o efeito nunca acontece**. Por isso
+  `liberarEventoStripe` apaga a reserva antes de devolver 500.
+- **`coupons.create` não aceita `currency` junto de `percent_off`.** Os três
+  tipos deste projeto são percentuais (`meses_gratis` é `percent_off: 100`).
+- **`price` do Stripe não aceita id nosso, mas aceita `lookup_key`** — que é
+  consultável por `list` (estritamente consistente), ao contrário de `search`.
+  É o que torna `precoDoContrato` idempotente.
+
+### ⚠️ Descobertos no PRIMEIRO teste de ponta a ponta (09/08/2026)
+
+- ⚠️⚠️ **A assinatura com trial emite uma fatura de R$ 0,00 NA HORA, e ela
+  dispara `invoice.paid`.** Medido: `invoice.created` → `finalized` → `paid`
+  no mesmo segundo do cadastro, antes de qualquer débito. Tratada como ciclo,
+  ela marcaria a inscrição como `ativa` ("Pagando") com o cartão só salvo, e
+  `ciclos_pagos` fecharia em SETE num curso de seis — a reclamação de julho
+  chegando por outra porta. **Corrigido:** o handler conta ciclo por
+  `billing_reason`, e não por valor (um `subscription_cycle` de R$ 0,00 por
+  cupom de meses grátis É um mês consumido e conta).
+- ⚠️ **`stripe listen` NÃO REENTREGA.** A CLI encaminha cada evento uma vez;
+  ela não implementa a política de retentativa do webhook de verdade. Um 500
+  local é definitivo — para completar o teste é preciso reenviar à mão
+  (`stripe events resend evt_...` ou o botão *Resend* no Dashboard). Em
+  produção o Stripe reentrega sozinho, com backoff.
+- **`invoice.paid` chega ANTES de `checkout.session.completed` na prática.**
+  O handler já previa (devolve 500 para reentrega) e o comportamento foi
+  observado na primeira inscrição — não é hipótese.
+- **O Next 16 depreciou `middleware.ts` em favor de `proxy.ts`.** É aviso, não
+  erro: o middleware funciona (aparece como `proxy.ts:` nos tempos do log).
+  Migrar é pendência, não bloqueio.
+
+### Novos, da sessão do corte 3
+
+- ⚠️ **`z.uuid()` do Zod 4 valida a RFC, não só a forma.** Um
+  `aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` tem o desenho certo e é REJEITADO
+  (o nibble de versão precisa ser 1–8, e o de variante 8/9/a/b). O sintoma é
+  a rota inteira devolvendo `400 Requisição inválida`, o que parece bug de
+  implementação. Custou sete testes vermelhos.
+- ⚠️ **Substituição de texto por indentação erra o alvo em JSX repetido.**
+  O menu do painel estava escrito duas vezes (desktop e mobile) e o mesmo
+  defeito apareceu TRÊS vezes: item duplicado numa lista, ausente na outra.
+  Nenhuma das três apareceu no `tsc` (que não verifica `.jsx`) nem em teste.
+  **O conserto foi estrutural**, não mais cuidado: os itens viraram um
+  componente `ItensDoMenu` usado nos dois lugares.
+- ⚠️ **`@supabase/ssr` precisa de dois clientes com permissões diferentes.**
+  Em Server Component a escrita de cookie LANÇA, então o `setAll` de
+  `src/lib/admin.ts` engole o erro de propósito (a renovação sai pelo
+  middleware). Nas rotas de OAuth/login a escrita é obrigatória — é onde o
+  cookie de sessão nasce. Fundi-los faria um dos dois estar errado.
+- **`revalidatePath('/')` no painel fecha a D-13.** Toda escrita de safra o
+  dispara: a defasagem de 60s da landing some, e o `revalidate = 60` vira o
+  piso e não o normal.
+
+---
+
+## 4. O que falta — o aceite e o deploy dos cortes 2 e 3
+
+### O código está pronto. Falta rodar, conferir e subir.
+
+⚠️ **Nesta ordem, e a ordem importa:**
+
+1. **Configurar o Stripe em modo teste**: `STRIPE_SECRET_KEY` e
+   `STRIPE_WEBHOOK_SECRET` no ambiente (ver `.env.example`). Local, o
+   `whsec_` sai de `stripe listen --forward-to localhost:3000/api/stripe/webhook`
+   e muda a cada execução.
+2. **Abrir a safra**: `inscricoes_abertas = true` numa safra com
+   `data_primeira_cobranca` a mais de 48h no futuro.
+3. ⛔ **O CHECKPOINT QUE NÃO SE DELEGA:** uma inscrição completa em modo
+   teste, do formulário ao webhook. Confirmar: **cartão salvo**, **zero débito
+   imediato**, `trial_end` na data certa, e `cancel_at` = primeira cobrança +
+   `duracao_meses` (seis faturas, não sete).
+4. **Conferir o cupom** com um registro de teste na tabela `cupons`.
+5. **Reentregar um evento** pelo Dashboard e confirmar que nada é contado duas
+   vezes.
+6. **Deploy.**
+7. **Só então a `018`** — dropar a sobrecarga de 10 argumentos da `011b`.
+   Antes do deploy, ela é o que mantém o formulário no ar.
+
+### ⚠️ O que só o uso real prova
+
+Nenhum teste deste repositório abre conexão. As coisas abaixo só ficam
+provadas usando:
+
+1. **A resolução da sobrecarga de `criar_inscricao`.** Existem duas funções
+   com o mesmo nome, e o PostgREST escolhe pelo conjunto de chaves do corpo.
+   Se essa leitura estiver errada, a chamada cai na de 10 argumentos, devolve
+   um booleano, e a rota responde falha **depois de gravar a linha**. É a
+   falha mais cara do corte 2 e nenhum teste a alcança.
+2. **`invoice.parent.subscription_details.subscription`** — a forma foi lida
+   no `.d.ts` do SDK, não numa entrega real.
+3. **`cancel_at` posto no webhook** e `trial_end` na data certa.
+4. **O login** — senha, cookie e guard, ponta a ponta.
+5. **As telas** — nenhuma passou pelo `shot.mjs` nem por um navegador.
+
+### A `018` está escrita e NÃO deve ser rodada ainda
+
+`supabase/migrations/018_drop_criar_inscricao_v1.sql` dropa a sobrecarga de
+10 argumentos da `011b`. Ela tem uma guarda que recusa rodar se a função de
+13 argumentos não existir — sem isso, um banco onde a `016` não rodou ficaria
+sem NENHUMA `criar_inscricao`, e o formulário morreria por completo.
+
+⛔ **É o único arquivo do projeto cuja hora de rodar não é "assim que estiver
+pronto".** Antes do deploy, a função antiga é o que mantém o formulário no ar.
+
+### Validação visual pendente — inclusive o `c77`
+
+**Nenhuma tela nova passou pelo `shot.mjs`**: as duas de retorno do Stripe, o
+campo de cupom na modal, e o painel inteiro. O agente não pode rodá-lo — ele
+sobe um `next dev` cuja checagem de saúde renderiza `/`, que lê
+`public.safras`, e o `CLAUDE.md` proíbe abrir conexão com o banco inclusive
+para `select`.
+
+⚠️ **E o `c77` ("render das telas do painel") não é só uma questão de quem
+roda.** Mesmo rodado à mão, o `shot.mjs` fotografaria a TELA DE LOGIN: as
+telas do painel exigem sessão, e o browser headless não tem uma. Fotografar o
+painel exige um passo que ainda não existe — autenticar o headless antes de
+navegar.
+
+Some-se a isso que `design/` está no `.gitignore` (a mesma razão pela qual o
+`c28` não foi commitável), e os prints precisariam de outro lugar para morar.
+**Decisão do dono, não tomada.**
+
+Nenhuma medida nova foi inventada em tela nenhuma — todas as classes já
+existiam —, mas ninguém olhou.
+
+---
+
+## 5. Corte 3 (painel) — IMPLEMENTADO
+
+`c58`–`c76`, `c78` e `c79` escritos. O `c77` está em aberto por impedimento
+técnico, e o motivo está na seção 4.
+
+| | |
+|---|---|
+| `c58`–`c62` | auth, allowlist, middleware, guard, teste de 403 |
+| `c63`, `c64` | layout, login, visão de hoje |
+| `c65`–`c67` | CRUD de turmas, aviso de preço travado, abrir/fechar |
+| `c68`, `c71`, `c72` | horários, kanban, PATCH de grupo sem tocar no Stripe |
+| `c69`, `c70` | lista de alunas com filtros, ficha |
+| `c73` | cancelar com confirmação por nome |
+| `c74`, `c75` | cupons, fila de pagamento pendente (D-15) |
+| `c76` | teste: alocação não dispara Stripe |
+| `c78` | `docs/MANUAL.md` — sem prints, ver seção 4 |
+| `c79` | `019_remove_waitlist_legado.sql` — ⛔ não rodar ainda |
+
+### ⚠️ Decisões que eu tomei e que você não tomou explicitamente
+
+- **Cancelar usa `cancel_at_period_end`, e não cancelamento imediato.** As
+  cobranças param e a pessoa não perde o mês que já pagou — cancelar não pode
+  significar "tomar de volta", e o sistema não faz reembolso. É a leitura
+  conservadora. **Se a intenção for cortar o acesso na hora, a troca é de uma
+  linha em `encerrarAssinatura`.**
+- **O kanban tem arrastar E uma caixinha de horário.** A API de drag and drop
+  do HTML5 **não dispara em toque** — uma tela só de arrastar não funcionaria
+  no aparelho em que a Giovanna mais provavelmente vai abri-la, e falharia em
+  silêncio. A caixinha não é fallback: é o caminho principal no celular e o
+  acessível por teclado.
+- **Só quem tem contrato aparece no kanban** (`confirmada`, `ativa`,
+  `inadimplente`). Alocar quem está em `pendente_pagamento` seria dar horário
+  a quem talvez nunca pague — e o trigger da `009` recusa grupo em lista de
+  espera de qualquer forma.
+
+### ⚠️ EXCEÇÃO DECLARADA — o design de `/admin`
+
+**Decidida em 09/08/2026 pelo dono do repositório.** Não existe Figma do
+painel e o `design/SPEC.md` cobre só a landing, então a regra "nenhum número
+visual estimado, valor de layout vem do Figma Dev Mode" **fica suspensa para
+`/admin`, e só para ele**, com uma condição:
+
+> **Nenhuma medida nova é inventada.** Tudo sai de classe que já foi medida em
+> outro lugar — `container-page`, `btn-brand`, `font-display`, os tokens de cor
+> do `tailwind.config.js`, e os tamanhos que a modal e o `DocumentoLegal` já
+> usam.
+
+O registro fica em três lugares que a pessoa que mexer vai abrir de qualquer
+jeito: `app/admin/login/page.jsx`, `app/admin/(protegido)/layout.jsx` e
+`src/components/admin/FormularioCupom.jsx`. Se um Figma do painel aparecer,
+esses comentários são o que diz o que foi assumido.
+
+### Dependência nova
+
+**`@supabase/ssr`** entrou no corte 3. Ela é o que faz a sessão viver em cookie
+no App Router (renovação, chunking, leitura em Server Component) — escrever isso
+à mão é o tipo de coisa que quebra em silêncio.
+
+⚠️ **Ela NÃO afrouxa a regra do "único lugar que conhece a chave".** São dois
+clientes com chaves e propósitos diferentes: `service_role` (lê e escreve dado
+pessoal, ignora RLS) mora só em `src/lib/supabase.ts`; `anon` + sessão (só
+resolve "quem é você?") mora em `src/lib/admin.ts` e nas rotas de OAuth. Com RLS
+ligada e zero policies, a `anon` não lê uma linha sequer.
+
+### ⚠️ Configuração fora do código, sem a qual o login não funciona
+
+Está escrita no `.env.example`, e o passo 3 é o que falha em silêncio:
+
+1. Google Cloud → OAuth 2.0 Client ID. O redirect URI é o do **Supabase**
+   (`https://<projeto>.supabase.co/auth/v1/callback`), não o nosso.
+2. Supabase → Authentication → Providers → Google: ligar e colar client
+   id/secret.
+3. Supabase → Authentication → URL Configuration → **Redirect URLs**:
+   acrescentar `http://localhost:3000/admin/callback` e a de produção. Sem
+   isso o login termina numa página errada **sem erro visível em lugar
+   nenhum**.
+
+### ⚠️ Limitação de modelo que o painel vai encostar
+
+Os três tipos de cupom da `013` cobrem: percentual no 1º mês, percentual em
+todos os meses, e N meses grátis (100%). **"20% nos 3 primeiros meses" não é
+representável.** O conserto é uma coluna `duracao_meses` em `cupons`, nullable,
+lida só quando `tipo = 'todos_meses'` — migração aditiva, sem downtime.
+
+Levantado em 09/08/2026; o dono decidiu **manter como está** por ora. ⚠️ O
+custo cresce com o tempo: depois de existirem cupons em produção, mudar a
+semântica de `todos_meses` é mexer em contrato de gente que já comprou.
+
+---
+
+## 6. Pendências pequenas, registradas
+
+- `c28` (`docs: SPEC.md — tokens novos do corte 1`) **não é commitável**:
+  `design/` está no `.gitignore`. O `SPEC.md` foi atualizado no working tree e
+  fica só local.
+- `design/SPEC.md` diz "Stack: Vite + React + Tailwind". É Next.js. Nunca
+  corrigido.
+- `next-env.d.ts` é gerado pelo Next e alterna com `dev`/`build`. Ruído; não
+  entra em commit.
+- **Não há campo de cupom para quem está na lista de espera**, e é
+  intencional: sem checkout não há o que descontar. O servidor ignora o campo
+  nesse modo.
