@@ -611,12 +611,22 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
 // mecanismo que manda e-mail sozinho para todo mundo é a coisa mais fácil
 // de errar neste projeto, e o erro não tem desfazer.
 
-/** O que o convite precisa saber. Contato e o link — nada além. */
+/** O que o convite precisa saber. Contato, link e — se houver — o cupom. */
 export type ConviteEmail = {
   nome: string
   email: string
   /** A URL completa, com `?convite=<token>`. Montada por quem chama. */
   link: string
+  /**
+   * O desconto que acompanha este convite, já descrito em português.
+   *
+   * ⚠️ `codigo` VAI JUNTO MESMO COM O LINK PRÉ-PREENCHENDO O CAMPO. Não é
+   * redundância: cliente de e-mail que bloqueia HTML, link copiado sem os
+   * parâmetros, ou a pessoa entrando pelo site direto num outro dia — nos
+   * três casos o código escrito é o que salva. Um desconto que só existe
+   * dentro de uma URL é um desconto que some quando a URL some.
+   */
+  cupom?: { codigo: string; descricao: string } | null
 }
 
 export type MotivoDoConvite = 'convite' | 'pendente'
@@ -657,6 +667,11 @@ function montarConvite(
 
   const rotuloBotao = pendente ? 'Concluir meu pagamento' : 'Quero minha vaga'
 
+  // ⚠️ O BLOCO DO CUPOM SÓ EXISTE QUANDO HÁ CUPOM. Uma seção "seu
+  // desconto" vazia, ou com um traço, seria pior que ausência: ela
+  // promete e não entrega, e quem lê rápido só registra a promessa.
+  const cupom = convite.cupom ?? null
+
   // A data de início entra quando existe safra, pela mesma regra de
   // sempre: derivada de `data_inicio_aulas` e nunca seca (D-14).
   const quando = semanaDeInicio
@@ -677,6 +692,20 @@ function montarConvite(
 <p style="margin:14px 0 0 0;font-size:15px;line-height:1.6;color:${COR.body};">${abertura}</p>
 ${quando ? `<p style="margin:12px 0 0 0;font-size:15px;line-height:1.6;color:${COR.body};">${quando}</p>` : ''}
 </td></tr>
+
+${
+  cupom
+    ? `<tr><td style="padding:20px 24px 0 24px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${COR.rose100};border-radius:10px;">
+<tr><td style="padding:16px 18px;font-family:${FONTE};text-align:center;">
+<p style="margin:0;font-size:14px;line-height:1.5;color:${COR.body};">Você tem <strong style="color:${COR.ink};">${esc(cupom.descricao)}</strong></p>
+<p style="margin:10px 0 0 0;font-size:20px;line-height:1.2;color:${COR.ink};font-weight:700;letter-spacing:1px;">${esc(cupom.codigo)}</p>
+<p style="margin:8px 0 0 0;font-size:13px;line-height:1.5;color:${COR.muted};">O código já vem preenchido pelo botão abaixo. Se precisar, digite no formulário.</p>
+</td></tr>
+</table>
+</td></tr>`
+    : ''
+}
 
 <tr><td style="padding:24px 24px 0 24px;font-family:${FONTE};">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -705,7 +734,9 @@ Dúvida? Responda este e-mail — ele chega direto para a Giovanna.
   const texto = `${titulo}
 
 ${abertura}
-${quandoTexto ? `\n${quandoTexto}\n` : ''}
+${quandoTexto ? `\n${quandoTexto}\n` : ''}${
+    cupom ? `\nSEU DESCONTO: ${cupom.descricao}\nCódigo: ${cupom.codigo}\n` : ''
+  }
 ${rotuloBotao}: ${convite.link}
 
 Este link é pessoal e tem prazo de validade. Se ele expirar, é só se
