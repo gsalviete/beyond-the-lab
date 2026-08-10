@@ -144,12 +144,36 @@ const SESSAO_COMPLETA = {
   },
 }
 
+/**
+ * Uma fatura de CICLO — o mês do contrato sendo cobrado.
+ *
+ * ⚠️ `billing_reason` NÃO É DETALHE. A fatura do trial (R$ 0,00, emitida
+ * no mesmo segundo do cadastro) também dispara `invoice.paid`, e tratá-la
+ * como ciclo faria a inscrição virar "Pagando" sem ninguém ter pagado — e
+ * `ciclos_pagos` fechar em 7 num curso de 6. Ver o bloco no handler.
+ */
 const FATURA_PAGA = {
   id: 'evt_2',
   type: 'invoice.paid',
   data: {
     object: {
       id: 'in_teste',
+      billing_reason: 'subscription_cycle',
+      amount_paid: 29999,
+      parent: { subscription_details: { subscription: SUB_ID } },
+    },
+  },
+}
+
+/** A fatura de R$ 0,00 que o Stripe emite quando a assinatura tem trial. */
+const FATURA_DO_TRIAL = {
+  id: 'evt_4',
+  type: 'invoice.paid',
+  data: {
+    object: {
+      id: 'in_trial',
+      billing_reason: 'subscription_create',
+      amount_paid: 0,
       parent: { subscription_details: { subscription: SUB_ID } },
     },
   },
@@ -577,5 +601,77 @@ describe('cobrança recusada', () => {
     dubles.reservarEventoStripe.mockResolvedValue(false)
     await POST(requisicao())
     expect(dubles.alertarCobrancaFalhada).not.toHaveBeenCalled()
+  })
+})
+
+// ============================================================
+// 9. ⚠️ A FATURA DE R$ 0,00 DO TRIAL NÃO É UM CICLO PAGO
+//
+// Quando a assinatura nasce com `trial_end` (D-04), o Stripe emite na hora
+// uma fatura de VALOR ZERO e a marca como paga — `invoice.paid` dispara no
+// mesmo segundo do cadastro, antes de alguém ser debitado. Medido na
+// primeira inscrição de ponta a ponta, em 09/08/2026.
+//
+// Sem a distinção: a inscrição viraria "Pagando" com o cartão só salvo, e
+// `ciclos_pagos` fecharia em SETE num curso de seis — a reclamação de
+// julho que a D-05 existe para evitar, chegando por outra porta.
+// ============================================================
+describe('a fatura do trial', () => {
+  beforeEach(() => {
+    dubles.verificarEventoDoStripe.mockReturnValue(FATURA_DO_TRIAL)
+  })
+
+  it('não conta ciclo e não marca como pagando', async () => {
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.contarCicloPago).not.toHaveBeenCalled()
+    expect(dubles.mudarStatusInscricao).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ 200 e não 500: o evento é legítimo e foi processado — a decisão foi
+  // "não há ciclo aqui". Um 500 faria o Stripe reentregar para sempre uma
+  // fatura que nunca vai ter o que somar.
+  it('e responde 200, para o Stripe não reentregar para sempre', async () => {
+    expect((await POST(requisicao())).status).toBe(200)
+  })
+
+  // ⚠️ CONTROLE NEGATIVO: a MESMA rota, com uma fatura de ciclo, conta.
+  // Sem este par, "não contou" seria indistinguível de "a rota não sabe
+  // contar".
+  it('controle negativo: a fatura de ciclo CONTA', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(FATURA_PAGA)
+
+    await POST(requisicao())
+
+    expect(dubles.contarCicloPago).toHaveBeenCalledTimes(1)
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'ativa')
+  })
+
+  // ⚠️ O discriminador é `billing_reason`, e NÃO "o valor é zero": um mês
+  // do contrato pago com cupom de `meses_gratis` sai a R$ 0,00 e FOI
+  // consumido — ele conta.
+  it('ciclo de R$ 0,00 por cupom de meses grátis CONTA', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue({
+      ...FATURA_PAGA,
+      data: { object: { ...FATURA_PAGA.data.object, amount_paid: 0 } },
+    })
+
+    await POST(requisicao())
+    expect(dubles.contarCicloPago).toHaveBeenCalledTimes(1)
+  })
+
+  // Sem trial (inscrição a menos de 48h da cobrança), a primeira fatura é
+  // `subscription_create` COM valor — e ela é o primeiro pagamento de
+  // verdade. Ignorá-la deixaria quem pagou sem nunca virar `ativa`.
+  it('sem trial, a primeira fatura com valor CONTA', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue({
+      ...FATURA_DO_TRIAL,
+      data: { object: { ...FATURA_DO_TRIAL.data.object, amount_paid: 29999 } },
+    })
+
+    await POST(requisicao())
+    expect(dubles.contarCicloPago).toHaveBeenCalledTimes(1)
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'ativa')
   })
 })

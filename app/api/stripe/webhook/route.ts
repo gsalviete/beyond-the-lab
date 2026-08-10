@@ -453,6 +453,56 @@ async function faturaPaga(fatura: Stripe.Invoice): Promise<void> {
     }
   }
 
+  // ============================================================
+  // ⚠️⚠️ A FATURA DE R$ 0,00 DO TRIAL NÃO É UM CICLO PAGO
+  // ============================================================
+  //
+  // Quando a assinatura nasce com `trial_end` (D-04), o Stripe emite na
+  // hora uma fatura de VALOR ZERO e a marca como paga — `invoice.paid`
+  // dispara no mesmo segundo do cadastro, antes de alguém ter sido
+  // debitado. Medido na primeira inscrição de ponta a ponta, em
+  // 09/08/2026.
+  //
+  // Sem esta distinção, o efeito seria duplo e silencioso:
+  //
+  //   1. A inscrição viraria `ativa` ("Pagando", no painel) enquanto o
+  //      cartão só está salvo. A Giovanna veria como pagante quem ainda
+  //      não pagou nada.
+  //   2. `ciclos_pagos` começaria em 1. Num curso de seis meses a conta
+  //      fecharia em SETE — a mesma reclamação de julho que a D-05 existe
+  //      para evitar, chegando por outra porta.
+  //
+  // ⚠️ O DISCRIMINADOR É `billing_reason`, E NÃO "o valor é zero".
+  // Um ciclo mensal legítimo TAMBÉM pode ser R$ 0,00 — é o que um cupom
+  // de `meses_gratis` produz —, e esse mês FOI consumido: ele conta. As
+  // três combinações, por extenso:
+  //
+  //   `subscription_cycle`                 → mês do contrato. Conta
+  //                                          sempre, inclusive a R$ 0.
+  //   `subscription_create`, valor > 0     → não houve trial (inscrição a
+  //                                          menos de 48h da cobrança, e
+  //                                          o débito saiu na hora). Conta.
+  //   `subscription_create`, valor zero    → a fatura do trial. NÃO conta.
+  //
+  // ⚠️ E ISSO RESPONDE 200. Não é falha: o evento é legítimo, foi
+  // processado, e a decisão foi "não há ciclo aqui". Devolver 500 faria o
+  // Stripe reentregar para sempre uma fatura que nunca vai ter o que
+  // somar.
+  // ============================================================
+  const ehCicloDoContrato =
+    fatura.billing_reason === 'subscription_cycle' ||
+    (fatura.billing_reason === 'subscription_create' && fatura.amount_paid > 0)
+
+  if (!ehCicloDoContrato) {
+    console.info(
+      '[webhook] fatura sem ciclo a contar (trial ou ajuste), ignorada',
+      fatura.id,
+      fatura.billing_reason,
+      fatura.amount_paid,
+    )
+    return
+  }
+
   // ⚠️ `false` do CAS NÃO É FALHA: significa que outra tentativa já somou
   // este ciclo. Refazer contaria duas vezes o mesmo mês, e a aluna que
   // pagou três apareceria com quatro — a D-05 passaria a encerrar cedo e
