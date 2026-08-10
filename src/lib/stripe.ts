@@ -10,7 +10,7 @@ import Stripe from 'stripe'
 // `curso.ts` é neutro — não toca `server-only` nem segredo —, então este
 // módulo pode importá-lo. `paraDataUTC` é usado por `paraEpoch` lá
 // embaixo, e a razão de reusar em vez de reescrever está lá.
-import { paraDataUTC } from '@/config/curso'
+import { formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
 
 // ============================================================
 // A MESMA DISCIPLINA DA `service_role`, PELO MESMO MOTIVO
@@ -593,6 +593,15 @@ export type SessaoDeCheckout = {
   email: string
   /** Epoch de `ancorasDaAssinatura`. Omitido quando não passa no `trialEhAceitavel`. */
   trialEnd: number | null
+  /**
+   * `'YYYY-MM-DD'` da primeira cobrança, para a frase da tela do Stripe.
+   *
+   * ⚠️ É a MESMA data que virou `trialEnd`, e ela viaja também como string
+   * porque epoch não se imprime. Vem do CONTRATO da inscrição (D-06), não
+   * da safra — quem retomou um checkout antigo tem que ler a data que ela
+   * combinou, não a de hoje.
+   */
+  dataPrimeiraCobranca: string
   /** `coupons.id` do Stripe, quando há cupom aplicado. Ver `cupomNoStripe`. */
   stripeCouponId?: string | null
   /**
@@ -691,6 +700,48 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
     // quando não há cupom: mandar `discounts: []` é diferente de não
     // mandar, e o Stripe trata a lista vazia como "remova todo desconto".
     ...(dados.stripeCouponId ? { discounts: [{ coupon: dados.stripeCouponId }] } : {}),
+
+    // ============================================================
+    // ⚠️ O TEXTO DA TELA DO STRIPE — o pouco que dá para controlar
+    // ============================================================
+    //
+    // O Stripe renderiza o cabeçalho sozinho a partir do trial, e ele sai
+    // **"Testar <nome do produto>"** com **"N dias grátis"**. Nenhum dos
+    // dois é configurável, e os dois dizem a coisa errada: isto não é
+    // período de avaliação, é matrícula com o cartão guardado (D-04).
+    // Medido na primeira inscrição de verdade — "17 dias grátis" foi o que
+    // apareceu.
+    //
+    // `custom_text.submit` é o texto NOSSO logo acima do botão de pagar, e
+    // é o último lugar onde a pessoa lê alguma coisa antes de decidir. É o
+    // ponto certo para desfazer o mal-entendido: nada é cobrado hoje, e a
+    // data em que será é esta.
+    //
+    // ⚠️ A DATA SAI SECA AQUI, e é a única do modelo que pode. Cobrança
+    // tem dia exato — o cartão é debitado no dia 26, não "na última semana
+    // de agosto". É o oposto de `data_inicio_aulas`, que a D-14 manda
+    // dizer por semana justamente porque cada grupo começa num dia
+    // diferente. `formatarDataPorExtenso` existia desde o corte 1 esperando
+    // exatamente este chamador; o comentário dela em `src/config/curso.ts`
+    // diz isso com todas as letras.
+    custom_text: {
+      submit: {
+        message:
+          dados.trialEnd !== null
+            ? `Seu cartão é salvo agora, sem nenhuma cobrança hoje. ` +
+              `A primeira mensalidade é debitada em ` +
+              `${formatarDataPorExtenso(paraDataUTC(dados.dataPrimeiraCobranca))}, ` +
+              `quando a turma começa.`
+            : // Sem trial: a data está a menos de 48h e o Stripe recusaria
+              // agendar. A frase muda junto — prometer "nada hoje" aqui
+              // seria mentira, e é a mentira que a pessoa descobre no
+              // extrato. Ver `trialEhAceitavel`.
+              `A primeira mensalidade é debitada agora, porque a turma já vai começar.`,
+      },
+      after_submit: {
+        message: 'Você recebe a confirmação por e-mail em alguns minutos.',
+      },
+    },
 
     metadata: {
       inscricao_id: dados.inscricaoId,

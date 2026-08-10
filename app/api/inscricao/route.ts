@@ -715,6 +715,10 @@ export async function POST(req: Request) {
         // Stripe recusa `trial_end` mais perto que isso, e a alternativa a
         // cobrar na hora seria não vender. Ver `trialEhAceitavel`.
         trialEnd: trialEhAceitavel(trialEnd, agora) ? trialEnd : null,
+        // A mesma data, em string, para a frase da tela do Stripe. Sai do
+        // CONTRATO e não da safra: quem retomou um checkout antigo lê a
+        // data que combinou, não a de hoje (D-06).
+        dataPrimeiraCobranca: result.contrato.dataPrimeiraCobranca,
         safraId: safra.id,
         stripeCouponId,
         // ⚠️ O id do NOSSO cupom viaja em metadata, e é assim que o webhook

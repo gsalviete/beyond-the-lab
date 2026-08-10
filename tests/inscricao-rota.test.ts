@@ -692,6 +692,28 @@ describe('safra aberta abre o checkout', () => {
     expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].trialEnd).toBe(esperado)
   })
 
+  // ⚠️ A DATA VIAJA TAMBÉM COMO STRING, para a frase que o Stripe imprime
+  // acima do botão de pagar. O cabeçalho dele ("Testar X", "N dias
+  // grátis") é gerado a partir do trial e não é configurável — esse texto
+  // é o único lugar onde dá para dizer que nada será cobrado hoje.
+  it('a data de cobrança vai por extenso para o texto do Stripe', async () => {
+    await post()
+    expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].dataPrimeiraCobranca).toBe(
+      CONTRATO.dataPrimeiraCobranca,
+    )
+  })
+
+  // ⚠️ E ela sai do CONTRATO, não da safra: quem retomou um checkout
+  // antigo tem que ler a data que combinou, não a de hoje (D-06).
+  it('e ela é a do contrato, não a da safra', async () => {
+    rpcComCheckout(false, { ...CONTRATO, dataPrimeiraCobranca: '2026-10-01' })
+    await post()
+
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.dataPrimeiraCobranca).toBe('2026-10-01')
+    expect(sessao.dataPrimeiraCobranca).not.toBe(safra(true).data_primeira_cobranca)
+  })
+
   // ⚠️ O Stripe recusa `trial_end` a menos de 48h. Omitir e cobrar na hora
   // é o menos ruim: a alternativa não é "cobrar depois", é "não vender". E
   // o que NÃO se pode fazer é empurrar a data, que desalinharia os seis
