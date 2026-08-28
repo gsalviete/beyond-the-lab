@@ -28,7 +28,13 @@ export const metadata = {
   metadataBase: new URL(SITE_URL),
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
-  icons: { icon: '/favicon.svg' },
+  // ⚠️ SEM `icons` AQUI DE PROPÓSITO. O ícone é `app/icon.svg`, convenção
+  // de arquivo do App Router: o Next monta o `<link rel="icon">` sozinho,
+  // em toda rota, com o tipo e o hash de cache certos. Declarar `icons`
+  // nesta `metadata` competiria com aquilo — e, pior, qualquer rota que
+  // definisse a própria `metadata.icons` (as de `/admin` definem `title` e
+  // `robots`) passaria a decidir sozinha se tem ícone. Ver o comentário
+  // dentro de `app/icon.svg`.
   openGraph: {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,

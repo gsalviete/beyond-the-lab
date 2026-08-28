@@ -1,0 +1,35 @@
+<!--
+  O FAVICON DO SITE INTEIRO.
+
+  ⚠️ ELE MORA EM `app/icon.svg` E NÃO EM `public/`, e a diferença é o que
+  faz ele aparecer: `app/icon.svg` é convenção de arquivo do App Router —
+  o Next injeta o `<link rel="icon">` com o tipo certo e um hash de cache
+  em TODA rota, inclusive nas de `/admin`, que têm `metadata` própria. Um
+  arquivo em `public/` depende de alguém lembrar de declará-lo, e uma
+  `metadata` que redefine `icons` numa rota derruba a declaração da raiz
+  sem avisar.
+
+  ⚠️ O "B" É DESENHADO, NÃO ESCRITO. A versão anterior usava um <text> com
+  `font-family="Poppins,Arial"` — uma fonte que o navegador não tem ao
+  renderizar um favicon, então cada sistema desenhava a letra com a fonte
+  que tinha à mão. Como caminho vetorial, o mark é o mesmo em todo lugar e
+  não depende de fonte nenhuma.
+
+  ⚠️ O GRADIENTE É O `brand-grad` do `tailwind.config.js`, com os mesmos
+  três pontos (#F75883 → #FF7EA1 → #FF487A). Não é cor nova.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="btl-favicon" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F75883"/>
+      <stop offset="53%" stop-color="#FF7EA1"/>
+      <stop offset="100%" stop-color="#FF487A"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#btl-favicon)"/>
+  <g fill="#fff">
+    <rect x="10" y="8" width="3.6" height="16" rx="1.2"/>
+    <path d="M12.4 8h4.2a3.8 3.8 0 0 1 0 7.6h-4.2z"/>
+    <path d="M12.4 16.4h4.8a3.8 3.8 0 0 1 0 7.6h-4.8z"/>
+  </g>
+</svg>

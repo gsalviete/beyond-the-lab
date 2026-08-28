@@ -37,6 +37,7 @@ app/                        # App Router: rotas, layout e CSS global
   layout.jsx                # <html>, metadata/OG, fonte Geist, bootstrap do scroll-reveal
   page.jsx                  # landing — monta as seções na ordem dentro de <main>
   globals.css               # base Tailwind + tokens de motion (--motion-*, --ease-*)
+  icon.svg                  # favicon — convenção de arquivo do App Router, vale em toda rota
   conteudo-programatico/
     page.jsx                # rota do conteúdo programático (metadata própria)
 
@@ -66,7 +67,6 @@ src/
 public/
   assets/                   # imagens extraídas do protótipo (hero, fotos, ilustrações)
   og.png                    # imagem de Open Graph (placeholder)
-  favicon.svg
 ```
 
 ## Renders de validação (`shot.mjs`)
