@@ -17,6 +17,8 @@
 // Figma do painel, este comentário é o que diz o que foi assumido.
 // ============================================================
 
+import CamposDeLogin from '@/components/admin/CamposDeLogin.jsx'
+
 const TITLE = 'Painel — Beyond The Lab'
 
 // ⚠️ `noindex`, e não é zelo: uma tela de login indexada é um convite
@@ -45,11 +47,6 @@ const ERROS = {
   oauth: 'Não conseguimos falar com o Google agora. Tente de novo em instantes.',
   config: 'O login não está configurado neste ambiente.',
 }
-
-const CAMPO =
-  'h-[52px] w-full rounded-2xl border border-border-soft bg-white px-4 ' +
-  'font-sans text-[15px] text-ink placeholder:text-muted shadow-soft ' +
-  'focus-visible:border-brand'
 
 export default async function Page({ searchParams }) {
   const { erro } = await searchParams
@@ -95,35 +92,15 @@ export default async function Page({ searchParams }) {
         method="post"
         className="mt-8 flex w-full max-w-[420px] flex-col gap-3 text-left"
       >
-        <label htmlFor="email" className="sr-only">
-          E-mail
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          required
-          autoComplete="username"
-          placeholder="E-mail"
-          className={CAMPO}
-        />
-
-        <label htmlFor="senha" className="sr-only">
-          Senha
-        </label>
-        {/* `autoComplete="current-password"` faz o gerenciador de senhas do
-            navegador oferecer a senha salva — que é o que torna viável
-            exigir uma senha longa e única. Sem isso, a pressão é para
-            escolher algo digitável, e digitável é adivinhável. */}
-        <input
-          id="senha"
-          name="senha"
-          type="password"
-          required
-          autoComplete="current-password"
-          placeholder="Senha"
-          className={CAMPO}
-        />
+        {/* ⚠️ OS DOIS CAMPOS SÃO UM CLIENT COMPONENT, e o `<form>` acima
+            NÃO É. É a divisão que preserva a regra: o formulário, o
+            `action` e o `method` estão no HTML servido, então o POST
+            acontece mesmo que o bundle nunca hidrate. O que a ilha
+            acrescenta é o olhinho da senha e a mensagem de campo vazio em
+            português — enfeite em cima de um formulário que já funciona,
+            nunca condição para ele funcionar. Ver
+            `src/components/admin/CamposDeLogin.jsx`. */}
+        <CamposDeLogin />
 
         <button type="submit" className="btn-brand mt-2 w-full text-[17px]">
           Entrar

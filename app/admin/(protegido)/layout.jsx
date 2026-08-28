@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import BotaoSair from '@/components/admin/BotaoSair.jsx'
+import MenuDoPainel from '@/components/admin/MenuDoPainel.jsx'
 import { sessaoAdmin } from '@/lib/admin'
 
 // ============================================================
@@ -55,7 +57,7 @@ export default async function Layout({ children }) {
               Beyond The Lab
             </Link>
             <nav className="hidden items-center gap-5 sm:flex">
-              <ItensDoMenu />
+              <MenuDoPainel />
             </nav>
           </div>
 
@@ -66,16 +68,10 @@ export default async function Layout({ children }) {
             <span className="hidden font-sans text-[14px] text-muted sm:inline">{admin.email}</span>
 
             {/* POST, pelo mesmo motivo da rota: um link de logout é
-                disparado por prefetch e por antivírus corporativo. */}
-            <form action="/api/admin/sair" method="post">
-              <button
-                type="submit"
-                className="rounded-full px-3 py-2 font-sans text-[14px] font-medium text-ink/80
-                           [transition:color_var(--motion-fast)_var(--ease-out)] hover:text-brand"
-              >
-                Sair
-              </button>
-            </form>
+                disparado por prefetch e por antivírus corporativo. O
+                formulário e o porquê da pergunta antes de sair estão em
+                `src/components/admin/BotaoSair.jsx`. */}
+            <BotaoSair />
           </div>
         </div>
       </header>
@@ -92,51 +88,11 @@ export default async function Layout({ children }) {
           do site usa. */}
       <nav className="border-b border-border-soft sm:hidden">
         <div className="container-page flex items-center gap-5 overflow-x-auto py-3">
-          <ItensDoMenu />
+          <MenuDoPainel />
         </div>
       </nav>
 
       <main className="container-page py-10">{children}</main>
     </div>
-  )
-}
-
-/**
- * Os itens do menu, num lugar só.
- *
- * ⚠️ ELES ESTAVAM ESCRITOS DUAS VEZES — uma no menu de desktop, outra no
- * de mobile — e a duplicação produziu o mesmo defeito TRÊS vezes seguidas
- * durante a implementação: acrescentar um item numa lista e não na outra,
- * ou acrescentar duas vezes na mesma. Nenhuma das três apareceu no `tsc`
- * (que não verifica `.jsx`) nem em teste nenhum; as três apareceram
- * abrindo a página.
- *
- * Uma lista só é o mecanismo que torna aquilo impossível, em vez da
- * disciplina de lembrar dos dois lugares. É a 8.3 do `REPORT.md` aplicada
- * a um `<nav>`.
- */
-function ItensDoMenu() {
-  return (
-    <>
-      <ItemDeMenu href="/admin">Hoje</ItemDeMenu>
-      <ItemDeMenu href="/admin/safras">Turmas</ItemDeMenu>
-      <ItemDeMenu href="/admin/alunas">Alunas</ItemDeMenu>
-      <ItemDeMenu href="/admin/alocacao">Horários</ItemDeMenu>
-      <ItemDeMenu href="/admin/espera">Lista de espera</ItemDeMenu>
-      <ItemDeMenu href="/admin/pendentes">Pendentes</ItemDeMenu>
-      <ItemDeMenu href="/admin/cupons">Cupons</ItemDeMenu>
-    </>
-  )
-}
-
-function ItemDeMenu({ href, children }) {
-  return (
-    <Link
-      href={href}
-      className="font-sans text-[15px] font-medium text-ink/80
-                 [transition:color_var(--motion-fast)_var(--ease-out)] hover:text-brand"
-    >
-      {children}
-    </Link>
   )
 }

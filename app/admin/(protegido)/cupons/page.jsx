@@ -2,7 +2,7 @@ import FormularioCupom from '@/components/admin/FormularioCupom.jsx'
 import { listarCupons, listarSafras } from '@/lib/supabase'
 
 // ============================================================
-// CUPONS (`c74`) — criar, desligar, e ver o uso
+// CUPONS (`c74`) — criar, desabilitar, e ver o uso
 //
 // ⚠️ A DIREÇÃO É UMA SÓ (D-07): o cupom nasce aqui e é espelhado no
 // Stripe. Cupom criado pelo Dashboard não existe para o sistema — não
@@ -81,10 +81,11 @@ export default async function Page() {
                 )}
               </div>
 
-              {/* ⚠️ Desligar NÃO apaga: `delete` levaria junto o histórico de
-                  quem já usou, que é informação financeira, e quebraria a FK
-                  de `assinaturas.cupom_id`. É um interruptor, não uma
-                  lixeira. */}
+              {/* ⚠️ Desabilitar NÃO apaga: `delete` levaria junto o histórico
+                  de quem já usou, que é informação financeira, e quebraria a
+                  FK de `assinaturas.cupom_id`. É um interruptor, não uma
+                  lixeira — e é por isso que o botão diz "desabilitar" e não
+                  "excluir". */}
               <BotaoAtivo cupom={c} />
             </li>
           ))}
@@ -104,13 +105,23 @@ function BotaoAtivo({ cupom }) {
       <input type="hidden" name="id" value={cupom.id} />
       <input type="hidden" name="ativo" value={cupom.ativo ? 'false' : 'true'} />
       <input type="hidden" name="_method" value="PATCH" />
+      {/* ⚠️ "DESABILITAR CUPOM" E NÃO "DESLIGAR". O verbo sozinho não dizia
+          o que era desligado — numa linha que também tem turma, validade e
+          contagem de usos, "Desligar" podia ser qualquer um dos quatro. E
+          ele é vermelho porque é o único dos dois estados que TIRA alguma
+          coisa do ar: um cupom desabilitado é um desconto que o checkout
+          passa a recusar, possivelmente já prometido num e-mail. Habilitar
+          de volta não quebra nada, e por isso não é vermelho. */}
       <button
         type="submit"
-        className="rounded-full border border-border-soft px-4 py-2 font-sans text-[14px]
-                   font-medium text-ink [transition:color_var(--motion-fast)_var(--ease-out)]
-                   hover:text-brand"
+        className={`rounded-full border px-4 py-2 font-sans text-[14px] font-medium
+                    [transition:background-color_var(--motion-fast)_var(--ease-out),border-color_var(--motion-fast)_var(--ease-out),color_var(--motion-fast)_var(--ease-out)] ${
+                      cupom.ativo
+                        ? 'border-red-200 text-red-600 hover:border-red-300 hover:bg-red-50'
+                        : 'border-border-soft text-ink hover:border-brand hover:text-brand'
+                    }`}
       >
-        {cupom.ativo ? 'Desligar' : 'Ligar'}
+        {cupom.ativo ? 'Desabilitar cupom' : 'Habilitar cupom'}
       </button>
     </form>
   )

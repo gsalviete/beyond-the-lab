@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import CancelarInscricao from '@/components/admin/CancelarInscricao.jsx'
+import EtiquetaStatus from '@/components/admin/EtiquetaStatus.jsx'
+import { SetaEsquerda } from '@/components/admin/Icones.jsx'
 import { ROTULO_DIA_SEMANA, ROTULO_NIVEL_INGLES, listarDias } from '@/config/dominio'
 import { formatarValorMensal } from '@/config/curso'
 import { buscarFicha } from '@/lib/supabase'
@@ -67,18 +69,33 @@ export default async function Page({ params }) {
 
   return (
     <>
-      <Link href="/admin/alunas" className="font-sans text-[14px] text-muted hover:text-brand">
-        ← Alunas
+      {/* ⚠️ A SETA É UM SVG, E NÃO O CARACTERE `←`. O caractere herda o
+          tamanho da fonte do texto ao lado — crescê-lo cresceria a palavra
+          "Alunas" junto — e sai desenhado diferente em cada sistema. Como
+          ícone, ela tem tamanho próprio e alvo de toque próprio: voltar é o
+          gesto mais repetido desta tela, e estava com a área de um til. */}
+      <Link
+        href="/admin/alunas"
+        className="-ml-2 inline-flex items-center gap-2 rounded-full px-2 py-1.5 font-sans
+                   text-[15px] font-medium text-muted
+                   [transition:color_var(--motion-fast)_var(--ease-out)] hover:text-brand"
+      >
+        <SetaEsquerda className="h-6 w-6" />
+        Alunas
       </Link>
 
       <h1 className="mt-3 font-display text-[26px] font-semibold leading-[1.2] text-[#022D57] sm:text-[32px]">
         {pessoa.nome}
       </h1>
 
-      <p className="mt-2 font-sans text-[15px] text-[#345372]">
-        {ROTULO_STATUS[inscricao.status] ?? inscricao.status}
-        {safra ? ` · ${safra.nome}` : ''}
-      </p>
+      {/* A mesma etiqueta da lista, com o texto longo desta tela. A cor é
+          compartilhada; o rótulo não — ver `EtiquetaStatus.jsx`. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <EtiquetaStatus status={inscricao.status}>
+          {ROTULO_STATUS[inscricao.status] ?? inscricao.status}
+        </EtiquetaStatus>
+        {safra && <span className="font-sans text-[15px] text-[#345372]">{safra.nome}</span>}
+      </div>
 
       <Bloco titulo="Contato">
         <Linha rotulo="E-mail" valor={pessoa.email} />

@@ -1,5 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { VALOR_MENSAL_PADRAO } from '@/config/safra'
 import { exigirAdmin } from '@/lib/admin'
 import { alternarInscricoes, atualizarSafra, criarSafra } from '@/lib/supabase'
 
@@ -28,20 +29,42 @@ const safraSchema = z.object({
   data_inicio_aulas: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   data_primeira_cobranca: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   // `coerce` porque `<input type="number">` chega como string no FormData.
-  valor_mensal: z.coerce.number().positive(),
+  //
+  // ⚠️ EM BRANCO É UM VALOR, NÃO UMA RECUSA: vale `VALOR_MENSAL_PADRAO`.
+  // O formulário promete isso com todas as letras ("Em branco = R$
+  // 299,00"), e a promessa e a gravação leem a MESMA constante, de
+  // `src/config/safra.ts` — é o que impede a tela dizer um número e o
+  // banco receber outro.
+  //
+  // A ordem do `union` importa: `z.coerce.number()` transforma '' em 0,
+  // que o `.positive()` recusa, e só então a alternativa `z.literal('')`
+  // é tentada. É o mesmo arranjo do `vagas_total` logo abaixo.
+  valor_mensal: z.union([z.coerce.number().positive(), z.literal('')]).optional(),
   duracao_meses: z.coerce.number().int().positive(),
   // Vazio = SEM LIMITE (D-08). Não é "zero vagas": é null no banco, e a
   // Giovanna respondeu em 08/08/2026 que não quer número fixo de vagas.
   vagas_total: z.union([z.coerce.number().int().positive(), z.literal('')]).optional(),
 })
 
-/** O corpo comum a criar e editar. */
+/**
+ * O corpo comum a criar e editar.
+ *
+ * ⚠️ O PADRÃO DE MENSALIDADE VALE PARA OS DOIS, e é preciso saber disso
+ * antes de escrever uma tela de edição: um PUT que não mande
+ * `valor_mensal` não está dizendo "mantenha o preço", está dizendo
+ * "R$ 299,00". Hoje não existe formulário de edição — o `_method=PUT` não
+ * tem chamador na interface —, e no dia em que existir ele tem que mandar
+ * o valor atual da turma, nunca um campo vazio.
+ */
 function paraSalvar(d: z.infer<typeof safraSchema>) {
   return {
     nome: d.nome,
     data_inicio_aulas: d.data_inicio_aulas,
     data_primeira_cobranca: d.data_primeira_cobranca,
-    valor_mensal: d.valor_mensal,
+    valor_mensal:
+      d.valor_mensal === '' || d.valor_mensal === undefined
+        ? VALOR_MENSAL_PADRAO
+        : d.valor_mensal,
     duracao_meses: d.duracao_meses,
     vagas_total: d.vagas_total === '' || d.vagas_total === undefined ? null : d.vagas_total,
   }
