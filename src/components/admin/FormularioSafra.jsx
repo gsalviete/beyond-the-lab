@@ -2,6 +2,9 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import CampoData from './CampoData.jsx'
+import { ChevronBaixo } from './Icones.jsx'
+import { MENSALIDADES_SUGERIDAS, VALOR_MENSAL_PADRAO, formatarReais } from '@/config/safra'
 
 // ============================================================
 // CRIAR TURMA (`c65`)
@@ -29,10 +32,26 @@ const CAMPO =
 
 const ROTULO = 'font-display text-[14px] font-semibold text-ink'
 
+/**
+ * O valor escolhido no menu de mensalidade.
+ *
+ * `''` = "deixar no padrão" (o campo não é enviado e a rota grava
+ * `VALOR_MENSAL_PADRAO`), `'outro'` = revela o campo de digitar, e
+ * qualquer outra string é um dos atalhos.
+ */
+const PADRAO = ''
+const OUTRO = 'outro'
+
 export default function FormularioSafra() {
   const router = useRouter()
   const [enviando, setEnviando] = useState(false)
   const [aviso, setAviso] = useState(null)
+  const [mensalidade, setMensalidade] = useState(PADRAO)
+  // ⚠️ O LIMITE DE VAGAS NASCE DESLIGADO porque "sem limite" é o caso
+  // normal (D-08) — a Giovanna respondeu em 08/08/2026 que não quer número
+  // fixo de vagas. Um campo numérico vazio pedindo para ser preenchido
+  // sugeria o contrário.
+  const [comLimite, setComLimite] = useState(false)
 
   async function onSubmit(event) {
     event.preventDefault()
@@ -57,6 +76,12 @@ export default function FormularioSafra() {
 
       if (body?.ok) {
         form.reset()
+        // `form.reset()` devolve os `<input>` ao valor inicial do HTML, e
+        // não sabe nada do React: sem estas duas linhas, o menu voltaria a
+        // "Outro valor" com o campo já limpo, e o interruptor de vagas
+        // continuaria ligado sobre um campo zerado.
+        setMensalidade(PADRAO)
+        setComLimite(false)
         router.refresh()
       }
     } catch {
@@ -93,14 +118,7 @@ export default function FormularioSafra() {
           <label htmlFor="data_inicio_aulas" className={ROTULO}>
             Começo das aulas
           </label>
-          <input
-            id="data_inicio_aulas"
-            name="data_inicio_aulas"
-            type="date"
-            required
-            disabled={enviando}
-            className={CAMPO}
-          />
+          <CampoData id="data_inicio_aulas" name="data_inicio_aulas" required disabled={enviando} />
           {/* ⚠️ O site NUNCA imprime esta data seca (D-14): ele diz "na
               primeira semana de setembro", derivado daqui. Cada grupo
               começa num dia diferente da mesma semana (D-01), e a data
@@ -114,13 +132,11 @@ export default function FormularioSafra() {
           <label htmlFor="data_primeira_cobranca" className={ROTULO}>
             Primeira cobrança
           </label>
-          <input
+          <CampoData
             id="data_primeira_cobranca"
             name="data_primeira_cobranca"
-            type="date"
             required
             disabled={enviando}
-            className={CAMPO}
           />
           {/* Esta sai seca de propósito: cobrança tem dia exato — o cartão
               é debitado no dia 25, não "na última semana". É o oposto da
@@ -131,20 +147,69 @@ export default function FormularioSafra() {
         </div>
 
         <div className="flex flex-col gap-2">
-          <label htmlFor="valor_mensal" className={ROTULO}>
+          <label htmlFor="escolha_mensalidade" className={ROTULO}>
             Mensalidade (R$)
           </label>
-          <input
-            id="valor_mensal"
-            name="valor_mensal"
-            type="number"
-            min="1"
-            step="0.01"
-            required
-            placeholder="299.99"
-            disabled={enviando}
-            className={CAMPO}
-          />
+
+          {/* ⚠️ MENU COM OS VALORES DE SEMPRE, E A PORTA PARA QUALQUER
+              OUTRO. O campo era um `number` vazio, e um campo numérico
+              vazio não diz quanto é o normal: quem cria a terceira turma do
+              ano digita de memória, e memória erra um zero. Os atalhos
+              respondem "é 299 como sempre" num toque, e "Outro valor"
+              devolve o campo livre para o dia em que não for.
+
+              ⚠️ O `<select>` NÃO TEM `name`. Quem carrega o valor para o
+              POST é o `<input>` abaixo — um escondido nos atalhos, um
+              visível em "Outro valor". Dois campos com o mesmo `name` no
+              mesmo formulário mandariam os dois, e o servidor leria o
+              primeiro. */}
+          <div className="relative">
+            <select
+              id="escolha_mensalidade"
+              value={mensalidade}
+              onChange={(e) => setMensalidade(e.target.value)}
+              disabled={enviando}
+              className={`${CAMPO} cursor-pointer appearance-none pr-12`}
+            >
+              <option value={PADRAO}>Deixar no padrão — {formatarReais(VALOR_MENSAL_PADRAO)}</option>
+              {MENSALIDADES_SUGERIDAS.map((v) => (
+                <option key={v} value={String(v)}>
+                  {formatarReais(v)}
+                </option>
+              ))}
+              <option value={OUTRO}>Outro valor…</option>
+            </select>
+            <ChevronBaixo className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          </div>
+
+          {mensalidade === OUTRO ? (
+            <input
+              id="valor_mensal"
+              name="valor_mensal"
+              type="number"
+              min="1"
+              step="0.01"
+              required
+              autoFocus
+              placeholder="Quanto por mês, em reais"
+              disabled={enviando}
+              className={CAMPO}
+            />
+          ) : (
+            mensalidade !== PADRAO && (
+              <input type="hidden" name="valor_mensal" value={mensalidade} />
+            )
+          )}
+
+          {/* ⚠️ EM BRANCO NÃO É ERRO, É UM VALOR — e a frase precisa dizer
+              qual, porque quem deixa em branco está confiando nela. O
+              número sai de `src/config/safra.ts`, o mesmo módulo que a rota
+              lê ao gravar: a promessa da tela e o que o banco recebe não
+              têm como divergir. */}
+          <p className="font-sans text-[13px] leading-[20px] text-muted">
+            Em branco = {formatarReais(VALOR_MENSAL_PADRAO)}. Vale só para quem se inscrever nesta
+            turma — quem já assinou continua pagando o que combinou.
+          </p>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -171,23 +236,84 @@ export default function FormularioSafra() {
         </div>
 
         <div className="flex flex-col gap-2 sm:col-span-2">
-          <label htmlFor="vagas_total" className={ROTULO}>
-            Limite de vagas
-          </label>
-          <input
-            id="vagas_total"
-            name="vagas_total"
-            type="number"
-            min="1"
-            step="1"
-            placeholder="sem limite"
+          <span className={ROTULO}>Limite de vagas</span>
+
+          {/* ⚠️ INTERRUPTOR, E NÃO UM CAMPO VAZIO. "Sem limite" era
+              representado por ausência — um campo em branco —, e ausência
+              não é resposta visível: a tela não distinguia "decidi que não
+              tem limite" de "esqueci de preencher". O interruptor faz a
+              decisão ser explícita nos dois sentidos, e o que vai para o
+              banco continua sendo o mesmo `null`.
+
+              ⚠️ `role="switch"` com `aria-checked` e não uma caixa
+              desenhada: quem usa leitor de tela ouve "ligado/desligado",
+              que é o que este controle é. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={comLimite}
+            aria-labelledby="rotulo-limite-vagas"
             disabled={enviando}
-            className={CAMPO}
-          />
+            onClick={() => setComLimite((v) => !v)}
+            className="flex items-center gap-3 self-start rounded-full disabled:cursor-not-allowed
+                       disabled:opacity-60"
+          >
+            <span
+              aria-hidden="true"
+              className={`relative h-7 w-12 shrink-0 rounded-full border
+                          [transition:background-color_var(--motion-fast)_var(--ease-out),border-color_var(--motion-fast)_var(--ease-out)] ${
+                            comLimite ? 'border-brand bg-brand' : 'border-border-soft bg-white'
+                          }`}
+            >
+              <span
+                className={`absolute top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white
+                            shadow-soft [transition:left_var(--motion-fast)_var(--ease-out)] ${
+                              comLimite ? 'left-[22px]' : 'left-[2px]'
+                            } ${comLimite ? '' : 'border border-border-soft'}`}
+              />
+            </span>
+            <span
+              id="rotulo-limite-vagas"
+              className="font-sans text-[14px] text-ink"
+            >
+              {comLimite ? 'Esta turma tem limite de vagas' : 'Sem limite de vagas'}
+            </span>
+          </button>
+
+          {/* ⚠️ O CAMPO SÓ EXISTE COM O INTERRUPTOR LIGADO, e é isso que
+              garante que desligá-lo grave `null` de verdade: um campo
+              apenas `disabled` continuaria na tela sugerindo um número, e
+              um campo escondido com `value` continuaria sendo enviado. Fora
+              do DOM, não há o que enviar. */}
+          {comLimite && (
+            <>
+              <label htmlFor="vagas_total" className="sr-only">
+                Quantas vagas
+              </label>
+              <input
+                id="vagas_total"
+                name="vagas_total"
+                type="number"
+                min="1"
+                step="1"
+                required
+                autoFocus
+                placeholder="Quantas vagas"
+                disabled={enviando}
+                className={`${CAMPO} sm:max-w-[240px]`}
+              />
+            </>
+          )}
+
           {/* ⚠️ Vazio = SEM LIMITE (D-08), e é o caso normal aqui: você
               respondeu que não precisa de número fixo de vagas. Com limite,
               quem chegar depois de esgotar entra na lista de espera — não
-              vê tela de erro. */}
+              vê tela de erro.
+
+              A frase fica na tela nos DOIS estados do interruptor, de
+              propósito: ela é a única coisa que explica o que acontece com
+              quem chegar depois de esgotar, e essa é justamente a dúvida de
+              quem está decidindo se liga o limite. */}
           <p className="font-sans text-[13px] leading-[20px] text-muted">
             Em branco = sem limite. Com limite, quem chegar depois entra na lista de espera.
           </p>

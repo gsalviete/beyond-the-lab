@@ -2,6 +2,8 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import CampoData from './CampoData.jsx'
+import { ChevronBaixo } from './Icones.jsx'
 
 // ============================================================
 // CRIAR CUPOM (`c74`) — "em linguagem de gente", que é o que o plano pede
@@ -139,20 +141,27 @@ export default function FormularioCupom({ safras }) {
           <label htmlFor="tipo" className={ROTULO}>
             O que o cupom faz
           </label>
-          <select
-            id="tipo"
-            name="tipo"
-            value={tipo}
-            onChange={(e) => setTipo(e.target.value)}
-            disabled={enviando}
-            className={`${CAMPO} cursor-pointer`}
-          >
-            {TIPOS.map((t) => (
-              <option key={t.valor} value={t.valor}>
-                {t.rotulo}
-              </option>
-            ))}
-          </select>
+          {/* A seta é nossa e não a nativa, pelo mesmo motivo do campo de
+              data: a nativa muda de desenho em cada navegador. `pr-12` abre
+              o espaço dela; `pointer-events-none` deixa o clique passar
+              para o `<select>` por baixo. */}
+          <div className="relative">
+            <select
+              id="tipo"
+              name="tipo"
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value)}
+              disabled={enviando}
+              className={`${CAMPO} cursor-pointer appearance-none pr-12`}
+            >
+              {TIPOS.map((t) => (
+                <option key={t.valor} value={t.valor}>
+                  {t.rotulo}
+                </option>
+              ))}
+            </select>
+            <ChevronBaixo className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -176,17 +185,25 @@ export default function FormularioCupom({ safras }) {
           <label htmlFor="safra_id" className={ROTULO}>
             Vale para
           </label>
-          <select id="safra_id" name="safra_id" disabled={enviando} className={`${CAMPO} cursor-pointer`}>
-            {/* ⚠️ VAZIO É `null` NO BANCO, e `null` significa "qualquer
-                safra" — não é ausência de dado, é o cupom de campanha que
-                funciona na turma que estiver aberta (`013`). */}
-            <option value="">Qualquer turma</option>
-            {safras.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nome}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              id="safra_id"
+              name="safra_id"
+              disabled={enviando}
+              className={`${CAMPO} cursor-pointer appearance-none pr-12`}
+            >
+              {/* ⚠️ VAZIO É `null` NO BANCO, e `null` significa "qualquer
+                  safra" — não é ausência de dado, é o cupom de campanha que
+                  funciona na turma que estiver aberta (`013`). */}
+              <option value="">Qualquer turma</option>
+              {safras.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nome}
+                </option>
+              ))}
+            </select>
+            <ChevronBaixo className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          </div>
         </div>
 
         <div className="flex flex-col gap-2">
@@ -212,13 +229,11 @@ export default function FormularioCupom({ safras }) {
           <label htmlFor="expira_em" className={ROTULO}>
             Expira em
           </label>
-          <input
-            id="expira_em"
-            name="expira_em"
-            type="datetime-local"
-            disabled={enviando}
-            className={CAMPO}
-          />
+          {/* O mesmo campo de data das turmas, para os dois formulários do
+              painel não parecerem de produtos diferentes. O porquê da área
+              inteira abrir o calendário está em
+              `src/components/admin/CampoData.jsx`. */}
+          <CampoData id="expira_em" name="expira_em" tipo="datetime-local" disabled={enviando} />
           <p className="font-sans text-[13px] leading-[20px] text-muted">
             Em branco = não expira.
           </p>

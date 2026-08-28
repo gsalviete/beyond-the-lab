@@ -1,4 +1,7 @@
 import Link from 'next/link'
+import ControlesDaLista from '@/components/admin/ControlesDaLista.jsx'
+import EtiquetaStatus from '@/components/admin/EtiquetaStatus.jsx'
+import { hrefAlunas } from '@/components/admin/hrefAlunas.js'
 import { listarAlunas, listarSafrasCompletas } from '@/lib/supabase'
 
 // ============================================================
@@ -29,13 +32,49 @@ const ROTULO_STATUS = {
   cancelada: 'Cancelada',
 }
 
+/**
+ * Quantas linhas a lista mostra quando ninguém escolheu.
+ *
+ * ⚠️ NÃO É "TODAS", e a diferença importa quando a lista crescer: uma
+ * página que desenha centenas de cartões demora a pintar no celular e
+ * enterra o que se procurava. O total continua na tela ao lado do
+ * seletor, então o corte nunca é silencioso — "Mostrando 25 de 137" é a
+ * frase que impede alguém de concluir que só existem 25.
+ */
+const POR_PAGINA_PADRAO = 25
+
+/**
+ * Lê o `?por=` da URL.
+ *
+ * ⚠️ QUALQUER LIXO CAI NO PADRÃO. O parâmetro é digitável na barra de
+ * endereço, e `?por=-1` ou `?por=abc` não podem virar uma lista vazia que
+ * lê como "não tem ninguém". Só 'todas' e um inteiro positivo mudam o
+ * corte; o resto é tratado como se ninguém tivesse escolhido.
+ */
+function lerPorPagina(por) {
+  if (por === 'todas') return null
+  const n = Number(por)
+  return Number.isInteger(n) && n > 0 ? n : POR_PAGINA_PADRAO
+}
+
 export default async function Page({ searchParams }) {
-  const { turma, status } = await searchParams
+  const { turma, status, por } = await searchParams
 
   const [safras, alunas] = await Promise.all([
     listarSafrasCompletas(),
     listarAlunas({ safraId: turma ?? null, status: status ?? null }),
   ])
+
+  // ⚠️ O CORTE É AQUI, DEPOIS DA CONSULTA, e é uma escolha consciente. Um
+  // `range()` no Supabase economizaria transporte, mas a tela precisa do
+  // TOTAL para dizer "de quantas" — e um `count` separado é uma segunda
+  // ida ao banco para responder o que a primeira já sabe. São dezenas de
+  // linhas na vida inteira do produto (a mesma ordem de grandeza que fez
+  // `contarComContrato` ser uma consulta por turma). Se um dia forem
+  // milhares, o lugar de paginar de verdade é dentro de `listarAlunas`.
+  const porPagina = lerPorPagina(por)
+  const visiveis = porPagina === null ? alunas : alunas.slice(0, porPagina)
+  const filtrosAtuais = { turma: turma ?? null, status: status ?? null, por: por ?? null }
 
   return (
     <>
@@ -46,8 +85,9 @@ export default async function Page({ searchParams }) {
       {/* ⚠️ Filtros por LINK, e não por formulário com JavaScript: cada
           combinação vira uma URL, que entra no histórico e pode ser
           compartilhada — "me manda a lista das inadimplentes" deixa de
-          exigir explicação. */}
-      <div className="mt-5 flex flex-col gap-3">
+          exigir explicação. Vale para as pills daqui E para os controles
+          abaixo, que também só empurram uma URL. */}
+      <div className="mt-5 flex flex-col gap-4">
         <Filtro
           titulo="Turma"
           atual={turma}
@@ -55,29 +95,30 @@ export default async function Page({ searchParams }) {
             { valor: null, rotulo: 'Todas' },
             ...safras.map((s) => ({ valor: s.id, rotulo: s.nome })),
           ]}
-          montarHref={(v) => hrefCom({ turma: v, status })}
+          montarHref={(v) => hrefAlunas(filtrosAtuais, { turma: v })}
         />
 
-        <Filtro
-          titulo="Situação"
-          atual={status}
-          opcoes={[
-            { valor: null, rotulo: 'Todas' },
-            ...Object.entries(ROTULO_STATUS).map(([valor, rotulo]) => ({ valor, rotulo })),
-          ]}
-          montarHref={(v) => hrefCom({ turma, status: v })}
+        {/* ⚠️ A SITUAÇÃO SAIU DAS PILLS, e as turmas ficaram. Não é
+            inconsistência: turma são três ou quatro opções que a Giovanna
+            reconhece pelo nome e troca o tempo todo — pill é o controle
+            certo para isso, um toque e pronto. Situação são sete rótulos
+            longos que enchiam duas linhas e empurravam a lista para fora
+            da tela. O porquê da caixa de digitar está em
+            `src/components/admin/ControlesDaLista.jsx`. */}
+        <ControlesDaLista
+          rotulosDeStatus={ROTULO_STATUS}
+          filtrosAtuais={filtrosAtuais}
+          porPagina={porPagina}
+          total={alunas.length}
+          mostrando={visiveis.length}
         />
       </div>
 
-      <p className="mt-6 font-sans text-[14px] text-muted">
-        {alunas.length} {alunas.length === 1 ? 'pessoa' : 'pessoas'}
-      </p>
-
       {alunas.length === 0 ? (
-        <p className="mt-3 font-sans text-[15px] text-muted">Ninguém com esses filtros.</p>
+        <p className="mt-6 font-sans text-[15px] text-muted">Ninguém com esses filtros.</p>
       ) : (
-        <ul className="mt-3 flex flex-col gap-2">
-          {alunas.map((a) => (
+        <ul className="mt-6 flex flex-col gap-2">
+          {visiveis.map((a) => (
             <li key={a.inscricao_id}>
               <Link
                 href={`/admin/alunas/${a.inscricao_id}`}
@@ -92,9 +133,13 @@ export default async function Page({ searchParams }) {
                   <span className="block font-sans text-[13px] text-muted">{a.email}</span>
                 </span>
 
-                <span className="font-sans text-[13px] text-[#345372]">
-                  {ROTULO_STATUS[a.status] ?? a.status}
-                  {a.safra_nome ? ` · ${a.safra_nome}` : ''}
+                <span className="flex flex-wrap items-center gap-2">
+                  <EtiquetaStatus status={a.status}>
+                    {ROTULO_STATUS[a.status] ?? a.status}
+                  </EtiquetaStatus>
+                  {a.safra_nome && (
+                    <span className="font-sans text-[13px] text-[#345372]">{a.safra_nome}</span>
+                  )}
                 </span>
               </Link>
             </li>
@@ -105,14 +150,6 @@ export default async function Page({ searchParams }) {
   )
 }
 
-function hrefCom({ turma, status }) {
-  const p = new URLSearchParams()
-  if (turma) p.set('turma', turma)
-  if (status) p.set('status', status)
-  const q = p.toString()
-  return q ? `/admin/alunas?${q}` : '/admin/alunas'
-}
-
 function Filtro({ titulo, atual, opcoes, montarHref }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -121,11 +158,17 @@ function Filtro({ titulo, atual, opcoes, montarHref }) {
         <Link
           key={o.valor ?? 'todas'}
           href={montarHref(o.valor)}
-          className={`rounded-full border px-3 py-1.5 font-sans text-[13px] ${
-            (atual ?? null) === o.valor
-              ? 'border-brand font-semibold text-brand'
-              : 'border-border-soft text-ink/80'
-          }`}
+          aria-current={(atual ?? null) === o.valor ? 'true' : undefined}
+          /* ⚠️ A PILL ESCOLHIDA É PREENCHIDA, não só contornada de rosa. A
+             borda sozinha some numa fila de pills — quem passa o olho vê
+             cinco caixas iguais e tem que procurar qual está diferente. O
+             preenchimento responde "qual está valendo" antes da leitura. */
+          className={`rounded-full border px-3 py-1.5 font-sans text-[13px]
+                      [transition:background-color_var(--motion-fast)_var(--ease-out),border-color_var(--motion-fast)_var(--ease-out)] ${
+                        (atual ?? null) === o.valor
+                          ? 'border-brand bg-brand font-semibold text-white shadow-pill'
+                          : 'border-border-soft text-ink/80 hover:border-brand hover:text-brand'
+                      }`}
         >
           {o.rotulo}
         </Link>
