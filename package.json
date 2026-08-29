@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "convidar": "node --env-file=.env.local --conditions=react-server --import=./scripts/alias.mjs scripts/convidar.mts"
   },
   "dependencies": {
     "@microsoft/clarity": "^1.0.2",

@@ -258,8 +258,26 @@ async function enviar(opts: {
    * dia sem nenhum comportamento amarrado a ela.
    */
   tipo: string
+  /**
+   * Cópia oculta, quando quem chama quer que a Giovanna receba o mesmo
+   * e-mail que a aluna recebeu.
+   *
+   * ⚠️ É `bcc` E NÃO `cc`, e a escolha não é estética. Em `cc` o endereço
+   * da Giovanna apareceria no cabeçalho que a aluna lê, e um "Enviado
+   * para você e mais alguém" transforma um convite pessoal numa
+   * circular — além de expor o endereço dela para quem der "responder a
+   * todos". `bcc` entrega a cópia sem contar isso a ninguém.
+   *
+   * ⚠️ E ELE É OPCIONAL DE PROPÓSITO. A confirmação da aluna e o alerta
+   * de cobrança recusada não passam por aqui: o primeiro é assunto dela,
+   * e o segundo já vai endereçado à Giovanna. Copiar tudo por padrão
+   * encheria a caixa dela de mensagem que ela não precisa ler, e o dia
+   * em que ela parar de ler é o dia em que o alerta que importa se perde
+   * no meio.
+   */
+  bcc?: string | null
 }): Promise<boolean> {
-  const { para, assunto, html, texto, ref, tipo } = opts
+  const { para, assunto, html, texto, ref, tipo, bcc } = opts
 
   if (!RESEND_API_KEY || !EMAIL_REMETENTE || !EMAIL_ADMIN) {
     console.error(
@@ -288,6 +306,9 @@ async function enviar(opts: {
         // Responder cai no Gmail da Giovanna, e não num endereço que
         // ninguém lê. É o "jeito de tirar dúvidas" do rodapé.
         reply_to: EMAIL_ADMIN,
+        // A chave só entra quando há destino: o Resend recusa `bcc: null`,
+        // e mandar lista vazia é diferente de não mandar.
+        ...(bcc ? { bcc: [bcc] } : {}),
         subject: assunto,
         html,
         text: texto,
@@ -810,6 +831,13 @@ export async function convidarParaInscricao(
   convite: ConviteEmail,
   turma: SafraDoEmail | null,
   motivo: MotivoDoConvite,
+  /**
+   * Cópia oculta para a Giovanna, quando quem chama quiser. Ver o `bcc` de
+   * `enviar`. Ausente por padrão: o painel dispara um convite por vez e ela
+   * já vê o resultado na tela — a cópia serve para envio em lote, onde não
+   * há tela nenhuma dizendo o que saiu.
+   */
+  bcc?: string | null,
 ): Promise<void> {
   try {
     const { assunto, html, texto } = montarConvite(convite, turma, motivo)
@@ -820,6 +848,7 @@ export async function convidarParaInscricao(
       texto,
       ref: convite.email,
       tipo: motivo === 'pendente' ? 'pendente' : 'convite',
+      bcc,
     })
   } catch (err) {
     // Rede a função `enviar` já cobre. Este catch pega o improvável: erro

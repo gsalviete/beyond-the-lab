@@ -1038,7 +1038,35 @@ export async function contarPorStatus(): Promise<ContagensDoPainel> {
   // ao `head: true`: é uma view ou uma RPC que faça `group by status` no
   // banco e devolva cinco linhas.
   // ============================================================
-  const { data, error, status } = await supabase().from('inscricoes').select('status')
+  // ============================================================
+  // ⚠️ OS CONTADORES CONTAM PESSOAS, E ANTES CONTAVAM LINHAS
+  // ============================================================
+  //
+  // A tela sempre prometeu pessoas — a unidade está escrita ao lado de
+  // cada número, e o comentário lá diz por quê. A consulta não cumpria:
+  // ela contava INSCRIÇÕES, e uma pessoa pode ter mais de uma.
+  //
+  // Entrar numa safra não converte a inscrição de lista de espera; a
+  // `016` cria uma linha nova e a antiga fica parada em `lista_espera`
+  // (ver o bloco de `listarListaDeEspera`). Medido em 29/08/2026: o
+  // painel dizia "Lista de espera: 10 pessoas" quando havia sete, porque
+  // Clarisse, Júlia e Tainá apareciam ao mesmo tempo na espera e no
+  // estado novo delas. O número que a Giovanna usa para decidir se abre
+  // outra turma estava 40% acima da verdade.
+  //
+  // ⚠️ A REGRA É "O ESTADO MAIS ADIANTADO VENCE", e não "some tudo": uma
+  // pessoa aparece UMA vez, no ponto mais avançado em que ela chegou.
+  // Somar contaria a Clarisse como pagante E como esperando, que é o bug
+  // com outro nome.
+  //
+  // ⚠️ `pessoa_id` ENTRA NA CONSULTA, e o comentário acima sobre não
+  // trafegar dado pessoal continua valendo: um uuid opaco não diz quem é
+  // ninguém, e sem ele não há como saber que duas linhas são a mesma
+  // pessoa. Nome, e-mail e telefone seguem fora.
+  // ============================================================
+  const { data, error, status } = await supabase()
+    .from('inscricoes')
+    .select('status,pessoa_id')
 
   if (error) {
     throw new Error(
@@ -1053,7 +1081,40 @@ export async function contarPorStatus(): Promise<ContagensDoPainel> {
   // porque um zero é exatamente o que faz a Giovanna não olhar de novo.
   if (!data) throw new Error(`inscricoes(contagem): HTTP ${status} — resposta sem corpo`)
 
-  const conta = (alvo: StatusInscricao) => data.filter((l) => l.status === alvo).length
+  // ⚠️ A ORDEM DESTA LISTA É A REGRA, e ela é o caminho da pessoa pelo
+  // funil: espera → abriu o checkout → cartão salvo → pagando. Quanto
+  // maior o índice, mais adiantado. `cancelada` e `concluida` ficam fora
+  // de propósito — nenhum contador da tela as mostra, e incluí-las aqui
+  // faria uma inscrição cancelada "vencer" a lista de espera de quem se
+  // recadastrou depois de desistir.
+  //
+  // `inadimplente` vem DEPOIS de `ativa` porque é o estado mais recente
+  // de quem já pagava: quem tem as duas está com uma cobrança recusada
+  // agora, e é nessa caixa que a Giovanna precisa vê-la.
+  const FUNIL: StatusInscricao[] = [
+    'lista_espera',
+    'pendente_pagamento',
+    'confirmada',
+    'ativa',
+    'inadimplente',
+  ]
+
+  const maisAdiantado = new Map<string, number>()
+
+  for (const linha of data) {
+    const posicao = FUNIL.indexOf(linha.status as StatusInscricao)
+    if (posicao === -1) continue // `cancelada`/`concluida`: nenhum contador as mostra.
+
+    const atual = maisAdiantado.get(linha.pessoa_id)
+    if (atual === undefined || posicao > atual) maisAdiantado.set(linha.pessoa_id, posicao)
+  }
+
+  const conta = (alvo: StatusInscricao) => {
+    const posicao = FUNIL.indexOf(alvo)
+    let total = 0
+    for (const p of maisAdiantado.values()) if (p === posicao) total += 1
+    return total
+  }
 
   return {
     listaEspera: conta('lista_espera'),
@@ -1523,6 +1584,40 @@ export async function moverParaGrupo(inscricaoId: string, grupoId: string | null
  * `token_expira_em` vem junto para a tela poder dizer se já existe convite
  * vivo — reenviar tem que mandar o MESMO link que está na caixa de entrada
  * dela, e não um novo que invalide o primeiro.
+ *
+ * ============================================================
+ * ⚠️ QUEM JÁ TEM ASSINATURA NÃO É PENDENTE, MESMO QUE O `status` DIGA QUE É
+ * ============================================================
+ *
+ * `status = 'pendente_pagamento'` é a pergunta ERRADA sozinha, e o motivo
+ * foi medido em produção: entre 17 e 24/08/2026 o endpoint do webhook
+ * ficou com o domínio escrito errado (`beyondhelab`, sem o `t`). Três
+ * alunas concluíram o checkout, tiveram o cartão salvo e foram cobradas —
+ * e como o aviso do Stripe nunca chegou, as três continuaram
+ * `pendente_pagamento` no nosso banco.
+ *
+ * Elas apareceram nesta fila. E esta fila tem um botão que dispara o link
+ * de pagamento.
+ *
+ * ⚠️ O QUE ACONTECERIA COM UM CLIQUE: o link cai no caminho de duplicata,
+ * que devolve a MESMA inscrição e abre um checkout novo (`016`, e a 2.7 do
+ * `ESTADO.md`). O Stripe criaria uma SEGUNDA assinatura para quem já tem
+ * uma — duas cobranças por mês, e a segunda sem `cancel_at`, porque o
+ * `registrarAssinatura` faz upsert por `stripe_subscription_id` e a nova
+ * bateria no unique de `inscricao_id`, derrubando o handler. A aluna que
+ * reclamou de não ter sido avisada seria cobrada em dobro.
+ *
+ * Por isso o critério é `pendente_pagamento` **e sem linha em
+ * `assinaturas`**. Assinatura espelhada é prova de que o dinheiro já
+ * andou; o `status` é só o que o nosso banco conseguiu saber sobre isso, e
+ * quando um webhook se perde os dois divergem.
+ *
+ * ⚠️ O FILTRO É NO JS E NÃO NO POSTGREST, de propósito. Um `!inner` no
+ * embed faria o oposto do que se quer (só traria quem TEM assinatura), e
+ * negar embed vazio pede um `not.is` sobre relação que o PostgREST resolve
+ * de formas diferentes conforme a cardinalidade. Uma fila de dezenas de
+ * linhas não paga o risco de uma consulta esperta: aqui a condição está
+ * escrita onde se lê.
  */
 export type PendenteDoPainel = {
   inscricao_id: string
@@ -1538,7 +1633,9 @@ export type PendenteDoPainel = {
 export async function listarPendentes(): Promise<PendenteDoPainel[]> {
   const { data, error } = await supabase()
     .from('inscricoes')
-    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em),safras(nome)')
+    .select(
+      'id,created_at,pessoas(id,nome,email,telefone,token_expira_em),safras(nome),assinaturas(id)',
+    )
     .eq('status', 'pendente_pagamento')
     .order('created_at', { ascending: true })
 
@@ -1553,6 +1650,14 @@ export async function listarPendentes(): Promise<PendenteDoPainel[]> {
   // uma linha que não pode existir.
   return (data ?? [])
     .filter((linha) => linha.pessoas)
+    // Ver o bloco sobre assinatura espelhada no cabeçalho. O embed vem como
+    // array ou objeto conforme a cardinalidade que o PostgREST inferir do
+    // unique de `inscricao_id`, e os dois formatos são tratados aqui em vez
+    // de se apostar em um.
+    .filter((linha) => {
+      const a = linha.assinaturas as unknown
+      return Array.isArray(a) ? a.length === 0 : a == null
+    })
     .map((linha) => ({
       inscricao_id: linha.id,
       pessoa_id: linha.pessoas!.id,
@@ -1597,9 +1702,36 @@ export type EsperandoDoPainel = {
 }
 
 export async function listarListaDeEspera(): Promise<EsperandoDoPainel[]> {
+  // ============================================================
+  // ⚠️ QUEM JÁ SAIU DA LISTA NÃO VOLTA PARA ELA, MESMO TENDO UMA LINHA
+  //    `lista_espera` PARADA NO BANCO
+  // ============================================================
+  //
+  // Entrar numa safra NÃO converte a inscrição de lista de espera: a
+  // `criar_inscricao_travados` (`016`) cria uma linha NOVA. As duas
+  // coexistem, e a antiga fica com `status = 'lista_espera'` e
+  // `safra_id` nulo para sempre.
+  //
+  // Medido em 29/08/2026: das dez linhas `lista_espera`, três eram
+  // dessas — Clarisse (que já paga), Júlia (cartão recusado) e Tainá
+  // (checkout aberto). O painel dizia "Lista de espera: 10 pessoas"
+  // quando havia sete, e a tela de espera oferecia à Giovanna o botão de
+  // convidar a Clarisse para se inscrever na turma que ela já paga.
+  //
+  // É a mesma classe de erro que `listarPendentes` tinha, pela mesma
+  // causa: perguntar o status de UMA linha para decidir sobre uma
+  // PESSOA. O bloco lá explica o estrago do lado do pagamento.
+  //
+  // ⚠️ O EMBED VAI ATÉ AS OUTRAS INSCRIÇÕES DA PESSOA, e é isso que
+  // torna a pergunta respondível: `inscricoes(status)` pendurado em
+  // `pessoas` devolve todos os status daquela pessoa, não só o desta
+  // linha. Sem ele não há como distinguir "está esperando" de "esteve".
+  // ============================================================
   const { data, error } = await supabase()
     .from('inscricoes')
-    .select('id,created_at,pessoas(id,nome,email,telefone,token_expira_em)')
+    .select(
+      'id,created_at,pessoas(id,nome,email,telefone,token_expira_em,inscricoes(status))',
+    )
     .eq('status', 'lista_espera')
     .order('created_at', { ascending: true })
 
@@ -1609,6 +1741,15 @@ export async function listarListaDeEspera(): Promise<EsperandoDoPainel[]> {
 
   return (data ?? [])
     .filter((l) => l.pessoas)
+    // Ver o bloco acima. Só continua esperando quem NÃO tem nenhuma outra
+    // inscrição — qualquer status diferente de `lista_espera` significa
+    // que ela já entrou em alguma safra, e o que sobrou aqui é a linha
+    // velha.
+    .filter((l) => {
+      const outras = l.pessoas!.inscricoes as unknown
+      if (!Array.isArray(outras)) return true
+      return outras.every((i: { status: string }) => i.status === 'lista_espera')
+    })
     .map((l) => ({
       inscricao_id: l.id,
       pessoa_id: l.pessoas!.id,
