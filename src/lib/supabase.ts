@@ -93,6 +93,9 @@ export class SupabaseNotConfiguredError extends Error {
  * trazer os nomes ao escopo deste arquivo, e eles são usados aqui embaixo.)
  */
 import type { NivelIngles, DiaDaSemana } from '@/config/dominio'
+// Neutro. É o único lugar que sabe ler a forma de pagamento de um contrato
+// — inclusive o `null` dos contratos anteriores à D-17.
+import { modalidadeDoContrato, emCentavos, type Modalidade } from '@/config/modalidade'
 export type { NivelIngles, DiaDaSemana }
 
 /**
@@ -141,6 +144,11 @@ export type Safra = Pick<
   | 'inscricoes_abertas'
   | 'vagas_total'
   | 'stripe_price_id'
+  // ⚠️ As três da D-17 (`020`). Nulas = forma não oferecida. Atravessam
+  // para a modal pela `/api/safra-ativa`, que é quem desenha as opções.
+  | 'valor_a_vista'
+  | 'valor_parcelado_total'
+  | 'parcelas_parcelado'
 >
 
 /**
@@ -385,7 +393,7 @@ export async function buscarSafraAtiva(): Promise<SafraAtiva | null> {
   const { data, error } = await supabase()
     .from('safras')
     .select(
-      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total,stripe_price_id',
+      'id,nome,data_inicio_aulas,data_primeira_cobranca,valor_mensal,duracao_meses,inscricoes_abertas,vagas_total,stripe_price_id,valor_a_vista,valor_parcelado_total,parcelas_parcelado',
     )
     .order('data_inicio_aulas', { ascending: false })
     .limit(1)
@@ -564,10 +572,59 @@ export async function buscarSafraDeVitrine(): Promise<SafraVitrine | null> {
  * banco.
  */
 export type ContratoTravado = {
+  /**
+   * ⚠️ O VALOR DE CADA COBRANÇA REGULAR, e o nome é anterior à D-17. No
+   * mensal é a mensalidade, como sempre foi; no parcelado é a parcela
+   * regular; no à vista é o valor inteiro. O nome ficou porque é o da
+   * coluna (`valor_mensal_travado`), e renomear os dois lados por estética
+   * mexeria em contrato de quem já pagou — ver o comentário da coluna na
+   * `021`.
+   */
   valorMensal: number
+  /** A duração do CURSO. Não é o número de cobranças — esse é `parcelas`. */
   duracaoMeses: number
   /** `'YYYY-MM-DD'` — dia de calendário, sem fuso. Ver `paraDataUTC`. */
   dataPrimeiraCobranca: string
+  /**
+   * A forma de pagamento (D-17). Sempre preenchida aqui em cima, mesmo
+   * para contrato anterior à `021` — quem traduz o `null` daquelas linhas
+   * para `'mensal'` é `modalidadeDoContrato`, e só ela.
+   */
+  modalidade: Modalidade
+  /** Quantas cobranças o contrato tem. */
+  parcelas: number
+  /** Quanto o contrato soma, em reais. */
+  valorTotal: number
+}
+
+/**
+ * Completa um contrato lido do banco, traduzindo as linhas anteriores à
+ * D-17.
+ *
+ * ⚠️ AS TRÊS COLUNAS DA `021` SÃO NULAS EM TODO CONTRATO ANTIGO, e sem
+ * backfill (ver o cabeçalho daquela migração). Para essas linhas a forma
+ * é mensal, as parcelas são a duração, e o total é parcela × duração —
+ * calculado em centavos, porque `299.99 * 6` em float não é 1799.94.
+ * Com as colunas preenchidas, vale o que está nelas.
+ */
+function completarContrato(linha: {
+  valor_mensal_travado: number
+  duracao_meses_travada: number
+  data_primeira_cobranca_travada: string
+  modalidade: string | null
+  parcelas_travadas: number | null
+  valor_total_travado: number | null
+}): ContratoTravado {
+  return {
+    valorMensal: linha.valor_mensal_travado,
+    duracaoMeses: linha.duracao_meses_travada,
+    dataPrimeiraCobranca: linha.data_primeira_cobranca_travada,
+    modalidade: modalidadeDoContrato(linha.modalidade),
+    parcelas: linha.parcelas_travadas ?? linha.duracao_meses_travada,
+    valorTotal:
+      linha.valor_total_travado ??
+      (emCentavos(linha.valor_mensal_travado) * linha.duracao_meses_travada) / 100,
+  }
 }
 
 /**
@@ -823,6 +880,16 @@ export async function criarInscricao(dados: {
     p_data_primeira_cobranca_travada: nulavel(
       dados.travados?.dataPrimeiraCobranca ?? null,
     ),
+    // ⚠️ AS TRÊS DA D-17 (`022`), e a regra é a mesma, um degrau acima: são
+    // estas três chaves a mais que fazem a chamada cair na função de
+    // DEZESSEIS e não na de treze da `016`, que continua viva até a `023`
+    // para o build antigo. `null` explícito na lista de espera, nunca
+    // omitido — omitir as três devolveria o corpo de treze chaves, e o
+    // PostgREST resolveria para a função antiga, que grava a inscrição SEM
+    // a forma de pagamento.
+    p_modalidade: nulavel(dados.travados?.modalidade ?? null),
+    p_parcelas_travadas: nulavel(dados.travados?.parcelas ?? null),
+    p_valor_total_travado: nulavel(dados.travados?.valorTotal ?? null),
   })
 
   if (error) {
@@ -877,15 +944,23 @@ export async function criarInscricao(dados: {
   // de banco e vira objeto. Meio contrato aqui viraria um `cancel_at`
   // calculado sobre `undefined` lá na frente — e a conta de prazo é a
   // única deste projeto cujo erro só aparece seis meses depois.
+  //
+  // ⚠️ E A FORMA VEM DA LINHA, não do que foi enviado (D-17). Na duplicata
+  // — a retomada pelo link da D-15 — ela é a da primeira vez. Linha com
+  // contrato e sem forma é contrato anterior à `021`, e `completarContrato`
+  // a lê como mensal.
   const contrato: ContratoTravado | null =
     linha.valor_mensal_travado !== null &&
     linha.duracao_meses_travada !== null &&
     linha.data_primeira_cobranca_travada !== null
-      ? {
-          valorMensal: linha.valor_mensal_travado,
-          duracaoMeses: linha.duracao_meses_travada,
-          dataPrimeiraCobranca: linha.data_primeira_cobranca_travada,
-        }
+      ? completarContrato({
+          valor_mensal_travado: linha.valor_mensal_travado,
+          duracao_meses_travada: linha.duracao_meses_travada,
+          data_primeira_cobranca_travada: linha.data_primeira_cobranca_travada,
+          modalidade: linha.modalidade,
+          parcelas_travadas: linha.parcelas_travadas,
+          valor_total_travado: linha.valor_total_travado,
+        })
       : null
 
   return {
@@ -1239,6 +1314,15 @@ export type SafraParaSalvar = {
   valor_mensal: number
   duracao_meses: number
   vagas_total: number | null
+  /**
+   * As formas da D-17 (`020`). `null` = forma não oferecida, e é o valor
+   * de quem deixa o campo em branco no painel — ao contrário da
+   * mensalidade, que tem padrão. O par do parcelado é tudo-ou-nada, e o
+   * CHECK da `020` recusa a metade.
+   */
+  valor_a_vista: number | null
+  valor_parcelado_total: number | null
+  parcelas_parcelado: number | null
 }
 
 /**
@@ -1475,6 +1559,12 @@ export type FichaDaAluna = {
     Tables<'assinaturas'>,
     'status_stripe' | 'ciclos_pagos' | 'trial_end' | 'cancel_at' | 'stripe_subscription_id'
   > | null
+  /**
+   * O Pix recebido (D-17), ou `null`. Mutuamente exclusivo com
+   * `assinatura` na prática: Pix não cria assinatura, e cartão não passa
+   * por `pagamentos_pix`.
+   */
+  pix: Pick<Tables<'pagamentos_pix'>, 'valor' | 'pago_em'> | null
 }
 
 /**
@@ -1495,7 +1585,7 @@ export type FichaDaAluna = {
 export async function buscarFicha(inscricaoId: string): Promise<FichaDaAluna | null> {
   const { data, error } = await supabase()
     .from('inscricoes')
-    .select('*,pessoas(*),safras(id,nome,data_inicio_aulas),grupos(id,dia_semana,horario),assinaturas(status_stripe,ciclos_pagos,trial_end,cancel_at,stripe_subscription_id)')
+    .select('*,pessoas(*),safras(id,nome,data_inicio_aulas),grupos(id,dia_semana,horario),assinaturas(status_stripe,ciclos_pagos,trial_end,cancel_at,stripe_subscription_id),pagamentos_pix(valor,pago_em)')
     .eq('id', inscricaoId)
     .limit(1)
 
@@ -1506,7 +1596,7 @@ export async function buscarFicha(inscricaoId: string): Promise<FichaDaAluna | n
   const l = data?.[0]
   if (!l || !l.pessoas) return null
 
-  const { pessoas, safras, grupos, assinaturas, ...inscricao } = l
+  const { pessoas, safras, grupos, assinaturas, pagamentos_pix, ...inscricao } = l
 
   return {
     inscricao: inscricao as Tables<'inscricoes'>,
@@ -1517,6 +1607,11 @@ export async function buscarFicha(inscricaoId: string): Promise<FichaDaAluna | n
     // PostgREST devolve o embed conforme a cardinalidade que ele infere.
     // O `Array.isArray` cobre as duas formas sem apostar em uma.
     assinatura: Array.isArray(assinaturas) ? (assinaturas[0] ?? null) : (assinaturas ?? null),
+    // Mesmo 1:1 pelo unique de `inscricao_id` (`021`), e o mesmo
+    // `Array.isArray` pelo mesmo motivo.
+    pix: Array.isArray(pagamentos_pix)
+      ? (pagamentos_pix[0] ?? null)
+      : (pagamentos_pix ?? null),
   }
 }
 
@@ -2016,6 +2111,16 @@ export type PerfilPendente = {
   curso: string
   periodo: string
   disponibilidade: string[]
+  /**
+   * A forma de pagamento TRAVADA na pendência (D-17), ou `null` quando a
+   * pendência não tem contrato (cadastro anterior ao checkout).
+   *
+   * ⚠️ ELA ATRAVESSA PARA A MODAL, e o motivo é não mentir: o servidor vai
+   * cobrar ESTA forma de qualquer jeito (a duplicata devolve o contrato da
+   * linha), e uma modal que deixasse a pessoa escolher o Pix mostraria uma
+   * escolha que não vale. A modal a exibe travada.
+   */
+  modalidade: Modalidade | null
 }
 
 export async function buscarPerfilPendente(
@@ -2024,7 +2129,7 @@ export async function buscarPerfilPendente(
 ): Promise<PerfilPendente | null> {
   const { data, error } = await supabase()
     .from('inscricoes')
-    .select('nivel_ingles,curso,periodo,disponibilidade')
+    .select('nivel_ingles,curso,periodo,disponibilidade,modalidade,valor_mensal_travado')
     .eq('pessoa_id', pessoaId)
     .eq('safra_id', safraId)
     .eq('status', 'pendente_pagamento')
@@ -2047,6 +2152,9 @@ export async function buscarPerfilPendente(
     curso: l.curso,
     periodo: l.periodo,
     disponibilidade: l.disponibilidade,
+    // Sem contrato não há forma travada. Com contrato e sem forma, é
+    // contrato anterior à D-17 — mensal, por `modalidadeDoContrato`.
+    modalidade: l.valor_mensal_travado === null ? null : modalidadeDoContrato(l.modalidade),
   }
 }
 
@@ -2496,11 +2604,52 @@ export async function contarCicloPago(
   return count === 1
 }
 
-/** O contrato travado de uma inscrição, do jeito que o banco o guarda. */
+/**
+ * O contrato travado de uma inscrição, do jeito que o banco o guarda.
+ *
+ * ⚠️ AS TRÊS DA D-17 ENTRARAM AQUI (`021`), e é o webhook que precisa
+ * delas: é pela FORMA da linha que ele decide entre declarar `cancel_at`
+ * (mensal, à vista no cartão) e declarar o schedule (parcelado). Lidas da
+ * inscrição, nunca da safra — mesmo raciocínio da D-06 que este bloco já
+ * explica abaixo. `contratoDosTravados` é quem traduz o `null` das linhas
+ * anteriores à D-17.
+ */
 export type TravadosDaInscricao = Pick<
   Tables<'inscricoes'>,
-  'valor_mensal_travado' | 'duracao_meses_travada' | 'data_primeira_cobranca_travada'
+  | 'valor_mensal_travado'
+  | 'duracao_meses_travada'
+  | 'data_primeira_cobranca_travada'
+  | 'modalidade'
+  | 'parcelas_travadas'
+  | 'valor_total_travado'
 >
+
+/**
+ * Os travados como contrato inteiro, ou `null` se a linha não tem contrato.
+ *
+ * Mesma regra de tudo-ou-nada do `inscricoes_travados_tudo_ou_nada_check`
+ * (`015`), reafirmada na fronteira — ver o bloco equivalente em
+ * `criarInscricao`.
+ */
+export function contratoDosTravados(t: TravadosDaInscricao | null): ContratoTravado | null {
+  if (
+    !t ||
+    t.valor_mensal_travado === null ||
+    t.duracao_meses_travada === null ||
+    t.data_primeira_cobranca_travada === null
+  ) {
+    return null
+  }
+
+  return completarContrato({
+    valor_mensal_travado: t.valor_mensal_travado,
+    duracao_meses_travada: t.duracao_meses_travada,
+    data_primeira_cobranca_travada: t.data_primeira_cobranca_travada,
+    modalidade: t.modalidade,
+    parcelas_travadas: t.parcelas_travadas,
+    valor_total_travado: t.valor_total_travado,
+  })
+}
 
 /**
  * Os três travados de uma inscrição. `null` quando a inscrição não existe.
@@ -2524,7 +2673,9 @@ export async function buscarTravadosDaInscricao(
 ): Promise<TravadosDaInscricao | null> {
   const { data, error } = await supabase()
     .from('inscricoes')
-    .select('valor_mensal_travado,duracao_meses_travada,data_primeira_cobranca_travada')
+    .select(
+      'valor_mensal_travado,duracao_meses_travada,data_primeira_cobranca_travada,modalidade,parcelas_travadas,valor_total_travado',
+    )
     .eq('id', inscricaoId)
     .limit(1)
 
@@ -2533,6 +2684,94 @@ export async function buscarTravadosDaInscricao(
   }
 
   return data?.[0] ?? null
+}
+
+/**
+ * A safra de uma inscrição, no recorte que o Stripe precisa para achar os
+ * `price` do parcelado. `null` quando a inscrição não tem safra.
+ *
+ * ⚠️ SÓ O ID, O NOME E O `price` ESPELHADO — nenhum valor. Os valores que
+ * o webhook cobra são os da INSCRIÇÃO (D-06); a safra entra aqui só porque
+ * o `product` e a `lookup_key` do Stripe são derivados dela. O
+ * `valor_mensal` vem junto apenas porque `SafraParaPrice` o exige, e o
+ * parcelado não o lê.
+ */
+export async function buscarSafraDaInscricao(inscricaoId: string): Promise<{
+  id: string
+  nome: string
+  valor_mensal: number
+  stripe_price_id: string | null
+} | null> {
+  const { data, error } = await supabase()
+    .from('inscricoes')
+    .select('safras(id,nome,valor_mensal,stripe_price_id)')
+    .eq('id', inscricaoId)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`inscricoes(safra): ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  return data?.[0]?.safras ?? null
+}
+
+/**
+ * Registra um Pix RECEBIDO (D-17). Devolve `false` se já estava registrado.
+ *
+ * ⚠️ CHAMADA SÓ QUANDO O DINHEIRO ENTROU — `async_payment_succeeded`, ou um
+ * `completed` que já chegue `paid`. Ver o cabeçalho da `021`: uma linha
+ * por QR gerado seria uma tabela de tentativas.
+ *
+ * ⚠️ `false` NÃO É FALHA. O mesmo Pix chega por dois eventos possíveis
+ * (`completed` já pago e `async_payment_succeeded`), e cada evento pode ser
+ * reentregue. O unique em `stripe_checkout_session_id` é o que faz o
+ * segundo registro não acontecer, e o `23505` dele significa "já está
+ * aqui" — a mesma leitura de `reservarEventoStripe`.
+ *
+ * ⚠️ MAS O UNIQUE EM `inscricao_id` TAMBÉM LEVANTA `23505`, e esse caso é
+ * outro: a mesma inscrição pagou DOIS Pix (duas abas, dois QRs). O
+ * segundo dinheiro entrou de verdade e não tem linha aqui. Quem chama
+ * registra isso no log como alarme — o reembolso é manual, no Dashboard
+ * (D-17) —, e não como duplicata silenciosa. Os dois casos são
+ * distinguidos pela sessão: se a linha existente é desta sessão, é
+ * reentrega; se é de outra, é pagamento em dobro.
+ */
+export async function registrarPagamentoPix(dados: {
+  inscricaoId: string
+  stripeCheckoutSessionId: string
+  stripePaymentIntentId: string | null
+  valor: number
+  pagoEm: string
+}): Promise<'registrado' | 'ja_registrado' | 'pago_em_dobro'> {
+  const { error } = await supabase().from('pagamentos_pix').insert({
+    inscricao_id: dados.inscricaoId,
+    stripe_checkout_session_id: dados.stripeCheckoutSessionId,
+    stripe_payment_intent_id: dados.stripePaymentIntentId,
+    valor: dados.valor,
+    pago_em: dados.pagoEm,
+  })
+
+  if (!error) return 'registrado'
+
+  if (error.code !== UNIQUE_VIOLATION) {
+    throw new Error(`pagamentos_pix: ${error.code ?? 'sem código'} — ${error.message}`)
+  }
+
+  const { data, error: erroLeitura } = await supabase()
+    .from('pagamentos_pix')
+    .select('stripe_checkout_session_id')
+    .eq('inscricao_id', dados.inscricaoId)
+    .limit(1)
+
+  if (erroLeitura) {
+    throw new Error(
+      `pagamentos_pix(select): ${erroLeitura.code ?? 'sem código'} — ${erroLeitura.message}`,
+    )
+  }
+
+  return data?.[0]?.stripe_checkout_session_id === dados.stripeCheckoutSessionId
+    ? 'ja_registrado'
+    : 'pago_em_dobro'
 }
 
 /**
@@ -2545,9 +2784,14 @@ export async function buscarTravadosDaInscricao(
  * webhook recebe um evento do Stripe — ele não sabe o nome de ninguém.
  *
  * O corte continua explícito e continua sendo o mínimo: nome, e-mail,
- * telefone e o perfil, que é literalmente o que o corpo da mensagem
- * imprime. Fora ficam `consent_text`, `consent_at`, `status`, os travados
- * e os ids — nada disso é lido para escrever o e-mail.
+ * telefone, o perfil e — desde a D-17 — o contrato travado, que é
+ * literalmente o que o corpo da mensagem imprime. Fora ficam
+ * `consent_text`, `consent_at`, `status` e os ids — nada disso é lido
+ * para escrever o e-mail.
+ *
+ * ⚠️ OS TRAVADOS ESTAVAM NA LISTA DE FORA ATÉ A D-17, e entraram porque o
+ * e-mail passou a dizer o que foi combinado: com quatro formas de pagar,
+ * a pessoa precisa ler, por escrito, qual escolheu.
  *
  * ⚠️ E ELE NÃO ATRAVESSA PARA NAVEGADOR NENHUM. O único chamador é
  * `app/api/stripe/webhook/route.ts`, que usa o resultado para chamar
@@ -2564,6 +2808,12 @@ export type InscricaoParaEmail = {
   periodo: string
   disponibilidade: DiaDaSemana[]
   safra: { nome: string; data_inicio_aulas: string } | null
+  /**
+   * O contrato travado (D-17), para a frase de pagamento do e-mail.
+   * `null` sem contrato. ⚠️ Entrou no recorte com a D-17 — ver o bloco
+   * acima, que dizia que os travados ficavam de fora.
+   */
+  contrato: ContratoTravado | null
 }
 
 /**
@@ -2597,7 +2847,7 @@ export async function buscarInscricaoParaEmail(
     // coluna existe. O erro que aparece é críptico (`Property 'pessoas'
     // does not exist on type '{ error: true } & String'`) e não menciona a
     // causa.
-    .select('nivel_ingles,curso,periodo,disponibilidade,pessoas(nome,email,telefone),safras(nome,data_inicio_aulas)')
+    .select('nivel_ingles,curso,periodo,disponibilidade,valor_mensal_travado,duracao_meses_travada,data_primeira_cobranca_travada,modalidade,parcelas_travadas,valor_total_travado,pessoas(nome,email,telefone),safras(nome,data_inicio_aulas)')
     .eq('id', inscricaoId)
     .limit(1)
 
@@ -2608,7 +2858,7 @@ export async function buscarInscricaoParaEmail(
   const linha = data?.[0]
   if (!linha) return null
 
-  const { pessoas, safras, nivel_ingles, curso, periodo, disponibilidade } = linha
+  const { pessoas, safras, nivel_ingles, curso, periodo, disponibilidade, ...travados } = linha
 
   // O perfil é tudo-ou-nada para efeito de e-mail: sem qualquer um destes
   // a mensagem sairia com um buraco no meio. Ver o ⚠️ acima sobre as
@@ -2630,6 +2880,7 @@ export async function buscarInscricaoParaEmail(
     periodo,
     disponibilidade: disponibilidade as DiaDaSemana[],
     safra: safras ?? null,
+    contrato: contratoDosTravados(travados),
   }
 }
 

@@ -54,6 +54,19 @@ type SafraPublica = {
    */
   inscricoes_abertas: boolean
   /**
+   * As formas da D-17 (`020`). `null` = forma não oferecida, e a modal não
+   * a desenha. São número JSON para EXIBIR — a divisão do parcelado em
+   * centavos acontece em `dividirEmParcelas`, que a modal e o servidor
+   * importam do mesmo módulo.
+   *
+   * ⚠️ O QUE A MODAL MOSTRA NÃO É O QUE DECIDE. A forma que a pessoa
+   * clicar é refeita contra a safra no POST (`contratoDaModalidade`), e a
+   * Giovanna pode ter tirado o à vista entre este GET e aquele POST.
+   */
+  valor_a_vista: number | null
+  valor_parcelado_total: number | null
+  parcelas_parcelado: number | null
+  /**
    * Quantas vagas sobraram, ou `null` para **SEM LIMITE**.
    *
    * `null` não é "não sabemos" nem "zero": é `vagas_total is null` no
@@ -93,6 +106,9 @@ export async function GET() {
       valor_mensal: safra.valor_mensal,
       duracao_meses: safra.duracao_meses,
       inscricoes_abertas: safra.inscricoes_abertas,
+      valor_a_vista: safra.valor_a_vista,
+      valor_parcelado_total: safra.valor_parcelado_total,
+      parcelas_parcelado: safra.parcelas_parcelado,
       // `Math.max(0, ...)` é a garantia de nunca negativo descrita no
       // DTO. O `null` passa direto, sem virar 0: as duas coisas dizem
       // coisas opostas — "sem limite" e "acabou" — e colapsá-las aqui

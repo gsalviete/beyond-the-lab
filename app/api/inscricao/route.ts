@@ -13,11 +13,16 @@ import {
 import {
   ancorasDaAssinatura,
   criarSessaoDeCheckout,
+  criarSessaoPix,
   cupomNoStripe,
-  precoDoContrato,
+  precoDaModalidade,
   StripeNotConfiguredError,
   trialEhAceitavel,
 } from '@/lib/stripe'
+// As formas de pagamento da D-17. Neutro: a modal lê o mesmo módulo para
+// desenhar as opções, e é isso que impede a tela de oferecer uma forma
+// que esta rota não sabe montar.
+import { aceitaCupom, contratoDaModalidade } from '@/config/modalidade'
 import { confirmarInscricao, notificarAdmin } from '@/lib/email'
 // O schema e a mensagem de erro moram juntos, em `src/config/schemas.ts`.
 // Metade do schema é derivada de `dominio.ts` e a outra metade não é
@@ -202,12 +207,19 @@ const GENERIC_ERROR = 'Não conseguimos salvar seu cadastro agora. Tente novamen
 // Só se pergunta pelo código que se conhece, e a resposta fala só dele —
 // não há listagem, não há "quase", não há sugestão.
 // ============================================================
-const MENSAGEM_CUPOM: Record<MotivoCupomInvalido, string> = {
+// ⚠️ `outra_forma` NÃO É MOTIVO DE `cupomInvalidoPorque`, e não é por
+// esquecimento: aquela função responde se o CUPOM é válido, e ele é. O que
+// não vale é a combinação com a forma de pagamento (D-17), e quem sabe a
+// forma é esta rota.
+const MENSAGEM_CUPOM: Record<MotivoCupomInvalido | 'outra_forma', string> = {
   inexistente: 'Não encontramos esse cupom. Confira o código e tente de novo.',
   inativo: 'Esse cupom não está mais disponível.',
   expirado: 'Esse cupom expirou.',
   esgotado: 'Esse cupom já atingiu o limite de usos.',
   outra_safra: 'Esse cupom não vale para esta turma.',
+  // ⚠️ D-17: cupom só vale no mensal. Não é culpa do cupom nem de quem o
+  // digitou — é a forma de pagamento escolhida, e a frase diz qual mudar.
+  outra_forma: 'Esse cupom vale só no pagamento mensal.',
   // ⚠️ Este é o único da lista que NÃO é culpa de quem digitou: o cupom é
   // válido e o espelho no Stripe não subiu. A mensagem não diz "inválido"
   // porque ele não é — e não diz "erro nosso" porque isso não ajuda
@@ -284,6 +296,9 @@ export async function POST(req: Request) {
     periodo,
     disponibilidade,
     cupom,
+    // ⚠️ D-17. Já vem com o padrão do schema (mensal) quando o POST não a
+    // manda — o bundle antigo. Ver `MODALIDADE_PADRAO`.
+    modalidade,
   } = parsed.data
 
   // Honeypot preenchido: responde sucesso e não grava nada. Devolver erro
@@ -423,14 +438,45 @@ export async function POST(req: Request) {
   // PRIMEIRA vez e ignora este. É de propósito, e é o que a sessão de
   // checkout tem que cobrar.
   // ------------------------------------------------------------
-  const travados =
-    abreCheckout && safra
-      ? {
-          valorMensal: safra.valor_mensal,
-          duracaoMeses: safra.duracao_meses,
-          dataPrimeiraCobranca: safra.data_primeira_cobranca,
-        }
-      : null
+  //
+  // ⚠️ DESDE A D-17 O CONTRATO DEPENDE DA FORMA ESCOLHIDA, e quem o monta é
+  // `contratoDaModalidade` — o mesmo módulo que a modal lê. `null` lá
+  // significa "esta safra não oferece esta forma", e isso NÃO degrada
+  // para o mensal: quem pediu o Pix não pediu mensalidade, e cobrar outra
+  // coisa do que a pessoa escolheu é cobrar errado. A resposta é 400, sem
+  // escrita, com o formulário intacto na tela — o mesmo tratamento do
+  // cupom inválido logo abaixo, pela mesma razão.
+  //
+  // ⚠️ O CASO RARO QUE ISSO DEIXA DE FORA, registrado: alguém escolhe o
+  // à vista, abandona o checkout, a Giovanna tira o à vista da safra, e a
+  // pessoa volta pelo link da D-15 com a forma travada. A forma da linha
+  // continua valendo (D-06), mas esta verificação acontece ANTES da RPC,
+  // que é quem sabe que a linha existe — e a pessoa recebe "forma não
+  // disponível". A saída é a Giovanna devolver a forma à safra ou falar
+  // com ela. Resolver isso aqui exigiria ler a inscrição antes de
+  // escrevê-la, que é a janela que a RPC existe para não abrir.
+  // ------------------------------------------------------------
+  const contratoEscolhido =
+    abreCheckout && safra ? contratoDaModalidade(safra, modalidade) : null
+
+  if (abreCheckout && !contratoEscolhido) {
+    console.warn('[inscricao] forma de pagamento nao oferecida pela safra', modalidade, safra?.id)
+    return json(
+      { ok: false, message: 'Essa forma de pagamento não está disponível para esta turma.' },
+      400,
+    )
+  }
+
+  const travados = contratoEscolhido
+    ? {
+        valorMensal: contratoEscolhido.valorPorCobranca,
+        duracaoMeses: contratoEscolhido.duracaoMeses,
+        dataPrimeiraCobranca: contratoEscolhido.dataPrimeiraCobranca,
+        modalidade: contratoEscolhido.modalidade,
+        parcelas: contratoEscolhido.parcelas,
+        valorTotal: contratoEscolhido.valorTotal,
+      }
+    : null
 
   // ============================================================
   // O CUPOM (`c49`) — validado ANTES de qualquer escrita
@@ -453,6 +499,16 @@ export async function POST(req: Request) {
   // ------------------------------------------------------------
   let stripeCouponId: string | null = null
   let cupomId: string | null = null
+
+  // ⚠️ CUPOM FORA DO MENSAL É RECUSADO (D-17), e antes da escrita, pela
+  // mesma razão de todo cupom inválido: a pessoa corrige e reenvia, sem
+  // ter sido gravada por causa de um campo. A modal esconde o campo nas
+  // outras formas, então isto só é alcançado por POST montado à mão — ou
+  // por uma aba antiga.
+  if (cupom && abreCheckout && !aceitaCupom(modalidade)) {
+    console.warn('[inscricao] cupom recusado', 'outra_forma', modalidade)
+    return json({ ok: false, message: MENSAGEM_CUPOM.outra_forma }, 400)
+  }
 
   if (cupom && abreCheckout && safra) {
     try {
@@ -674,12 +730,63 @@ export async function POST(req: Request) {
   // recuperável pela própria pessoa.
   // ============================================================
   if (abreCheckout && safra && result.inscricaoId && result.contrato) {
+    const contrato = result.contrato
+
     try {
+      // ============================================================
+      // ⚠️ A FORMA QUE VALE É A DA LINHA, NÃO A DO FORMULÁRIO (D-17)
+      // ============================================================
+      //
+      // Na duplicata — quem volta pelo link da D-15 ou preenche de novo —
+      // a RPC devolve o contrato da PRIMEIRA vez, inclusive a forma. "Mesma
+      // modalidade" foi a decisão do dono do repositório em 20/10/2026, e
+      // é este `contrato` que a cumpre: quem escolheu o 12x e abandonou
+      // paga o 12x, mesmo que hoje tenha clicado no Pix.
+      //
+      // ⚠️ O CUPOM SEGUE A MESMA FORMA. Ele foi validado contra a forma
+      // ENVIADA; se a da linha não for o mensal, ele não entra na sessão —
+      // desconto de mensalidade num pagamento único seria o curso de
+      // graça. Fica no log, porque alguém digitou um código que não foi
+      // usado.
+      const cupomDaSessao = aceitaCupom(contrato.modalidade)
+      if (!cupomDaSessao && cupomId) {
+        console.warn(
+          '[inscricao] cupom ignorado — a forma travada na linha nao e mensal',
+          result.inscricaoId,
+          contrato.modalidade,
+        )
+      }
+
+      // ------------------------------------------------------------
+      // O PIX — sessão de pagamento único, cobrada agora (D-17)
+      //
+      // ⚠️ A ÚNICA FORMA QUE NÃO PASSA PELO TRIAL. Pix não guarda meio de
+      // pagamento: "salvar hoje, cobrar depois" não existe para ele. O
+      // valor é o TOTAL da linha (D-06), não o da safra.
+      // ------------------------------------------------------------
+      if (contrato.modalidade === 'a_vista_pix') {
+        const url = await criarSessaoPix({
+          inscricaoId: result.inscricaoId,
+          safra,
+          valor: contrato.valorTotal,
+          email,
+          sucessoUrl: paginaDeRetorno(req, '/inscricao/sucesso'),
+          canceladoUrl: paginaDeRetorno(req, '/inscricao/cancelado'),
+        })
+
+        return json({ ok: true, modo: 'checkout', url, message: SUCCESS_MESSAGE_CHECKOUT }, 200)
+      }
+
       // ⚠️ O `price` SAI DO CONTRATO DA LINHA, não do valor da safra. Nos
       // dois coincidem no caminho normal; divergem quando a Giovanna mudou
       // o preço entre a primeira tentativa e a retomada, e aí é o contrato
-      // que vale (D-06). Ver `precoDoContrato`.
-      const preco = await precoDoContrato(safra, result.contrato.valorMensal)
+      // que vale (D-06). Ver `precoDoContrato` e `precoDaModalidade` — no
+      // mensal o caminho é exatamente o de antes da D-17.
+      const preco = await precoDaModalidade(safra, {
+        modalidade: contrato.modalidade,
+        valorPorCobranca: contrato.valorMensal,
+        duracaoMeses: contrato.duracaoMeses,
+      })
 
       // ⚠️ A GRAVAÇÃO DO `price` NÃO PODE DERRUBAR O CHECKOUT. Ela é
       // otimização de próxima chamada, não requisito desta: o `priceId`
@@ -696,8 +803,8 @@ export async function POST(req: Request) {
       }
 
       const { trialEnd } = ancorasDaAssinatura({
-        data_primeira_cobranca: result.contrato.dataPrimeiraCobranca,
-        duracao_meses: result.contrato.duracaoMeses,
+        data_primeira_cobranca: contrato.dataPrimeiraCobranca,
+        duracao_meses: contrato.duracaoMeses,
       })
 
       // ⚠️ `cancelAt` NÃO É USADO AQUI, e a ausência é a nota da D-05: a
@@ -718,16 +825,18 @@ export async function POST(req: Request) {
         // A mesma data, em string, para a frase da tela do Stripe. Sai do
         // CONTRATO e não da safra: quem retomou um checkout antigo lê a
         // data que combinou, não a de hoje (D-06).
-        dataPrimeiraCobranca: result.contrato.dataPrimeiraCobranca,
+        dataPrimeiraCobranca: contrato.dataPrimeiraCobranca,
         safraId: safra.id,
-        stripeCouponId,
+        modalidade: contrato.modalidade,
+        parcelas: contrato.parcelas,
+        stripeCouponId: cupomDaSessao ? stripeCouponId : null,
         // ⚠️ O id do NOSSO cupom viaja em metadata, e é assim que o webhook
         // grava `assinaturas.cupom_id`. Mapear de volta a partir do
         // `coupon` do Stripe exigiria fatiar o id `cupom_<uuid>` — decidir
         // identidade pelo formato de uma string, que quebra no dia em que
         // o formato mudar. Quem sabe qual cupom foi aplicado é quem o
         // aplicou.
-        cupomId,
+        cupomId: cupomDaSessao ? cupomId : null,
         sucessoUrl: paginaDeRetorno(req, '/inscricao/sucesso'),
         canceladoUrl: paginaDeRetorno(req, '/inscricao/cancelado'),
       })

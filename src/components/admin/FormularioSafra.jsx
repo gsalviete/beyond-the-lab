@@ -235,6 +235,80 @@ export default function FormularioSafra() {
           </p>
         </div>
 
+        {/* ============================================================
+            AS OUTRAS FORMAS DE PAGAMENTO (D-17)
+            ============================================================
+
+            ⚠️ EM BRANCO = A TURMA NÃO OFERECE ESTA FORMA, e é o oposto da
+            mensalidade, que tem padrão. Uma turma nova não sai vendendo à
+            vista por um preço que ninguém digitou. O site e o formulário de
+            inscrição só mostram a forma que tiver valor aqui.
+
+            ⚠️ NENHUMA MEDIDA NOVA: o mesmo `CAMPO`, o mesmo `ROTULO` e a
+            mesma frase de ajuda dos campos acima. */}
+        <div className="flex flex-col gap-2">
+          <label htmlFor="valor_a_vista" className={ROTULO}>
+            À vista (R$)
+          </label>
+          <input
+            id="valor_a_vista"
+            name="valor_a_vista"
+            type="number"
+            min="1"
+            step="0.01"
+            placeholder="Em branco = não oferecer"
+            disabled={enviando}
+            className={CAMPO}
+          />
+          {/* O mesmo valor vale para o cartão e para o Pix. A diferença é
+              QUANDO cobra: o cartão na data da primeira cobrança, como a
+              mensalidade; o Pix na hora da inscrição (D-17). */}
+          <p className="font-sans text-[13px] leading-[20px] text-muted">
+            Vale para cartão e Pix. O cartão é debitado na data da primeira cobrança, uma vez
+            só; o Pix é pago na hora da inscrição.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className={ROTULO}>Parcelado</span>
+          {/* ⚠️ O TOTAL, e não o valor da parcela — o negócio fixa o total
+              (R$ 2.000,00), e a divisão em centavos é do sistema: 12 vezes
+              de R$ 2.000,00 são 11 de 166,67 e uma de 166,63. Digitar a
+              parcela faria o total virar 2.000,04. */}
+          <div className="grid grid-cols-2 gap-2">
+            <label htmlFor="valor_parcelado_total" className="sr-only">
+              Total do parcelado, em reais
+            </label>
+            <input
+              id="valor_parcelado_total"
+              name="valor_parcelado_total"
+              type="number"
+              min="1"
+              step="0.01"
+              placeholder="Total (R$)"
+              disabled={enviando}
+              className={CAMPO}
+            />
+            <label htmlFor="parcelas_parcelado" className="sr-only">
+              Número de parcelas
+            </label>
+            <input
+              id="parcelas_parcelado"
+              name="parcelas_parcelado"
+              type="number"
+              min="2"
+              step="1"
+              placeholder="Parcelas"
+              disabled={enviando}
+              className={CAMPO}
+            />
+          </div>
+          <p className="font-sans text-[13px] leading-[20px] text-muted">
+            Em branco = não oferecer. Preencha os dois: o total e em quantas vezes. As parcelas
+            começam na data da primeira cobrança.
+          </p>
+        </div>
+
         <div className="flex flex-col gap-2 sm:col-span-2">
           <span className={ROTULO}>Limite de vagas</span>
 

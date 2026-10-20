@@ -61,6 +61,8 @@ const dubles = vi.hoisted(() => {
 
     verificarEventoDoStripe: vi.fn(),
     declararFimDaAssinatura: vi.fn(),
+    declararParcelamento: vi.fn(),
+    precosDoParcelado: vi.fn(),
     subscriptionsRetrieve: vi.fn(),
 
     reservarEventoStripe: vi.fn(),
@@ -69,7 +71,9 @@ const dubles = vi.hoisted(() => {
     mudarStatusInscricao: vi.fn(),
     buscarAssinaturaPorSubscription: vi.fn(),
     buscarTravadosDaInscricao: vi.fn(),
+    buscarSafraDaInscricao: vi.fn(),
     buscarInscricaoParaEmail: vi.fn(),
+    registrarPagamentoPix: vi.fn(),
     contarCicloPago: vi.fn(),
     confirmarInscricao: vi.fn(),
     alertarCobrancaFalhada: vi.fn(),
@@ -85,6 +89,11 @@ vi.mock('@/lib/stripe', async (original) => {
     // — não de que ela declara a data certa.
     somarMeses: real.somarMeses,
     paraEpoch: real.paraEpoch,
+    // ⚠️ `fimDoContrato` TAMBÉM: é a conta do à vista sem trial (D-17), e
+    // ela decide se alguém recebe uma segunda cobrança.
+    fimDoContrato: real.fimDoContrato,
+    declararParcelamento: dubles.declararParcelamento,
+    precosDoParcelado: dubles.precosDoParcelado,
     StripeNotConfiguredError: dubles.StripeNotConfiguredError,
     WebhookNotConfiguredError: dubles.WebhookNotConfiguredError,
     verificarEventoDoStripe: dubles.verificarEventoDoStripe,
@@ -93,7 +102,11 @@ vi.mock('@/lib/stripe', async (original) => {
   }
 })
 
-vi.mock('@/lib/supabase', () => ({
+// ⚠️ `contratoDosTravados` VEM DE VERDADE: é quem lê o `null` dos contratos
+// anteriores à D-17 como mensal, e a forma que ela devolve decide entre
+// `cancel_at` e schedule.
+vi.mock('@/lib/supabase', async (original) => ({
+  contratoDosTravados: (await original<typeof import('@/lib/supabase')>()).contratoDosTravados,
   SupabaseNotConfiguredError: dubles.SupabaseNotConfiguredError,
   reservarEventoStripe: dubles.reservarEventoStripe,
   liberarEventoStripe: dubles.liberarEventoStripe,
@@ -101,7 +114,9 @@ vi.mock('@/lib/supabase', () => ({
   mudarStatusInscricao: dubles.mudarStatusInscricao,
   buscarAssinaturaPorSubscription: dubles.buscarAssinaturaPorSubscription,
   buscarTravadosDaInscricao: dubles.buscarTravadosDaInscricao,
+  buscarSafraDaInscricao: dubles.buscarSafraDaInscricao,
   buscarInscricaoParaEmail: dubles.buscarInscricaoParaEmail,
+  registrarPagamentoPix: dubles.registrarPagamentoPix,
   contarCicloPago: dubles.contarCicloPago,
 }))
 
@@ -185,7 +200,9 @@ const FATURA_DO_TRIAL = {
 function escritas() {
   return [
     dubles.declararFimDaAssinatura,
+    dubles.declararParcelamento,
     dubles.registrarAssinatura,
+    dubles.registrarPagamentoPix,
     dubles.mudarStatusInscricao,
     dubles.contarCicloPago,
   ]
@@ -197,10 +214,16 @@ beforeEach(() => {
   dubles.verificarEventoDoStripe.mockReturnValue(SESSAO_COMPLETA)
   dubles.reservarEventoStripe.mockResolvedValue(true)
   dubles.liberarEventoStripe.mockResolvedValue(undefined)
+  // ⚠️ AS TRÊS DA D-17 NULAS: é um contrato anterior à `021`, que o banco
+  // devolve assim (sem backfill) e que `contratoDosTravados` lê como
+  // mensal. É o caso de toda assinatura que já está em produção.
   dubles.buscarTravadosDaInscricao.mockResolvedValue({
     valor_mensal_travado: 299.99,
     duracao_meses_travada: 6,
     data_primeira_cobranca_travada: '2026-09-01',
+    modalidade: null,
+    parcelas_travadas: null,
+    valor_total_travado: null,
   })
   dubles.subscriptionsRetrieve.mockResolvedValue({
     id: SUB_ID,
@@ -673,5 +696,271 @@ describe('a fatura do trial', () => {
     await POST(requisicao())
     expect(dubles.contarCicloPago).toHaveBeenCalledTimes(1)
     expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'ativa')
+  })
+})
+
+// ============================================================
+// AS FORMAS DE PAGAMENTO (D-17) — `c90` a `c94`
+//
+// ⚠️ O QUE ESTE BLOCO NÃO PROVA: que o Stripe cobra 11 + 1 nas datas
+// certas, nem que o Pix de verdade dispara estes eventos nesta ordem. Isso
+// só fecha com o aceite do corte 4, em modo teste. O que ele prova é que a
+// rota escolhe o mecanismo certo para cada forma e não escreve o que não
+// deve.
+// ============================================================
+const TRAVADOS_PARCELADO = {
+  valor_mensal_travado: 166.67,
+  duracao_meses_travada: 6,
+  data_primeira_cobranca_travada: '2026-11-02',
+  modalidade: 'parcelado',
+  parcelas_travadas: 12,
+  valor_total_travado: 2000,
+}
+
+const TRAVADOS_A_VISTA = {
+  valor_mensal_travado: 1500,
+  duracao_meses_travada: 6,
+  data_primeira_cobranca_travada: '2026-11-02',
+  modalidade: 'a_vista_cartao',
+  parcelas_travadas: 1,
+  valor_total_travado: 1500,
+}
+
+const SAFRA_DA_INSCRICAO = {
+  id: '77777777-7777-7777-7777-777777777777',
+  nome: 'Novembro 2026',
+  valor_mensal: 299.99,
+  stripe_price_id: null,
+}
+
+describe('parcelado: schedule no lugar de `cancel_at`', () => {
+  beforeEach(() => {
+    dubles.buscarTravadosDaInscricao.mockResolvedValue(TRAVADOS_PARCELADO)
+    dubles.buscarSafraDaInscricao.mockResolvedValue(SAFRA_DA_INSCRICAO)
+    dubles.precosDoParcelado.mockResolvedValue({
+      priceRegular: 'price_16667',
+      priceUltima: 'price_16663',
+    })
+  })
+
+  it('sessão concluída declara o schedule com 12 parcelas, e NÃO põe `cancel_at`', async () => {
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.declararParcelamento).toHaveBeenCalledWith({
+      subscriptionId: SUB_ID,
+      parcelas: 12,
+      priceRegular: 'price_16667',
+      priceUltima: 'price_16663',
+    })
+    expect(dubles.declararFimDaAssinatura).not.toHaveBeenCalled()
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'confirmada')
+  })
+
+  // ⚠️ D-06: os `price` saem do TOTAL DA LINHA, não da safra.
+  it('os `price` são pedidos para o total e as parcelas do contrato', async () => {
+    await POST(requisicao())
+    expect(dubles.precosDoParcelado.mock.calls[0][1]).toMatchObject({
+      valorTotal: 2000,
+      parcelas: 12,
+    })
+  })
+
+  // ⚠️ NO PARCELADO, `cancel_at` NULO É O ESTADO NORMAL. Pôr `cancel_at`
+  // numa assinatura com schedule é recusado pelo Stripe — o 500 viraria
+  // reentrega eterna, e nenhum ciclo seria contado.
+  it('`invoice.paid` com `cancel_at` nulo garante o schedule, e conta o ciclo', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(FATURA_PAGA)
+    dubles.buscarAssinaturaPorSubscription.mockResolvedValue({
+      id: ASSINATURA_ID,
+      inscricao_id: INSCRICAO_ID,
+      ciclos_pagos: 3,
+      cancel_at: null,
+    })
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.declararParcelamento).toHaveBeenCalledTimes(1)
+    expect(dubles.declararFimDaAssinatura).not.toHaveBeenCalled()
+    expect(dubles.contarCicloPago).toHaveBeenCalledWith(ASSINATURA_ID, 3)
+  })
+})
+
+describe('à vista no cartão: uma cobrança só', () => {
+  beforeEach(() => {
+    dubles.buscarTravadosDaInscricao.mockResolvedValue(TRAVADOS_A_VISTA)
+  })
+
+  it('com trial, o fim é a data da cobrança + a duração do curso', async () => {
+    await POST(requisicao())
+
+    const esperado = Math.floor(Date.UTC(2027, 4, 2) / 1000) // 2026-11-02 + 6 meses
+    expect(dubles.declararFimDaAssinatura).toHaveBeenCalledWith(SUB_ID, esperado)
+  })
+
+  // ⚠️ SEM TRIAL o Stripe cobrou na criação e ancorou o período ali. Um
+  // `cancel_at` na data da safra cairia DEPOIS do fim do período pago, e o
+  // Stripe abriria uma fatura proporcional — uma segunda cobrança.
+  it('sem trial, o fim é o fim do período JÁ PAGO, lido do Stripe', async () => {
+    const fimDoPeriodo = Math.floor(Date.UTC(2027, 3, 30) / 1000)
+    dubles.subscriptionsRetrieve.mockResolvedValue({
+      id: SUB_ID,
+      status: 'active',
+      trial_end: null,
+      cancel_at: null,
+      items: { data: [{ current_period_end: fimDoPeriodo }] },
+    })
+
+    await POST(requisicao())
+    expect(dubles.declararFimDaAssinatura).toHaveBeenCalledWith(SUB_ID, fimDoPeriodo)
+  })
+})
+
+const SESSAO_PIX = {
+  id: 'cs_pix',
+  mode: 'payment',
+  client_reference_id: INSCRICAO_ID,
+  subscription: null,
+  customer: null,
+  payment_intent: 'pi_pix',
+  amount_total: 150000,
+}
+
+const evento = (type: string, object: Record<string, unknown>, id = 'evt_pix') => ({
+  id,
+  type,
+  data: { object },
+})
+
+describe('o Pix', () => {
+  beforeEach(() => {
+    dubles.registrarPagamentoPix.mockResolvedValue('registrado')
+    dubles.buscarInscricaoParaEmail.mockResolvedValue({
+      nome: 'Maria Silva',
+      email: 'maria@exemplo.com',
+      telefone: '+5521987654321',
+      nivel_ingles: 'basico',
+      curso: 'Fonoaudiologia',
+      periodo: '6º semestre',
+      disponibilidade: ['seg', 'qua'],
+      safra: { nome: 'Novembro 2026', data_inicio_aulas: '2026-11-02' },
+      contrato: { modalidade: 'a_vista_pix', valorTotal: 1500 },
+    })
+  })
+
+  // ⚠️ `completed` NO PIX É "VIU O QR", NÃO "PAGOU". Confirmar aqui seria
+  // dar a vaga a quem só olhou para o código.
+  it('`completed` sem pagamento não escreve nada — a inscrição segue pendente', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.completed', { ...SESSAO_PIX, payment_status: 'unpaid' }),
+    )
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    for (const f of escritas()) expect(f).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ E NÃO É "SESSÃO SEM ASSINATURA → LANÇA". Sem o desvio do Pix, a
+  // falta de `subscription` faria o Stripe reentregar um Pix legítimo
+  // para sempre.
+  it('`completed` do Pix não é tratado como sessão criada fora do sistema', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.completed', { ...SESSAO_PIX, payment_status: 'unpaid' }),
+    )
+
+    await POST(requisicao())
+    expect(dubles.liberarEventoStripe).not.toHaveBeenCalled()
+  })
+
+  it('o dinheiro chega → `ativa`, registra o valor recebido e confirma por e-mail', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.async_payment_succeeded', { ...SESSAO_PIX, payment_status: 'paid' }),
+    )
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'ativa')
+    expect(dubles.registrarPagamentoPix).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inscricaoId: INSCRICAO_ID,
+        stripeCheckoutSessionId: 'cs_pix',
+        stripePaymentIntentId: 'pi_pix',
+        valor: 1500,
+      }),
+    )
+    expect(dubles.confirmarInscricao).toHaveBeenCalledTimes(1)
+    // A frase de pagamento do e-mail sai do contrato da linha.
+    expect(dubles.confirmarInscricao.mock.calls[0][2]).toMatchObject({ modalidade: 'a_vista_pix' })
+    // Pix não tem assinatura nem `cancel_at`.
+    expect(dubles.registrarAssinatura).not.toHaveBeenCalled()
+    expect(dubles.declararFimDaAssinatura).not.toHaveBeenCalled()
+  })
+
+  it('`completed` que já chega pago é tratado como pagamento', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.completed', { ...SESSAO_PIX, payment_status: 'paid' }),
+    )
+
+    await POST(requisicao())
+    expect(dubles.mudarStatusInscricao).toHaveBeenCalledWith(INSCRICAO_ID, 'ativa')
+    expect(dubles.registrarPagamentoPix).toHaveBeenCalledTimes(1)
+  })
+
+  // ⚠️ O MESMO PIX POR DOIS EVENTOS (ou reentregue): o e-mail sai uma vez.
+  it('Pix já registrado → nenhum segundo e-mail', async () => {
+    dubles.registrarPagamentoPix.mockResolvedValue('ja_registrado')
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.async_payment_succeeded', { ...SESSAO_PIX, payment_status: 'paid' }),
+    )
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ PAGO EM DOBRO É ALARME, NÃO 500. O dinheiro entrou; reentregar não
+  // o devolve. O reembolso é manual, no Dashboard (D-17).
+  it('pago em dobro → 200, sem e-mail, e o log é o aviso', async () => {
+    dubles.registrarPagamentoPix.mockResolvedValue('pago_em_dobro')
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.async_payment_succeeded', { ...SESSAO_PIX, payment_status: 'paid' }),
+    )
+
+    const res = await POST(requisicao())
+
+    expect(res.status).toBe(200)
+    expect(dubles.confirmarInscricao).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ "PIX NÃO PAGO VOLTA PARA A FILA" (D-17) não exige escrita — exige
+  // não escrever outra coisa por cima de `pendente_pagamento`.
+  it.each(['checkout.session.async_payment_failed', 'checkout.session.expired'])(
+    '%s → 200 e nenhuma escrita: a inscrição fica na fila da D-15',
+    async (tipo) => {
+      dubles.verificarEventoDoStripe.mockReturnValue(evento(tipo, SESSAO_PIX))
+
+      const res = await POST(requisicao())
+
+      expect(res.status).toBe(200)
+      for (const f of escritas()) expect(f).not.toHaveBeenCalled()
+    },
+  )
+
+  it('Pix sem `client_reference_id` → 500: dinheiro por uma porta desconhecida', async () => {
+    dubles.verificarEventoDoStripe.mockReturnValue(
+      evento('checkout.session.async_payment_succeeded', {
+        ...SESSAO_PIX,
+        client_reference_id: null,
+        payment_status: 'paid',
+      }),
+    )
+
+    const res = await POST(requisicao())
+    expect(res.status).toBe(500)
+    expect(dubles.registrarPagamentoPix).not.toHaveBeenCalled()
   })
 })

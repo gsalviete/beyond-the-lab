@@ -360,6 +360,105 @@ c79  chore(db): remove waitlist_legado — só depois de tudo verificado
 
 ---
 
+# Corte 4 — Formas de pagamento (D-17)
+
+Acrescentado em 20/10/2026. Ponto de parada seguro: **o mensal continua
+vendendo igual durante o corte inteiro.** As colunas novas nascem nulas,
+e nula quer dizer "forma não oferecida". Até a Giovanna preencher os
+valores de uma safra, nada muda para quem se inscreve.
+
+⚠️ **Ordem de deploy:** cada migração roda **antes** do código que a lê.
+A RPC nova entra **ao lado** da atual, que só cai num commit próprio no
+fim (mesmo padrão da `018`). Nenhum passo derruba o formulário.
+
+### Base
+```
+c80  docs: D-17 e corte 4 no plano
+c81  feat(db): 020 — valor_a_vista, valor_parcelado_total e parcelas_parcelado em safras
+c82  feat(db): 021 — modalidade travada em inscricoes + tabela pagamentos_pix
+c83  feat(db): 022 — criar_inscricao v3 recebe a modalidade e trava o contrato dela
+```
+> `c82`: `modalidade` nula numa linha com contrato travado = contrato
+> anterior à D-17 = mensal. Isso fica dito no `comment on column`. **Sem
+> backfill.** CHECKs `NOT VALID`, como sempre.
+> `pagamentos_pix` existe porque `assinaturas.stripe_subscription_id` é
+> `not null`, e Pix não tem assinatura.
+> Depois do `c83`, o dono roda `supabase gen types`.
+
+### Domínio
+```
+c84  feat(dominio): modalidades e a conta das parcelas em centavos
+c85  test(dominio): 2000/12 → 11 × 166,67 + 166,63; soma bate no centavo
+```
+
+### Stripe e checkout
+```
+c86  feat(stripe): price por modalidade — mensal, parcelado, à vista (interval_count = duração)
+c87  feat(stripe): sessão Pix — mode payment, expiração do QR
+c88  feat(api): inscrição recebe a modalidade e valida contra a safra; cupom só no mensal
+c89  feat(api): link da D-15 reabre a modalidade travada
+```
+
+### Webhooks
+```
+c90  feat(webhook): parcelado vira subscription schedule na conclusão (11 + 1)
+c91  feat(webhook): rede do cancel_at não age em assinatura com schedule
+c92  docs(webhook): "concluída" do parcelado pela regra de sempre (cancel_at da fase final)
+c93  feat(webhook): Pix — async_payment_succeeded, async_payment_failed, expired
+c94  test(webhook): parcelado soma R$ 2.000,00; à vista no cartão cobra uma vez; Pix reentregue não duplica
+```
+> `c92` mudou na implementação: a documentação do Stripe diz que o
+> `cancel_at` da assinatura passa a existir quando ela entra na **fase
+> final** do schedule. A regra de sempre (`ended_at >= cancel_at`) já
+> reconhece o fim do 12x, e não houve código novo — só o registro do
+> porquê, em `src/lib/stripe.ts`. O que **mudou** no webhook foi a rede do
+> `invoice.paid` (`c91`) e o cancelamento pelo painel (`encerrarAssinatura`
+> solta o schedule antes).
+
+### Interface
+```
+~~c95  feat(landing): formas de pagamento lidas da safra~~ — fora (ver abaixo)
+c96  feat(modal): escolha da forma de pagamento (cartão ou Pix no à vista)
+c97  feat(email): confirmação diz o que foi combinado em cada forma
+c98  feat(admin): formulário de turma com à vista e parcelado
+c99  feat(admin): ficha e listas mostram a forma de pagamento
+```
+
+### Fecho
+```
+c100 docs: manual da Giovana — formas de pagamento
+c101 chore(db): remove criar_inscricao v2 — só depois do aceite
+```
+
+**Passos manuais do dono (fora do repositório):**
+1. Stripe → Settings → Payment methods → **ativar Pix** (exige conta
+   bancária brasileira com Pix).
+2. Stripe → Webhooks → no endpoint existente, acrescentar
+   `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed` e `checkout.session.expired`.
+
+**Aceite do corte 4:** em modo teste, uma inscrição de cada forma, do
+formulário ao webhook. Cartão: zero débito imediato e `trial_end` na data
+certa. Parcelado: schedule com 11 + 1 fases e fim declarado. Pix: inscrição
+`pendente_pagamento` até o pagamento, e confirmada depois dele.
+
+### Respondido pelo dono do repositório em 20/10/2026
+
+1. **Status de quem pagou Pix:** `ativa` assim que o pagamento entra.
+   **Nunca vira `concluida` automaticamente** — não há evento do Stripe no
+   fim do curso e a D-05 proíbe job nosso. Aprovado.
+2. **"Concluída" no parcelado:** só na 12ª parcela paga, meses depois do fim
+   das aulas. Até lá, `ativa`. Aprovado.
+3. **Landing:** **sem alteração.** O `c95` saiu do corte. A modal (`c96`)
+   ganhou o menu de forma de pagamento reusando o `CampoSelect` e os estilos
+   que já existiam — nenhuma medida nova. O menu só aparece quando a turma
+   oferece mais de uma forma; turma só mensal mostra a tela de antes.
+
+Os dois passos manuais (Pix ativado, três eventos no webhook) foram feitos
+pelo dono em 20/10/2026.
+
+---
+
 ## Fora de escopo (deliberado)
 
 Da agenda do REPORT, ficam de fora e continuam registrados:

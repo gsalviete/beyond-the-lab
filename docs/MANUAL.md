@@ -36,11 +36,42 @@ criados para você. Nenhum outro e-mail entra, mesmo com a senha certa.
 - **Mensalidade** e **duração** — a cobrança para sozinha depois do número de
   meses que você puser aqui. Você não precisa fazer nada em junho para a
   cobrança acabar em junho.
+- **À vista** e **Parcelado** — as outras formas de pagamento. Veja a seção
+  *Formas de pagamento* logo abaixo. **Em branco, a turma não oferece aquela
+  forma** — o site e o formulário simplesmente não mostram.
 - **Limite de vagas** — deixe em branco. Sem limite é o normal aqui.
 
 ⚠️ **A turma nasce fechada.** Ninguém consegue se inscrever até você abrir.
 Isso é de propósito: dá tempo de conferir o preço antes de o site começar a
 vender.
+
+#### Formas de pagamento
+
+Uma turma pode oferecer até quatro formas. A aluna escolhe uma no formulário
+de inscrição:
+
+| Forma | O que você preenche | Quando o dinheiro sai da conta dela |
+|---|---|---|
+| **Mensal** | Mensalidade e duração (sempre oferecida) | Todo mês, a partir da primeira cobrança |
+| **Parcelado** | O **total** e em **quantas vezes** | Todo mês, a partir da primeira cobrança |
+| **À vista no cartão** | O valor à vista | Uma vez só, na data da primeira cobrança |
+| **À vista no Pix** | O mesmo valor à vista | **Na hora da inscrição** |
+
+- **No parcelado, digite o total, não a parcela.** Para "12x de R$ 166,66 —
+  R$ 2.000,00", preencha **2000** e **12**. O sistema divide: 11 parcelas de
+  R$ 166,67 e a última de R$ 166,63, fechando R$ 2.000,00 exatos.
+- **O parcelado pode passar do fim do curso.** 12 parcelas num curso de 6
+  meses continuam sendo cobradas depois que as aulas acabam. É o combinado.
+- **O à vista vale para cartão e Pix.** O valor é o mesmo; muda só quando
+  cobra. No cartão, ela guarda o cartão hoje e paga na data da turma, como na
+  mensalidade. No Pix, ela paga na hora.
+- **Cupom só vale na mensalidade.** Se ela escolher outra forma, o campo de
+  cupom nem aparece.
+
+⚠️ **O que ela escolheu fica travado.** Se ela começar o pagamento no 12x e
+não terminar, o link de pagamento que você mandar abre **o 12x de novo** —
+ela não troca de forma. Mudar os valores da turma depois também não muda o
+que ela combinou.
 
 ### 2. Criar os horários
 
@@ -96,6 +127,10 @@ caixa de entrada dela.
 
 A tela mostra **há quanto tempo cada uma está parada**. Alguém parada há duas
 horas talvez volte sozinha; alguém parada há três semanas não vai.
+
+**Pix também cai aqui.** Quem escolheu o Pix e não pagou — o código do Pix
+vale por 4 horas — aparece como pendente, igual a quem largou o cartão no
+meio. O link que você manda abre um Pix novo.
 
 ### 6. Distribuir os horários
 
@@ -154,6 +189,15 @@ mais fácil de cometer, e o mais caro de desfazer.
 ⚠️ **As cobranças param no fim do mês que ela já pagou.** Ela não perde o que
 comprou, e não há novo débito. O sistema não faz reembolso.
 
+Em cada forma de pagamento:
+
+- **Mensal e parcelado** — as parcelas que ainda não venceram não são
+  cobradas.
+- **À vista no cartão** — se ela cancelar antes da data da primeira cobrança,
+  nada é cobrado. Depois dela, o valor já foi pago.
+- **À vista no Pix** — o dinheiro já entrou. Cancelar aqui só tira ela da
+  turma; **devolver o dinheiro é no Stripe**, com o Gabriel.
+
 ---
 
 ## A ficha da aluna
@@ -162,8 +206,9 @@ comprou, e não há novo débito. O sistema não faz reembolso.
 
 Além do contato e do que ela respondeu no formulário, a ficha mostra:
 
-- **Contrato** — quanto ela combinou pagar, por quantos meses, e quantos meses
-  já pagou. ⚠️ Este valor é o que **ela** combinou, e não o preço atual da
+- **Contrato** — a **forma de pagamento** que ela escolheu, quanto ela
+  combinou pagar, o total, e quantas cobranças já foram pagas (ou, no Pix,
+  quando o Pix caiu). ⚠️ Este valor é o que **ela** combinou, e não o preço atual da
   turma. Se você mudou o preço depois, o dela continua o mesmo — está certo.
 - **Consentimento** — quando ela aceitou os termos, e o texto exato que estava
   na tela naquele dia. É a prova, e é por isso que ela aparece por escrito.
@@ -176,8 +221,11 @@ de consentimento, e ninguém inventou a resposta depois.
 
 ## Coisas que o painel **não** faz, e por quê
 
-- **Não reembolsa.** Reembolso de assinatura é feito no Stripe, à mão, e é
-  raro o bastante para não valer uma tela.
+- **Não reembolsa.** Reembolso — de assinatura ou de Pix — é feito no Stripe,
+  à mão, e é raro o bastante para não valer uma tela.
+- **Não marca como "concluída" quem pagou no Pix.** O Pix é pago de uma vez e
+  o Stripe não avisa quando o curso acaba. Ela aparece como **ativa** até o
+  fim — está certo.
 - **Não manda e-mail em massa.** O convite para a lista antiga é gerado em
   lote e disparado por fora, com você revisando a lista antes. Um botão que
   manda e-mail para todo mundo é a coisa mais fácil de apertar por engano.
@@ -196,6 +244,8 @@ de consentimento, e ninguém inventou a resposta depois.
 | "E-mail ou senha incorretos" | Confira a senha. Se persistir, fale com o Gabriel — pode ser o cadastro |
 | "Esta conta não tem acesso ao painel" | O e-mail está certo mas não é o autorizado |
 | "Já existe uma turma com inscrições abertas" | Feche a outra turma primeiro, em Turmas |
+| "No parcelado, preencha o total e o número de parcelas" | Preencha os dois campos do parcelado, ou deixe os dois em branco |
+| "O pagamento à vista no cartão só funciona em turmas de até 12 meses" | Limite do Stripe. Tire o à vista, ou fale com o Gabriel |
 | "Esse horário é de outra turma" | Você está tentando pôr alguém num horário que não é da turma dela |
 | "Não conseguimos ler os números agora" | Recarregue. Nada foi perdido — é leitura, não escrita |
 

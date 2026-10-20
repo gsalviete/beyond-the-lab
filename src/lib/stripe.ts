@@ -11,6 +11,9 @@ import Stripe from 'stripe'
 // módulo pode importá-lo. `paraDataUTC` é usado por `paraEpoch` lá
 // embaixo, e a razão de reusar em vez de reescrever está lá.
 import { formatarDataPorExtenso, paraDataUTC } from '@/config/curso'
+// Neutro também. A conversão para centavos e a divisão do parcelado moram
+// lá desde a D-17, porque a modal precisa fazer a MESMA conta.
+import { dividirEmParcelas, emCentavos, type Modalidade } from '@/config/modalidade'
 
 // ============================================================
 // A MESMA DISCIPLINA DA `service_role`, PELO MESMO MOTIVO
@@ -133,7 +136,14 @@ export function stripe(): Stripe {
  * O comentário de `formatarValorMensal` em `src/config/curso.ts` já
  * avisava que aritmética de dinheiro não acontece em float e que "a
  * conversão para inteiro é do corte 2, no ponto que monta a Checkout
- * Session". É este ponto. Aqui, e em nenhum outro lugar.
+ * Session". É este ponto.
+ *
+ * ⚠️ A REGRA EM SI MORA EM `emCentavos` (`src/config/modalidade.ts`) desde
+ * a D-17, e esta função delega. O parcelado obrigou a mudança: a modal
+ * mostra a parcela e o webhook a cobra, e as duas contas têm que ser a
+ * mesma — mas a modal não pode importar um módulo `server-only`. Este
+ * nome continua existindo porque é o vocabulário da fronteira com o
+ * Stripe, e é por ele que os chamadores daqui de dentro o procuram.
  *
  * ⚠️ A CONVERSÃO ACONTECE UMA VEZ SÓ, na fronteira. Depois daqui o valor
  * é centavo inteiro e permanece inteiro — não volta para reais, não é
@@ -143,7 +153,7 @@ export function stripe(): Stripe {
  * depois, que alguém está pagando um centavo a menos.
  */
 export function paraCentavos(reais: number): number {
-  return Math.round(reais * 100)
+  return emCentavos(reais)
 }
 
 /**
@@ -388,7 +398,42 @@ export async function precoDoContrato(
     return precoDaSafra(safra)
   }
 
-  const lookupKey = `safra_${safra.id}_${centavosDoContrato}`
+  return { priceId: await precoRecorrente(safra, centavosDoContrato, 1), criado: false }
+}
+
+/**
+ * Um `price` recorrente desta safra, achado ou criado por `lookup_key`.
+ *
+ * ⚠️ É O CORPO QUE `precoDoContrato` TINHA, extraído na D-17 porque o
+ * parcelado e o à vista no cartão precisam do mesmo mecanismo com outros
+ * valores. Tudo o que o comentário de `precoDoContrato` diz sobre
+ * `lookup_key` (por que não `search`, por que a chave carrega o valor em
+ * centavos, por que nunca vai para `safras.stripe_price_id`) vale aqui
+ * inteiro.
+ *
+ * ⚠️ A CHAVE DE UM `price` MENSAL É A MESMA DE ANTES DA D-17
+ * (`safra_<id>_<centavos>`), e isso é de propósito: os `price` que já
+ * existem no Stripe para contratos antigos continuam sendo achados, em vez
+ * de duplicados. Uma parcela de 166,67 e uma mensalidade de 166,67 da
+ * mesma safra SÃO o mesmo `price` — R$ 166,67 por mês —, e não há razão
+ * para o Stripe ter dois.
+ *
+ * ⚠️ `mesesPorCobranca > 1` É O À VISTA NO CARTÃO, e a chave ganha o
+ * intervalo (`_cada6m`) porque o mesmo valor com outro intervalo é outro
+ * `price`. O Stripe limita `interval_count` de `month` a 12 (um ano): uma
+ * safra de 13 meses ou mais não consegue vender à vista no cartão, e a
+ * criação falha alto aqui — a inscrição cai na fila da D-15, que é onde
+ * alguém vê. Não existe hoje safra assim.
+ */
+export async function precoRecorrente(
+  safra: SafraParaPrice,
+  centavos: number,
+  mesesPorCobranca: number,
+): Promise<string> {
+  const lookupKey =
+    mesesPorCobranca === 1
+      ? `safra_${safra.id}_${centavos}`
+      : `safra_${safra.id}_${centavos}_cada${mesesPorCobranca}m`
 
   const existentes = await stripe().prices.list({
     lookup_keys: [lookupKey],
@@ -397,18 +442,71 @@ export async function precoDoContrato(
   })
 
   const achado = existentes.data[0]
-  if (achado) return { priceId: achado.id, criado: false }
+  if (achado) return achado.id
 
   const price = await stripe().prices.create({
     product: await produtoDaSafra(safra),
     currency: MOEDA,
-    unit_amount: centavosDoContrato,
-    recurring: { interval: 'month', interval_count: 1 },
+    unit_amount: centavos,
+    recurring: { interval: 'month', interval_count: mesesPorCobranca },
     lookup_key: lookupKey,
     metadata: { safra_id: safra.id, contrato_travado: 'true' },
   })
 
-  return { priceId: price.id, criado: false }
+  return price.id
+}
+
+/**
+ * O `price` que a Checkout Session cobra, para cada forma de cartão (D-17).
+ *
+ * ============================================================
+ * ⚠️ AS TRÊS FORMAS DE CARTÃO SÃO A MESMA ASSINATURA COM TRIAL
+ * ============================================================
+ *
+ * É a decisão que mantém a D-04 de pé para todo cartão: salva hoje, cobra
+ * na data da safra. Muda só o `price`:
+ *
+ *   mensal          → mensal, o valor da mensalidade (como sempre)
+ *   parcelado       → mensal, o valor da PARCELA REGULAR. A última parcela,
+ *                     que é diferente, entra pelo schedule que o webhook
+ *                     declara — ver `declararParcelamento`.
+ *   a_vista_cartao  → a cada `duracaoMeses` meses, o valor inteiro. Uma
+ *                     cobrança em `data_primeira_cobranca`; a próxima cairia
+ *                     exatamente no `cancel_at` da D-05, e não acontece.
+ *
+ * ⚠️ O CABEÇALHO DESTA SEÇÃO DIZ QUE `interval_count: 6` "cobraria seis
+ * mensalidades de uma vez" — e continua certo, para o MENSAL. No à vista,
+ * cobrar o curso inteiro de uma vez é exatamente a intenção. As duas
+ * leituras não se contradizem: `duracao_meses` continua sendo prazo de
+ * contrato, e no à vista o prazo de contrato e a unidade de cobrança
+ * coincidem.
+ *
+ * ⚠️ O PIX NÃO PASSA POR AQUI. Pix é pagamento único (`mode: 'payment'`),
+ * sem `price` recorrente — ver `criarSessaoPix`. Chamar isto com Pix é
+ * erro de quem chamou, e lança.
+ */
+export async function precoDaModalidade(
+  safra: SafraParaPrice,
+  contrato: { modalidade: Modalidade; valorPorCobranca: number; duracaoMeses: number },
+): Promise<ResultadoPrice> {
+  const centavos = paraCentavos(contrato.valorPorCobranca)
+
+  switch (contrato.modalidade) {
+    case 'mensal':
+      return precoDoContrato(safra, contrato.valorPorCobranca)
+
+    case 'parcelado':
+      return { priceId: await precoRecorrente(safra, centavos, 1), criado: false }
+
+    case 'a_vista_cartao':
+      return {
+        priceId: await precoRecorrente(safra, centavos, contrato.duracaoMeses),
+        criado: false,
+      }
+
+    case 'a_vista_pix':
+      throw new Error('Pix nao tem price recorrente — use criarSessaoPix')
+  }
 }
 
 // ============================================================
@@ -617,6 +715,68 @@ export type SessaoDeCheckout = {
   cupomId?: string | null
   /** Só para rastrear no Dashboard e conciliar depois. */
   safraId: string
+  /**
+   * A forma de CARTÃO deste contrato (D-17). Muda só a frase acima do
+   * botão do Stripe e o metadata — a mecânica é a mesma assinatura com
+   * trial para as três. Pix não passa por aqui (`criarSessaoPix`).
+   *
+   * ⚠️ VEM DO CONTRATO DA LINHA, e não do que a pessoa clicou agora: na
+   * duplicata (link da D-15) a forma é a da primeira vez.
+   */
+  modalidade: Exclude<Modalidade, 'a_vista_pix'>
+  /** Quantas cobranças o contrato tem — para a frase do parcelado. */
+  parcelas: number
+}
+
+/**
+ * A frase NOSSA acima do botão de pagar do Stripe, para cada forma.
+ *
+ * ⚠️ É O ÚLTIMO TEXTO QUE A PESSOA LÊ ANTES DE DECIDIR, e a tela do Stripe
+ * em volta dele diz coisas que não controlamos: "N dias grátis" (o trial
+ * da D-04), "R$ 166,67 por mês" no parcelado, e — o pior — "R$ 1.500,00 a
+ * cada 6 meses" no à vista, que é como o Stripe descreve um `price` de
+ * `interval_count: 6`. A assinatura morre antes da segunda cobrança
+ * (D-05), mas a tela não sabe disso. Esta frase é o lugar de dizer "uma
+ * vez só".
+ *
+ * ⚠️ SEM TRIAL A FRASE MUDA, e a mudança não é opcional: a data está a
+ * menos de 48h e o Stripe recusaria agendar (`trialEhAceitavel`).
+ * Prometer "nada hoje" aqui seria a mentira que a pessoa descobre no
+ * extrato.
+ */
+function fraseDoCheckout(dados: SessaoDeCheckout): string {
+  if (dados.trialEnd === null) {
+    switch (dados.modalidade) {
+      case 'mensal':
+        return 'A primeira mensalidade é debitada agora, porque a turma já vai começar.'
+      case 'parcelado':
+        return `A primeira de ${dados.parcelas} parcelas é debitada agora, porque a turma já vai começar.`
+      case 'a_vista_cartao':
+        return 'O valor à vista é debitado agora, uma vez só, porque a turma já vai começar.'
+    }
+  }
+
+  // ⚠️ A DATA SAI SECA, e é a única do modelo que pode — ver o bloco do
+  // `custom_text` lá embaixo.
+  const data = formatarDataPorExtenso(paraDataUTC(dados.dataPrimeiraCobranca))
+
+  switch (dados.modalidade) {
+    case 'mensal':
+      return (
+        `Seu cartão é salvo agora, sem nenhuma cobrança hoje. ` +
+        `A primeira mensalidade é debitada em ${data}, quando a turma começa.`
+      )
+    case 'parcelado':
+      return (
+        `Seu cartão é salvo agora, sem nenhuma cobrança hoje. ` +
+        `A primeira de ${dados.parcelas} parcelas é debitada em ${data}, quando a turma começa.`
+      )
+    case 'a_vista_cartao':
+      return (
+        `Seu cartão é salvo agora, sem nenhuma cobrança hoje. ` +
+        `O valor à vista é debitado em ${data}, uma vez só — não há segunda cobrança.`
+      )
+  }
 }
 
 /**
@@ -692,6 +852,11 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
       metadata: {
         inscricao_id: dados.inscricaoId,
         safra_id: dados.safraId,
+        // Só para quem lê o Dashboard. O webhook NÃO decide pela forma
+        // daqui: ele lê a da inscrição (`buscarTravadosDaInscricao`), que é
+        // o contrato. Metadata é o que nós escrevemos; a linha é o que foi
+        // combinado.
+        modalidade: dados.modalidade,
         ...(dados.cupomId ? { cupom_id: dados.cupomId } : {}),
       },
     },
@@ -724,19 +889,14 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
     // diferente. `formatarDataPorExtenso` existia desde o corte 1 esperando
     // exatamente este chamador; o comentário dela em `src/config/curso.ts`
     // diz isso com todas as letras.
+    //
+    // ⚠️ DESDE A D-17 A FRASE DEPENDE DA FORMA, e mora em `fraseDoCheckout`
+    // — com o caso sem trial (menos de 48h, `trialEhAceitavel`) dentro
+    // dela. Três formas × dois casos em ternários aninhados aqui seria
+    // ilegível exatamente no texto que mais precisa ser lido.
     custom_text: {
       submit: {
-        message:
-          dados.trialEnd !== null
-            ? `Seu cartão é salvo agora, sem nenhuma cobrança hoje. ` +
-              `A primeira mensalidade é debitada em ` +
-              `${formatarDataPorExtenso(paraDataUTC(dados.dataPrimeiraCobranca))}, ` +
-              `quando a turma começa.`
-            : // Sem trial: a data está a menos de 48h e o Stripe recusaria
-              // agendar. A frase muda junto — prometer "nada hoje" aqui
-              // seria mentira, e é a mentira que a pessoa descobre no
-              // extrato. Ver `trialEhAceitavel`.
-              `A primeira mensalidade é debitada agora, porque a turma já vai começar.`,
+        message: fraseDoCheckout(dados),
       },
       after_submit: {
         message: 'Você recebe a confirmação por e-mail em alguns minutos.',
@@ -746,6 +906,7 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
     metadata: {
       inscricao_id: dados.inscricaoId,
       safra_id: dados.safraId,
+      modalidade: dados.modalidade,
     },
   })
 
@@ -759,6 +920,307 @@ export async function criarSessaoDeCheckout(dados: SessaoDeCheckout): Promise<st
   }
 
   return sessao.url
+}
+
+// ============================================================
+// O PIX (D-17) — o único pagamento que acontece na inscrição
+// ============================================================
+//
+// ⚠️ É A ÚNICA EXCEÇÃO À D-04, e a razão é mecânica, não comercial: Pix
+// não guarda meio de pagamento. "Salvar hoje, cobrar na data da safra" não
+// existe para ele — ou cobra agora, ou não vende.
+//
+// ⚠️ PIX É ASSÍNCRONO, e isso muda o webhook inteiro. A pessoa conclui a
+// sessão quando VÊ o QR, não quando paga: `checkout.session.completed`
+// chega com `payment_status: 'unpaid'`, e o dinheiro chega depois, em
+// `checkout.session.async_payment_succeeded` — ou não chega, e vem
+// `async_payment_failed` quando o QR expira. Tratar `completed` como
+// "pagou" confirmaria quem só olhou para o código.
+
+/** O que a sessão Pix precisa saber. */
+export type SessaoPix = {
+  inscricaoId: string
+  safra: SafraParaPrice
+  /** O valor À VISTA do contrato travado, em reais. Vem da LINHA (D-06). */
+  valor: number
+  email: string
+  sucessoUrl: string
+  canceladoUrl: string
+}
+
+/**
+ * Cria a sessão hospedada do Pix e devolve a URL.
+ *
+ * ⚠️ `price_data` INLINE, e não um `price` com `lookup_key` como os de
+ * cartão. Um `price` de pagamento único não é reaproveitado por assinatura
+ * nenhuma — ele não é contrato de ninguém depois que o Pix cai —, e o
+ * `product` continua sendo o da safra (`produtoDaSafra`), que é o que o
+ * Dashboard agrupa.
+ *
+ * ⚠️ A EXPIRAÇÃO DO QR É O DEFAULT DO STRIPE (4 horas), e não um número
+ * nosso. Qualquer número aqui seria inventado; o default é documentado e
+ * a consequência de expirar já tem dono: a inscrição continua em
+ * `pendente_pagamento`, aparece na fila da D-15, e a pessoa paga de novo
+ * pelo link ou preenchendo o formulário outra vez (a duplicata abre um
+ * Pix novo para a MESMA inscrição).
+ *
+ * ⚠️ `payment_method_types: ['pix']` EXPLÍCITO. Sem ele o Stripe mostraria
+ * todo método ativo na conta — inclusive cartão, num `mode: 'payment'`
+ * que cobraria o cartão NA HORA, contra a D-04. Quem quer à vista no
+ * cartão escolheu outra forma, com outra sessão.
+ *
+ * Os metadados e o `client_reference_id` seguem a mesma regra de
+ * `criarSessaoDeCheckout`: é o fio que liga o pagamento à inscrição. O
+ * `payment_intent_data.metadata` existe porque um reembolso feito no
+ * Dashboard mostra o PaymentIntent, não a sessão — e quem olha precisa
+ * saber de quem é aquele dinheiro.
+ */
+export async function criarSessaoPix(dados: SessaoPix): Promise<string> {
+  const metadata = {
+    inscricao_id: dados.inscricaoId,
+    safra_id: dados.safra.id,
+    modalidade: 'a_vista_pix',
+  }
+
+  const sessao = await stripe().checkout.sessions.create({
+    mode: 'payment',
+    payment_method_types: ['pix'],
+    line_items: [
+      {
+        price_data: {
+          currency: MOEDA,
+          product: await produtoDaSafra(dados.safra),
+          unit_amount: paraCentavos(dados.valor),
+        },
+        quantity: 1,
+      },
+    ],
+
+    client_reference_id: dados.inscricaoId,
+    customer_email: dados.email,
+
+    success_url: dados.sucessoUrl,
+    cancel_url: dados.canceladoUrl,
+
+    locale: 'pt-BR',
+
+    payment_intent_data: { metadata },
+    metadata,
+
+    // ⚠️ SEM `discounts`: cupom só vale no mensal (D-17), e a rota recusa
+    // cupom em qualquer outra forma antes de chegar aqui.
+
+    custom_text: {
+      submit: {
+        // ⚠️ "Assim que o Pix cair", e não "agora": entre ver o QR e o
+        // banco confirmar pode haver minutos, e a confirmação por e-mail só
+        // sai quando o dinheiro chega — ver o webhook.
+        message:
+          'O pagamento à vista no Pix é feito agora. Sua inscrição é confirmada ' +
+          'assim que o Pix cair, e você recebe a confirmação por e-mail.',
+      },
+    },
+  })
+
+  if (!sessao.url) {
+    throw new Error(`checkout.session ${sessao.id} (pix) criada sem url`)
+  }
+
+  return sessao.url
+}
+
+// ============================================================
+// O PARCELADO (D-17) — 11 + 1, por subscription schedule
+// ============================================================
+//
+// ⚠️ É O FALLBACK QUE A PRÓPRIA D-05 NOMEIA, e só é usado aqui porque
+// aqui ele é necessário. A assinatura comum cobra o MESMO valor todo mês;
+// o parcelado de R$ 2.000,00 em 12 cobra 11 × 166,67 e depois 1 × 166,63
+// (`dividirEmParcelas`). Duas fases de preço diferente é exatamente o que
+// um schedule é.
+//
+// ⚠️ ISTO NÃO É JOB. O que a D-05 proíbe é código NOSSO agendado — algo
+// que precise rodar no 12º mês para que a cobrança pare no 12º mês. Aqui o
+// nosso código roda UMA vez, no webhook de conclusão (como o `cancel_at`
+// do mensal), declara as fases e o fim (`end_behavior: 'cancel'`), e o
+// Stripe cumpre sozinho.
+//
+// ⚠️ E O `cancel_at` DA D-05 NÃO É POSTO NO PARCELADO. Uma assinatura
+// gerida por schedule recusa mudança direta de cancelamento — quem decide
+// o fim é o schedule. Segundo a documentação do Stripe, o `cancel_at` da
+// assinatura passa a existir sozinho quando ela entra na fase final; é por
+// isso que `assinaturaEncerrada` (webhook) continua distinguindo
+// `concluida` de `cancelada` pela mesma regra de sempre.
+
+/**
+ * Declara as fases do parcelado na assinatura que o checkout criou.
+ *
+ * ============================================================
+ * AS FASES, POR EXTENSO (12 parcelas)
+ * ============================================================
+ *
+ *   COM TRIAL (o caso normal, D-04):
+ *     fase 0  hoje → T         trial, nada cobrado (a fase que o Stripe já criou)
+ *     fase 1  T → T+11 meses   11 × parcela regular
+ *     fase 2  T+11 → T+12      1 × última parcela
+ *     fim     cancela
+ *
+ *   SEM TRIAL (inscrição a menos de 48h da cobrança — `trialEhAceitavel`):
+ *     fase 0  hoje → +1 mês    1ª parcela, JÁ COBRADA na criação
+ *     fase 1  → +10 meses      10 × parcela regular
+ *     fase 2  → +1 mês         1 × última parcela
+ *     fim     cancela
+ *
+ * Nos dois casos, 12 cobranças. As durações são CONTADAS PELO STRIPE a
+ * partir do fim da fase 0, e não calculadas por nós em datas: assim elas
+ * seguem a âncora real da assinatura, e não uma data que pode estar dois
+ * dias deslocada dela.
+ *
+ * ⚠️ A FASE 0 É COPIADA DO QUE O STRIPE CRIOU, com o trial junto. A
+ * atualização de schedule SUBSTITUI todas as fases pelas que forem
+ * mandadas, e o que não for mandado é removido — inclusive o trial. Sem
+ * repassar o `trial_end`, a fase atual deixaria de ser trial e a primeira
+ * parcela seria cobrada na hora, contra a D-04.
+ *
+ * ⚠️ IDEMPOTENTE, e precisa ser: o webhook é reentregue, e a rede do
+ * `invoice.paid` chama isto de novo. Um schedule que já termina em
+ * `cancel` com mais de uma fase já foi declarado — chamar de novo não
+ * mexe em nada. Um schedule que existe mas NÃO foi declarado (a criação
+ * deu certo e a atualização falhou) é completado, e não pulado: pular
+ * deixaria a assinatura cobrando a parcela regular para sempre.
+ */
+export async function declararParcelamento(dados: {
+  subscriptionId: string
+  parcelas: number
+  /** O `price` da parcela regular — o mesmo que o checkout cobrou. */
+  priceRegular: string
+  /** O `price` da última parcela, de `dividirEmParcelas`. */
+  priceUltima: string
+}): Promise<void> {
+  const sub = await stripe().subscriptions.retrieve(dados.subscriptionId)
+
+  const scheduleExistente =
+    typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule?.id ?? null)
+
+  const schedule = scheduleExistente
+    ? await stripe().subscriptionSchedules.retrieve(scheduleExistente)
+    : await stripe().subscriptionSchedules.create({ from_subscription: sub.id })
+
+  if (schedule.end_behavior === 'cancel' && schedule.phases.length > 1) return
+
+  const atual = schedule.phases[0]
+  if (!atual) throw new Error(`schedule ${schedule.id} sem fase atual`)
+
+  const precoAtual = atual.items[0]?.price
+  const priceDaFaseAtual = typeof precoAtual === 'string' ? precoAtual : precoAtual?.id
+  if (!priceDaFaseAtual) throw new Error(`schedule ${schedule.id} sem price na fase atual`)
+
+  // A fase atual é trial quando o Stripe a criou com `trial_end` — o caso
+  // normal. Sem trial, ela é o primeiro mês, e a 1ª parcela já foi cobrada.
+  const emTrial = atual.trial_end !== null && atual.trial_end !== undefined
+  const cobradasNaFaseAtual = emTrial ? 0 : 1
+  const regularesDepois = dados.parcelas - cobradasNaFaseAtual - 1
+
+  const metadata = sub.metadata
+
+  await stripe().subscriptionSchedules.update(schedule.id, {
+    end_behavior: 'cancel',
+    // ⚠️ `none`: a atualização não muda nada da fase atual, então não há o
+    // que ratear. Deixar o default seria convidar o Stripe a gerar um
+    // ajuste de centavos sobre uma fase que ninguém alterou.
+    proration_behavior: 'none',
+    phases: [
+      {
+        items: [{ price: priceDaFaseAtual, quantity: 1 }],
+        start_date: atual.start_date,
+        end_date: atual.end_date,
+        ...(emTrial ? { trial_end: atual.end_date } : {}),
+        metadata,
+      },
+      ...(regularesDepois > 0
+        ? [
+            {
+              items: [{ price: dados.priceRegular, quantity: 1 }],
+              duration: { interval: 'month' as const, interval_count: regularesDepois },
+              metadata,
+            },
+          ]
+        : []),
+      {
+        items: [{ price: dados.priceUltima, quantity: 1 }],
+        duration: { interval: 'month' as const, interval_count: 1 },
+        metadata,
+      },
+    ],
+  })
+}
+
+/**
+ * Os dois `price` do parcelado, a partir do contrato travado.
+ *
+ * Existe para que o webhook e a rede do `invoice.paid` montem as fases da
+ * MESMA conta que a rota usou para abrir o checkout — `dividirEmParcelas`
+ * sobre o total da linha, nunca da safra (D-06).
+ */
+export async function precosDoParcelado(
+  safra: SafraParaPrice,
+  contrato: { valorTotal: number; parcelas: number },
+): Promise<{ priceRegular: string; priceUltima: string }> {
+  const { regular, ultima } = dividirEmParcelas(paraCentavos(contrato.valorTotal), contrato.parcelas)
+
+  return {
+    priceRegular: await precoRecorrente(safra, regular, 1),
+    priceUltima: await precoRecorrente(safra, ultima, 1),
+  }
+}
+
+/**
+ * O `cancel_at` (D-05) de um contrato de cartão, em epoch.
+ *
+ * Para o mensal, e para o à vista com trial — o caso normal —, é a conta
+ * de sempre: `data_primeira_cobranca + duracao_meses` (ver "A CONTA DO
+ * PRAZO" lá em cima).
+ *
+ * ============================================================
+ * ⚠️ O À VISTA SEM TRIAL É A EXCEÇÃO, e o erro custaria uma cobrança
+ * ============================================================
+ *
+ * Sem trial (inscrição a menos de 48h da data — `trialEhAceitavel`), o
+ * Stripe cobra NA CRIAÇÃO e ancora o período ali: o período pago vai de
+ * hoje até hoje + 6 meses, e não de T até T + 6. As duas datas diferem em
+ * até dois dias. Um `cancel_at = T + 6` cairia DEPOIS do fim do período
+ * pago — e o Stripe, ao renovar no fim do período, abriria uma fatura
+ * proporcional pelos dias que faltam até o `cancel_at`. Num `price` de R$
+ * 1.500,00 a cada 6 meses, dois dias são uma cobrança a mais que ninguém
+ * combinou.
+ *
+ * Então, sem trial, o fim é o fim do período que JÁ FOI PAGO, lido do
+ * Stripe — que é exatamente "uma cobrança só".
+ *
+ * ⚠️ O MENSAL NÃO PASSA POR ESTE CASO, e a ausência é deliberada: ele é o
+ * comportamento em produção desde o corte 2, e mudá-lo agora seria mexer
+ * no contrato de gente que já paga sem que ninguém tenha pedido. O mesmo
+ * deslocamento de até dois dias existe nele, e o efeito lá é uma fatura
+ * proporcional de dois dias no fim — registrado em `docs/ESTADO.md` para
+ * decisão do dono do repositório.
+ */
+export function fimDoContrato(
+  contrato: { modalidade: Modalidade; dataPrimeiraCobranca: string; duracaoMeses: number },
+  /** A assinatura lida do Stripe. Só o à vista a consulta; `null` no resto. */
+  assinatura: Stripe.Subscription | null,
+): number {
+  const fimCombinado = paraEpoch(somarMeses(contrato.dataPrimeiraCobranca, contrato.duracaoMeses))
+
+  if (
+    contrato.modalidade !== 'a_vista_cartao' ||
+    !assinatura ||
+    assinatura.status === 'trialing'
+  ) {
+    return fimCombinado
+  }
+
+  // Desde a API `basil`, o período mora no ITEM da assinatura, não nela.
+  return assinatura.items.data[0]?.current_period_end ?? fimCombinado
 }
 
 /**
@@ -815,8 +1277,33 @@ export async function declararFimDaAssinatura(
  * ⚠️ IDEMPOTENTE: marcar de novo uma assinatura já marcada é um `update`
  * com o valor que já está lá. Cancelar duas vezes por engano no painel não
  * produz nada de novo.
+ *
+ * ============================================================
+ * ⚠️ NO PARCELADO, O SCHEDULE É SOLTO ANTES (D-17)
+ * ============================================================
+ *
+ * Assinatura gerida por schedule recusa mudança direta de cancelamento —
+ * o Stripe responde que o cancelamento é do schedule. Sem o `release`,
+ * cancelar uma aluna do 12x no painel daria erro, e as parcelas
+ * continuariam saindo.
+ *
+ * `release` e não `cancel` do schedule: `cancel` mata a assinatura NA HORA,
+ * que é o `subscriptions.cancel()` que o bloco acima recusa pelo mesmo
+ * motivo. `release` só desliga o schedule e deixa a assinatura como está;
+ * em seguida o `cancel_at_period_end` faz o de sempre — nenhuma parcela
+ * nova, e o mês pago não é tomado de volta.
+ *
+ * No à vista no cartão não há schedule, e o comportamento sai certo sem
+ * caso especial: antes da data da safra o período atual é o trial, e a
+ * assinatura morre sem cobrar nada; depois dela o período é o curso
+ * inteiro, que foi pago.
  */
 export async function encerrarAssinatura(subscriptionId: string): Promise<void> {
+  const sub = await stripe().subscriptions.retrieve(subscriptionId)
+  const schedule = typeof sub.schedule === 'string' ? sub.schedule : (sub.schedule?.id ?? null)
+
+  if (schedule) await stripe().subscriptionSchedules.release(schedule)
+
   await stripe().subscriptions.update(subscriptionId, { cancel_at_period_end: true })
 }
 

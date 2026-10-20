@@ -366,6 +366,75 @@ conhecido, porque a `010` recusa rodar duas vezes.
 
 ---
 
+## D-17 · Quatro formas de pagar, e só o Pix cobra na inscrição
+
+Decidida em **20/10/2026**, com o dono do repositório.
+
+A safra passa a oferecer, além da mensalidade, duas outras formas de
+pagamento. A pessoa escolhe uma no formulário:
+
+| Forma | Valor (turma de novembro/2026) | Como cobra | Quando |
+|---|---|---|---|
+| **Mensal** | 6 × R$ 299,99 | assinatura, como hoje | a partir de `data_primeira_cobranca` |
+| **Parcelado** | 12 cobranças, total R$ 2.000,00 | assinatura de 12 ciclos | a partir de `data_primeira_cobranca` |
+| **À vista no cartão** | R$ 1.500,00 | assinatura de **um** ciclo | em `data_primeira_cobranca` |
+| **À vista no Pix** | R$ 1.500,00 | pagamento único | **na inscrição** |
+
+Os valores são da safra, no banco, editados no painel (D-07, D-13). A
+tabela acima é exemplo, não constante.
+
+*Por quê:* foi o que o negócio pediu. Desenhada para mexer o mínimo no
+que já funciona: as três formas de cartão são **a mesma assinatura com
+trial** da D-04, e mudam só o número e o valor dos ciclos.
+
+**Obriga — a D-04 continua valendo para todo cartão.** Cartão salvo hoje,
+débito na semana de início, inclusive no à vista. A exceção é **só o
+Pix**: Pix não guarda meio de pagamento, então "cobrar depois" não
+existe para ele. Ou cobra agora, ou não vende.
+
+**Obriga — o parcelado fecha em R$ 2.000,00 exatos.** 2.000 ÷ 12 não fecha
+em centavos. São 11 × R$ 166,67 + 1 × R$ 166,63. O Stripe não cobra
+valores diferentes numa assinatura comum, então o parcelado usa
+*subscription schedule* com `end_behavior: 'cancel'`: o fallback que a
+**própria D-05 nomeia**. A D-05 não muda. O que ela proíbe (job nosso
+agendado) continua proibido. O schedule é declarado uma vez, no webhook
+de conclusão, e o Stripe cumpre.
+
+**Obriga — o à vista no cartão é um `price` de `interval_count =
+duracao_meses`.** Uma cobrança em `data_primeira_cobranca`, e o
+`cancel_at` da D-05 cai exatamente no fim do primeiro período. A
+assinatura termina no fim do curso, e não um mês depois de começar.
+⚠️ O comentário em `src/lib/stripe.ts` que diz "modelar a duração como
+`interval_count: 6` cobraria seis mensalidades de uma vez" continua
+certo para o mensal, e é **exatamente** a intenção aqui. Ele migra para
+explicar as duas coisas.
+
+**Obriga — a forma de pagamento trava na inscrição (D-06).** Ela é
+copiada para a linha junto do valor. O link de pagamento pendente (D-15)
+reabre **a mesma** forma. A pessoa não escolhe de novo.
+
+**Obriga — cupom vale só no mensal.** O servidor recusa cupom em
+qualquer outra forma. Os três tipos da `013` foram desenhados para
+mensalidade, e "primeiro mês grátis" num pagamento único seria o curso
+de graça.
+
+**Obriga — Pix não pago volta para a fila da D-15.** Pix expirado ou
+recusado deixa a inscrição em `pendente_pagamento`, e a Giovanna a vê
+como qualquer checkout abandonado.
+
+**Não muda a D-11.** Escolher *como* pagar não é o `payment_choice`
+("quer pagar agora?") que a D-11 matou. A escolha vem do cliente, mas o
+servidor só aceita uma forma que a safra oferece (`REPORT.md` §9.1). E
+a decisão `safra aberta ? checkout : lista de espera` continua sendo do
+servidor.
+
+**Proíbe:** reembolso pelo sistema. Reembolso de Pix e de cartão é feito
+no Dashboard do Stripe, à mão, pelo dono. Proíbe também: forma de
+pagamento sem valor na safra aparecer na landing ou no formulário (coluna
+nula = forma não oferecida).
+
+---
+
 ## O que NÃO muda
 
 Direto do `REPORT.md` §9, e continua valendo:

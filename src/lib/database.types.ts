@@ -195,12 +195,15 @@ export type Database = {
           duracao_meses_travada: number | null
           grupo_id: string | null
           id: string
+          modalidade: string | null
           nivel_ingles: string | null
+          parcelas_travadas: number | null
           periodo: string | null
           pessoa_id: string
           safra_id: string | null
           status: string
           valor_mensal_travado: number | null
+          valor_total_travado: number | null
         }
         Insert: {
           consent?: boolean | null
@@ -213,12 +216,15 @@ export type Database = {
           duracao_meses_travada?: number | null
           grupo_id?: string | null
           id?: string
+          modalidade?: string | null
           nivel_ingles?: string | null
+          parcelas_travadas?: number | null
           periodo?: string | null
           pessoa_id: string
           safra_id?: string | null
           status: string
           valor_mensal_travado?: number | null
+          valor_total_travado?: number | null
         }
         Update: {
           consent?: boolean | null
@@ -231,12 +237,15 @@ export type Database = {
           duracao_meses_travada?: number | null
           grupo_id?: string | null
           id?: string
+          modalidade?: string | null
           nivel_ingles?: string | null
+          parcelas_travadas?: number | null
           periodo?: string | null
           pessoa_id?: string
           safra_id?: string | null
           status?: string
           valor_mensal_travado?: number | null
+          valor_total_travado?: number | null
         }
         Relationships: [
           {
@@ -258,6 +267,44 @@ export type Database = {
             columns: ["safra_id"]
             isOneToOne: false
             referencedRelation: "safras"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pagamentos_pix: {
+        Row: {
+          criado_em: string
+          id: string
+          inscricao_id: string
+          pago_em: string
+          stripe_checkout_session_id: string
+          stripe_payment_intent_id: string | null
+          valor: number
+        }
+        Insert: {
+          criado_em?: string
+          id?: string
+          inscricao_id: string
+          pago_em: string
+          stripe_checkout_session_id: string
+          stripe_payment_intent_id?: string | null
+          valor: number
+        }
+        Update: {
+          criado_em?: string
+          id?: string
+          inscricao_id?: string
+          pago_em?: string
+          stripe_checkout_session_id?: string
+          stripe_payment_intent_id?: string | null
+          valor?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pagamentos_pix_inscricao_id_fkey"
+            columns: ["inscricao_id"]
+            isOneToOne: true
+            referencedRelation: "inscricoes"
             referencedColumns: ["id"]
           },
         ]
@@ -301,10 +348,13 @@ export type Database = {
           id: string
           inscricoes_abertas: boolean
           nome: string
+          parcelas_parcelado: number | null
           slug: string
           stripe_price_id: string | null
           vagas_total: number | null
+          valor_a_vista: number | null
           valor_mensal: number
+          valor_parcelado_total: number | null
         }
         Insert: {
           created_at?: string
@@ -314,10 +364,13 @@ export type Database = {
           id?: string
           inscricoes_abertas?: boolean
           nome: string
+          parcelas_parcelado?: number | null
           slug: string
           stripe_price_id?: string | null
           vagas_total?: number | null
+          valor_a_vista?: number | null
           valor_mensal: number
+          valor_parcelado_total?: number | null
         }
         Update: {
           created_at?: string
@@ -327,10 +380,13 @@ export type Database = {
           id?: string
           inscricoes_abertas?: boolean
           nome?: string
+          parcelas_parcelado?: number | null
           slug?: string
           stripe_price_id?: string | null
           vagas_total?: number | null
+          valor_a_vista?: number | null
           valor_mensal?: number
+          valor_parcelado_total?: number | null
         }
         Relationships: []
       }
@@ -442,6 +498,36 @@ export type Database = {
               duracao_meses_travada: number
               inscricao_id: string
               valor_mensal_travado: number
+            }[]
+          }
+        | {
+            Args: {
+              p_consent_at: string
+              p_consent_text: string
+              p_curso: string
+              p_data_primeira_cobranca_travada: string
+              p_disponibilidade: string[]
+              p_duracao_meses_travada: number
+              p_email: string
+              p_modalidade: string
+              p_nivel_ingles: string
+              p_nome: string
+              p_parcelas_travadas: number
+              p_periodo: string
+              p_safra_id?: string
+              p_telefone: string
+              p_valor_mensal_travado: number
+              p_valor_total_travado: number
+            }
+            Returns: {
+              criada: boolean
+              data_primeira_cobranca_travada: string
+              duracao_meses_travada: number
+              inscricao_id: string
+              modalidade: string
+              parcelas_travadas: number
+              valor_mensal_travado: number
+              valor_total_travado: number
             }[]
           }
     }

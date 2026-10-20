@@ -1,5 +1,10 @@
 import FormularioSafra from '@/components/admin/FormularioSafra.jsx'
 import { formatarSemanaDeInicio, formatarValorMensal } from '@/config/curso'
+import {
+  contratoDaModalidade,
+  modalidadesOferecidas,
+  rotuloDaModalidade,
+} from '@/config/modalidade'
 import { contarComContrato, listarSafrasCompletas } from '@/lib/supabase'
 
 // ============================================================
@@ -78,6 +83,21 @@ export default async function Page({ searchParams }) {
                     {formatarValorMensal(s.valor_mensal)}/mês por {s.duracao_meses}{' '}
                     {s.duracao_meses === 1 ? 'mês' : 'meses'}
                   </p>
+
+                  {/* As outras formas da D-17, com o valor — a MESMA frase
+                      que a aluna lê no formulário (`rotuloDaModalidade`).
+                      Uma turma só com mensalidade não ganha linha nenhuma.
+                      O Pix fica de fora porque tem o mesmo valor do à vista
+                      no cartão, e a linha repetiria o número. */}
+                  {modalidadesOferecidas(s).length > 1 && (
+                    <p className="mt-1 font-sans text-[14px] leading-[22px] text-[#345372]">
+                      {modalidadesOferecidas(s)
+                        .filter((m) => m !== 'mensal' && m !== 'a_vista_pix')
+                        .map((m) => rotuloDaModalidade(contratoDaModalidade(s, m)))
+                        .join(' · ')}
+                      {s.valor_a_vista !== null && ' (cartão ou Pix)'}
+                    </p>
+                  )}
 
                   <p className="mt-1 font-sans text-[13px] leading-[20px] text-muted">
                     {/* A mesma função que a landing e o e-mail usam — as três

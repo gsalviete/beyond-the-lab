@@ -60,8 +60,9 @@ const dubles = vi.hoisted(() => {
     buscarCupom: vi.fn(),
     salvarStripeCouponId: vi.fn(),
     cupomNoStripe: vi.fn(),
-    precoDoContrato: vi.fn(),
+    precoDaModalidade: vi.fn(),
     criarSessaoDeCheckout: vi.fn(),
+    criarSessaoPix: vi.fn(),
     notificarAdmin: vi.fn(),
     confirmarInscricao: vi.fn(),
     /** O que o `after` agendou. Uma tarefa = um lote de e-mails. */
@@ -103,8 +104,9 @@ vi.mock('@/lib/stripe', async (original) => {
     ancorasDaAssinatura: real.ancorasDaAssinatura,
     trialEhAceitavel: real.trialEhAceitavel,
     StripeNotConfiguredError: dubles.StripeNotConfiguredError,
-    precoDoContrato: dubles.precoDoContrato,
+    precoDaModalidade: dubles.precoDaModalidade,
     criarSessaoDeCheckout: dubles.criarSessaoDeCheckout,
+    criarSessaoPix: dubles.criarSessaoPix,
     cupomNoStripe: dubles.cupomNoStripe,
   }
 })
@@ -122,16 +124,29 @@ const { POST } = await import('../app/api/inscricao/route')
 // ------------------------------------------------------------
 const SAFRA_ID = '11111111-2222-3333-4444-555555555555'
 
+//
+// ⚠️ A DATA DE COBRANÇA É DE 2099, e é de propósito. Ela era 2026-09-01,
+// e o teste de `trial_end` passou a falhar sozinho no dia em que setembro
+// de 2026 virou passado: a regra das 48h (`trialEhAceitavel`) é a de
+// VERDADE neste arquivo, e uma data no passado não tem trial. Uma data
+// que nunca chega mede a rota, e não o calendário.
+//
+// As três formas da D-17 estão todas oferecidas: é a turma de novembro de
+// 2026 como o negócio a descreveu. Quem quiser uma safra só mensal anula
+// as colunas.
 const safra = (inscricoes_abertas: boolean) => ({
   id: SAFRA_ID,
-  nome: 'Setembro 2026',
-  data_inicio_aulas: '2026-09-01',
-  data_primeira_cobranca: '2026-09-01',
+  nome: 'Setembro 2099',
+  data_inicio_aulas: '2099-09-01',
+  data_primeira_cobranca: '2099-09-01',
   valor_mensal: 299.99,
   duracao_meses: 6,
   inscricoes_abertas,
   vagas_total: 20,
   inscritas: 3,
+  valor_a_vista: 1500,
+  valor_parcelado_total: 2000,
+  parcelas_parcelado: 12,
 })
 
 /** O payload que a modal manda. Cada teste muda um campo só. */
@@ -640,7 +655,10 @@ const INSCRICAO_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const CONTRATO = {
   valorMensal: 299.99,
   duracaoMeses: 6,
-  dataPrimeiraCobranca: '2026-09-01',
+  dataPrimeiraCobranca: '2099-09-01',
+  modalidade: 'mensal',
+  parcelas: 6,
+  valorTotal: 1799.94,
 }
 
 /** A RPC devolvendo uma inscrição pagável. */
@@ -657,7 +675,7 @@ describe('safra aberta abre o checkout', () => {
   beforeEach(() => {
     dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
     rpcComCheckout()
-    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.precoDaModalidade.mockResolvedValue({ priceId: 'price_teste', criado: false })
     dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
   })
 
@@ -685,10 +703,10 @@ describe('safra aberta abre o checkout', () => {
   })
 
   // ⚠️ D-04: `trial_end` é a data de cobrança da safra, em epoch de
-  // SEGUNDOS. A conta é a de verdade — 2026-09-01 UTC.
+  // SEGUNDOS. A conta é a de verdade — 2099-09-01 UTC.
   it('`trial_end` é a data de primeira cobrança, em segundos', async () => {
     await post()
-    const esperado = Math.floor(Date.UTC(2026, 8, 1) / 1000)
+    const esperado = Math.floor(Date.UTC(2099, 8, 1) / 1000)
     expect(dubles.criarSessaoDeCheckout.mock.calls[0][0].trialEnd).toBe(esperado)
   })
 
@@ -706,11 +724,11 @@ describe('safra aberta abre o checkout', () => {
   // ⚠️ E ela sai do CONTRATO, não da safra: quem retomou um checkout
   // antigo tem que ler a data que combinou, não a de hoje (D-06).
   it('e ela é a do contrato, não a da safra', async () => {
-    rpcComCheckout(false, { ...CONTRATO, dataPrimeiraCobranca: '2026-10-01' })
+    rpcComCheckout(false, { ...CONTRATO, dataPrimeiraCobranca: '2099-10-01' })
     await post()
 
     const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
-    expect(sessao.dataPrimeiraCobranca).toBe('2026-10-01')
+    expect(sessao.dataPrimeiraCobranca).toBe('2099-10-01')
     expect(sessao.dataPrimeiraCobranca).not.toBe(safra(true).data_primeira_cobranca)
   })
 
@@ -732,7 +750,7 @@ describe('safra aberta abre o checkout', () => {
   it('o `price` é pedido para o valor do contrato devolvido', async () => {
     rpcComCheckout(false, { ...CONTRATO, valorMensal: 249.99 })
     await post()
-    expect(dubles.precoDoContrato.mock.calls[0][1]).toBe(249.99)
+    expect(dubles.precoDaModalidade.mock.calls[0][1].valorPorCobranca).toBe(249.99)
   })
 
   // ⚠️ DUPLICATA TAMBÉM PAGA. Quem abandonou o checkout ficava preso em
@@ -776,7 +794,7 @@ describe('safra aberta abre o checkout', () => {
   // A gravação do `price` na safra é otimização de próxima chamada, não
   // requisito desta: o `priceId` devolvido pelo Stripe é válido agora.
   it('falha ao gravar o price na safra não derruba o checkout', async () => {
-    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_novo', criado: true })
+    dubles.precoDaModalidade.mockResolvedValue({ priceId: 'price_novo', criado: true })
     dubles.salvarStripePriceId.mockRejectedValue(new Error('banco fora do ar'))
 
     const { body } = await post()
@@ -799,7 +817,7 @@ describe('safra aberta abre o checkout', () => {
 describe('vaga é limite mole', () => {
   beforeEach(() => {
     rpcComCheckout()
-    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.precoDaModalidade.mockResolvedValue({ priceId: 'price_teste', criado: false })
     dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
   })
 
@@ -866,7 +884,7 @@ describe('o cupom', () => {
   beforeEach(() => {
     dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
     rpcComCheckout()
-    dubles.precoDoContrato.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.precoDaModalidade.mockResolvedValue({ priceId: 'price_teste', criado: false })
     dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
     dubles.buscarCupom.mockResolvedValue(CUPOM_VALIDO)
     dubles.cupomNoStripe.mockResolvedValue(CUPOM_VALIDO.stripe_coupon_id)
@@ -968,5 +986,139 @@ describe('o cupom', () => {
     expect(body.ok).toBe(true)
     expect(dubles.buscarCupom).not.toHaveBeenCalled()
     expect(argumentos().safra_id).toBeNull()
+  })
+})
+
+// ============================================================
+// 10. AS FORMAS DE PAGAMENTO (D-17)
+//
+// ⚠️ `contratoDaModalidade` é a de VERDADE aqui — a rota a importa de
+// `src/config/modalidade.ts`, que não é dublado. O que se afirma abaixo é
+// o contrato real que vai para o banco, e não um dublê concordando consigo
+// mesmo.
+// ============================================================
+const CONTRATO_PIX = {
+  valorMensal: 1500,
+  duracaoMeses: 6,
+  dataPrimeiraCobranca: '2099-09-01',
+  modalidade: 'a_vista_pix',
+  parcelas: 1,
+  valorTotal: 1500,
+}
+
+describe('as formas de pagamento (D-17)', () => {
+  beforeEach(() => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(true))
+    rpcComCheckout()
+    dubles.precoDaModalidade.mockResolvedValue({ priceId: 'price_teste', criado: false })
+    dubles.criarSessaoDeCheckout.mockResolvedValue('https://checkout.stripe.com/c/pay/teste')
+    dubles.criarSessaoPix.mockResolvedValue('https://checkout.stripe.com/c/pay/pix')
+    dubles.buscarCupom.mockResolvedValue(CUPOM_VALIDO)
+  })
+
+  // ⚠️ O BUNDLE ANTIGO. Uma aba aberta antes do deploy manda o POST sem o
+  // campo, e "nenhum passo derruba o formulário".
+  it('sem o campo → mensal, exatamente como antes da D-17', async () => {
+    await post()
+    expect(argumentos().travados.modalidade).toBe('mensal')
+    expect(argumentos().travados).toEqual(CONTRATO)
+  })
+
+  // ⚠️ A DURAÇÃO DO CURSO E O NÚMERO DE COBRANÇAS SE SEPARAM AQUI.
+  it('parcelado → o contrato gravado é 12 cobranças de um curso de 6 meses', async () => {
+    await post({ modalidade: 'parcelado' })
+    expect(argumentos().travados).toEqual({
+      valorMensal: 166.67,
+      duracaoMeses: 6,
+      dataPrimeiraCobranca: '2099-09-01',
+      modalidade: 'parcelado',
+      parcelas: 12,
+      valorTotal: 2000,
+    })
+  })
+
+  it('a sessão de cartão leva a forma e as parcelas da LINHA', async () => {
+    rpcComCheckout(true, { ...CONTRATO, modalidade: 'parcelado', parcelas: 12, valorTotal: 2000 })
+    await post({ modalidade: 'parcelado' })
+
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.modalidade).toBe('parcelado')
+    expect(sessao.parcelas).toBe(12)
+  })
+
+  // ⚠️ PIX NÃO É ASSINATURA: nenhum `price` recorrente, nenhuma sessão de
+  // trial. O valor é o TOTAL da linha (D-06).
+  it('Pix → sessão de pagamento único com o total da linha, e nenhuma assinatura', async () => {
+    rpcComCheckout(true, CONTRATO_PIX)
+    const { body } = await post({ modalidade: 'a_vista_pix' })
+
+    expect(body.modo).toBe('checkout')
+    expect(body.url).toBe('https://checkout.stripe.com/c/pay/pix')
+    expect(dubles.criarSessaoPix.mock.calls[0][0].valor).toBe(1500)
+    expect(dubles.criarSessaoPix.mock.calls[0][0].inscricaoId).toBe(INSCRICAO_ID)
+    expect(dubles.criarSessaoDeCheckout).not.toHaveBeenCalled()
+    expect(dubles.precoDaModalidade).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ "MESMA MODALIDADE" (decisão de 20/10/2026). Quem escolheu o Pix,
+  // abandonou e volta clicando no mensal paga o Pix — a forma da LINHA.
+  it('duplicata travada no Pix abre o Pix, mesmo com o mensal no formulário', async () => {
+    rpcComCheckout(false, CONTRATO_PIX)
+    await post({ modalidade: 'mensal' })
+
+    expect(dubles.criarSessaoPix).toHaveBeenCalledTimes(1)
+    expect(dubles.criarSessaoDeCheckout).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ `null` DE `contratoDaModalidade` NÃO DEGRADA PARA O MENSAL. Quem
+  // pediu o Pix não pediu mensalidade.
+  it('forma que a safra não oferece → 400, e NADA é gravado', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue({ ...safra(true), valor_a_vista: null })
+
+    const { res, body } = await post({ modalidade: 'a_vista_pix' })
+
+    expect(res.status).toBe(400)
+    expect(body.message).toContain('não está disponível')
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+  })
+
+  it('forma fora do domínio → 400 do schema, e NADA é gravado', async () => {
+    const { res } = await post({ modalidade: 'boleto' })
+
+    expect(res.status).toBe(400)
+    expect(dubles.criarInscricao).not.toHaveBeenCalled()
+  })
+
+  // ⚠️ CUPOM SÓ NO MENSAL (D-17), recusado ANTES da escrita.
+  it.each(['parcelado', 'a_vista_cartao', 'a_vista_pix'])(
+    'cupom com %s → 400, e NADA é gravado',
+    async (modalidade) => {
+      const { res, body } = await post({ modalidade, cupom: 'PARCERIA' })
+
+      expect(res.status).toBe(400)
+      expect(body.message).toContain('mensal')
+      expect(dubles.criarInscricao).not.toHaveBeenCalled()
+    },
+  )
+
+  // ⚠️ O cupom foi validado contra a forma ENVIADA (mensal), mas a linha é
+  // de outra forma — ele não entra na sessão.
+  it('duplicata travada fora do mensal ignora o cupom enviado com o mensal', async () => {
+    rpcComCheckout(false, { ...CONTRATO, modalidade: 'a_vista_cartao', parcelas: 1, valorTotal: 1500 })
+    await post({ modalidade: 'mensal', cupom: 'PARCERIA' })
+
+    const sessao = dubles.criarSessaoDeCheckout.mock.calls[0][0]
+    expect(sessao.stripeCouponId).toBeNull()
+    expect(sessao.cupomId).toBeNull()
+  })
+
+  // Na lista de espera não há o que pagar: a forma não importa, e um valor
+  // estranho no campo não pode recusar um cadastro.
+  it('sem safra aberta → a forma não decide nada, e a pessoa entra na lista', async () => {
+    dubles.buscarSafraAtiva.mockResolvedValue(safra(false))
+    const { res } = await post({ modalidade: 'a_vista_pix' })
+
+    expect(res.status).toBe(200)
+    expect(argumentos().travados).toBeNull()
   })
 })

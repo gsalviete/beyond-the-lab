@@ -44,7 +44,58 @@ const safraSchema = z.object({
   // Vazio = SEM LIMITE (D-08). Não é "zero vagas": é null no banco, e a
   // Giovanna respondeu em 08/08/2026 que não quer número fixo de vagas.
   vagas_total: z.union([z.coerce.number().int().positive(), z.literal('')]).optional(),
+  // ------------------------------------------------------------
+  // AS FORMAS DA D-17 (`020`) — em branco = forma NÃO OFERECIDA
+  //
+  // ⚠️ O OPOSTO DA MENSALIDADE, e a assimetria é decisão. A mensalidade
+  // em branco vale o padrão porque toda turma vende mensal. À vista e
+  // parcelado em branco valem `null`, porque uma turma pode não oferecê-
+  // los — e um padrão aqui faria toda turma nova sair vendendo à vista por
+  // um preço que ninguém digitou.
+  // ------------------------------------------------------------
+  valor_a_vista: z.union([z.coerce.number().positive(), z.literal('')]).optional(),
+  valor_parcelado_total: z.union([z.coerce.number().positive(), z.literal('')]).optional(),
+  parcelas_parcelado: z.union([z.coerce.number().int().min(2), z.literal('')]).optional(),
 })
+
+/** `''`/ausente → `null`. As três formas da D-17 têm a mesma leitura. */
+function ouNulo(v: number | '' | undefined): number | null {
+  return v === '' || v === undefined ? null : v
+}
+
+/**
+ * As regras das formas da D-17 que cruzam campos, com a frase que a
+ * Giovanna lê. `null` = tudo certo.
+ *
+ * ⚠️ SÃO AS MESMAS DOS CHECKs DA `020`, repetidas aqui de propósito e só
+ * aqui: o CHECK é quem garante, e esta função é quem EXPLICA. Sem ela, a
+ * recusa do banco chegaria à tela como "não conseguimos salvar a turma",
+ * e a Giovanna não teria como saber que faltou o número de parcelas.
+ *
+ * ⚠️ O LIMITE DE 12 MESES NO À VISTA É DO STRIPE, não nosso. O à vista no
+ * cartão é um `price` que cobra a cada `duracao_meses` meses (ver
+ * `precoDaModalidade`), e o Stripe não aceita intervalo maior que um ano.
+ * Sem esta checagem, a turma seria salva e a primeira pessoa a escolher o
+ * à vista cairia na fila da D-15 sem ninguém entender por quê.
+ */
+function problemaNasFormas(d: z.infer<typeof safraSchema>): string | null {
+  const total = ouNulo(d.valor_parcelado_total)
+  const parcelas = ouNulo(d.parcelas_parcelado)
+
+  if ((total === null) !== (parcelas === null)) {
+    return 'No parcelado, preencha o total e o número de parcelas — ou deixe os dois em branco.'
+  }
+
+  if (total !== null && parcelas !== null && Math.round(total * 100) < parcelas) {
+    return 'O total do parcelado é pequeno demais para esse número de parcelas.'
+  }
+
+  if (ouNulo(d.valor_a_vista) !== null && d.duracao_meses > 12) {
+    return 'O pagamento à vista no cartão só funciona em turmas de até 12 meses.'
+  }
+
+  return null
+}
 
 /**
  * O corpo comum a criar e editar.
@@ -55,6 +106,11 @@ const safraSchema = z.object({
  * "R$ 299,00". Hoje não existe formulário de edição — o `_method=PUT` não
  * tem chamador na interface —, e no dia em que existir ele tem que mandar
  * o valor atual da turma, nunca um campo vazio.
+ *
+ * ⚠️ E COM AS FORMAS DA D-17 É PIOR: um PUT sem `valor_a_vista` não diz
+ * "mantenha", diz "esta turma deixou de vender à vista". O formulário de
+ * edição, quando existir, manda os três campos preenchidos com o valor
+ * atual.
  */
 function paraSalvar(d: z.infer<typeof safraSchema>) {
   return {
@@ -67,6 +123,9 @@ function paraSalvar(d: z.infer<typeof safraSchema>) {
         : d.valor_mensal,
     duracao_meses: d.duracao_meses,
     vagas_total: d.vagas_total === '' || d.vagas_total === undefined ? null : d.vagas_total,
+    valor_a_vista: ouNulo(d.valor_a_vista),
+    valor_parcelado_total: ouNulo(d.valor_parcelado_total),
+    parcelas_parcelado: ouNulo(d.parcelas_parcelado),
   }
 }
 
@@ -88,6 +147,9 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, message: 'Confira os campos da turma.' }, { status: 400 })
   }
 
+  const problema = problemaNasFormas(parsed.data)
+  if (problema) return Response.json({ ok: false, message: problema }, { status: 400 })
+
   try {
     await criarSafra(paraSalvar(parsed.data))
     revalidatePath('/')
@@ -103,6 +165,9 @@ async function editar(bruto: Record<string, unknown>, req: Request) {
   if (!parsed.success) {
     return Response.json({ ok: false, message: 'Confira os campos da turma.' }, { status: 400 })
   }
+
+  const problema = problemaNasFormas(parsed.data)
+  if (problema) return Response.json({ ok: false, message: problema }, { status: 400 })
 
   try {
     // ⚠️ MUDAR O PREÇO AQUI NÃO MEXE EM QUEM JÁ ASSINOU (D-06): o valor de
