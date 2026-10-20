@@ -5,6 +5,7 @@ import {
   SupabaseNotConfiguredError,
   tokenVenceu,
 } from '@/lib/supabase'
+import type { Modalidade } from '@/config/modalidade'
 
 // ============================================================
 // O LINK DO CONVITE — identifica, e NÃO autoriza (D-10)
@@ -79,6 +80,14 @@ type PessoaPublica = {
     curso: string
     periodo: string
     disponibilidade: string[]
+    /**
+     * A forma de pagamento TRAVADA na pendência (D-17), ou `null` se a
+     * pendência é anterior ao checkout. A modal a mostra fixa: o servidor
+     * vai cobrar esta forma de qualquer jeito ("mesma modalidade",
+     * decisão de 20/10/2026), e um menu livre aqui mostraria uma escolha
+     * que não vale.
+     */
+    modalidade: Modalidade | null
   } | null
 }
 

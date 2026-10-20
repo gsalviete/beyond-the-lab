@@ -34,6 +34,18 @@ import {
   PERIODOS,
 } from '@/config/dominio'
 import { mascararTelefone, paraE164, paraNacional, telefoneEhValido } from '@/lib/telefone'
+// As formas de pagamento (D-17). O MESMO módulo que a rota usa para montar
+// o contrato — é isso que impede este menu de oferecer uma forma que o
+// servidor não sabe cobrar, ou de mostrar uma parcela que não é a que vai
+// ser debitada.
+import {
+  MODALIDADE_PADRAO,
+  NOME_DA_MODALIDADE,
+  aceitaCupom,
+  contratoDaModalidade,
+  modalidadesOferecidas,
+  rotuloDaModalidade,
+} from '@/config/modalidade'
 
 // Campo em repouso e no foco — herdado tal e qual do Waitlist.jsx que esta
 // modal substitui. Altura 60px é a mesma do .btn-brand, e o radius de pill é
@@ -188,6 +200,7 @@ export default function InscricaoModal({ onFechar }) {
   const cursoId = `${id}-curso`
   const periodoId = `${id}-periodo`
   const cupomId = `${id}-cupom`
+  const modalidadeId = `${id}-modalidade`
   const consentId = `${id}-consentimento`
   // Alvo do `aria-labelledby` da caixa de consentimento — ver o bloco do
   // consentimento no formulário para o porquê de o nome acessível não
@@ -261,6 +274,22 @@ export default function InscricaoModal({ onFechar }) {
   // existia quando a modal abriu.
   const [cupomDoConvite] = useState(() => cupomDaUrl())
 
+  // ============================================================
+  // A FORMA DE PAGAMENTO (D-17)
+  // ============================================================
+  //
+  // Começa no mensal — a forma que toda safra vende, e a única que existia
+  // antes da D-17. Quem não mexe no menu se inscreve exatamente como antes.
+  //
+  // ⚠️ `travada` vem do LINK DA D-15: quem abandonou o checkout volta para
+  // a forma que escolheu da primeira vez ("mesma modalidade", decisão de
+  // 20/10/2026). O servidor cobraria essa forma de qualquer jeito — a RPC
+  // devolve o contrato da linha —, então deixar o menu livre seria mostrar
+  // uma escolha que não vale. QUEM DECIDE É O SERVIDOR; a modal só deixa de
+  // fingir que há escolha.
+  const [modalidade, setModalidade] = useState(MODALIDADE_PADRAO)
+  const [modalidadeTravada, setModalidadeTravada] = useState(false)
+
   const [telefone, setTelefone] = useState('')
   const [nivel, setNivel] = useState('')
   const [curso, setCurso] = useState('')
@@ -296,6 +325,24 @@ export default function InscricaoModal({ onFechar }) {
   // conseguir abrir o formulário de inscrição por acidente. Só o booleano
   // verdadeiro, vindo do servidor, abre.
   const inscricaoAberta = safra?.inscricoes_abertas === true
+
+  // As opções do menu de pagamento, com o valor de cada uma. Só existem com
+  // as inscrições abertas: na lista de espera não há o que pagar.
+  //
+  // ⚠️ A FORMA TRAVADA ENTRA MESMO QUE A SAFRA NÃO A OFEREÇA MAIS — sem
+  // valor, só com o nome. É o caso raro de a Giovanna tirar uma forma da
+  // safra depois de alguém tê-la escolhido; mostrar outra forma no menu
+  // seria mentir sobre o que vai ser cobrado. A rota responde o que fazer.
+  const opcoesDePagamento = inscricaoAberta
+    ? modalidadesOferecidas(safra).map((m) => ({
+        valor: m,
+        rotulo: rotuloDaModalidade(contratoDaModalidade(safra, m)),
+      }))
+    : []
+  if (modalidadeTravada && !opcoesDePagamento.some((o) => o.valor === modalidade)) {
+    opcoesDePagamento.push({ valor: modalidade, rotulo: NOME_DA_MODALIDADE[modalidade] })
+  }
+  const contratoDaTela = inscricaoAberta ? contratoDaModalidade(safra, modalidade) : null
 
   // `onFechar` numa ref para o efeito de teclado poder rodar uma única vez
   // (array de dependências vazio) sem capturar uma versão velha da função.
@@ -375,6 +422,10 @@ export default function InscricaoModal({ onFechar }) {
         // pendência nem qual safra está aberta — ela obedece ao que veio.
         // ------------------------------------------------------------
         if (pessoa.perfil) {
+          if (pessoa.perfil.modalidade) {
+            setModalidade(pessoa.perfil.modalidade)
+            setModalidadeTravada(true)
+          }
           setNivel(pessoa.perfil.nivel_ingles)
           setDias(pessoa.perfil.disponibilidade)
           escolherOuOutro(pessoa.perfil.curso, CURSOS, setCurso, setCursoOutro)
@@ -609,6 +660,10 @@ export default function InscricaoModal({ onFechar }) {
           disponibilidade: dias,
           consent: consentimento,
           website,
+          // A forma de pagamento (D-17) só viaja quando há o que pagar. Na
+          // lista de espera o servidor a ignoraria, e o schema já tem o
+          // padrão para quando ela não vem.
+          ...(inscricaoAberta ? { modalidade } : {}),
           // ⚠️ A CHAVE SÓ VIAJA QUANDO HÁ CUPOM. O schema declara
           // `cupom` como `.optional()` com `min(1)`: mandar string vazia
           // seria um cupom inválido de um campo que a pessoa nem
@@ -1034,7 +1089,52 @@ export default function InscricaoModal({ onFechar }) {
                   e passa pelo rate limit da rota — e a inscrição NÃO é
                   gravada quando o cupom é recusado, então a pessoa corrige
                   o código e reenvia com tudo como estava. */}
-              {inscricaoAberta && (
+              {/* ============================================================
+                  FORMA DE PAGAMENTO (D-17) — só quando há mais de uma
+                  ============================================================
+
+                  ⚠️ UMA FORMA SÓ = SEM MENU. Uma turma que vende só a
+                  mensalidade mostra exatamente a tela de antes da D-17: um
+                  menu de uma opção é uma pergunta sem escolha.
+
+                  ⚠️ NENHUMA MEDIDA NOVA NESTE BLOCO. É o `CampoSelect` dos
+                  outros três selects, com o mesmo `LABEL`, na mesma casca
+                  do cupom logo abaixo. Não existe Figma deste campo, e o
+                  dono do repositório pediu, em 20/10/2026, que a landing
+                  não mudasse — a saída honesta é reusar o que já foi
+                  medido e não inventar valor nenhum.
+
+                  ⚠️ OS RÓTULOS TÊM O VALOR DENTRO ("12x, total de R$
+                  2.000,00"), e saem de `rotuloDaModalidade` — a mesma
+                  função do painel e do e-mail. */}
+              {opcoesDePagamento.length > 1 && (
+                <div className="flex flex-col gap-2 text-left">
+                  <label htmlFor={modalidadeId} className={LABEL}>
+                    Forma de pagamento
+                  </label>
+                  <CampoSelect
+                    id={modalidadeId}
+                    name="modalidade"
+                    valor={modalidade}
+                    aoMudar={setModalidade}
+                    opcoes={opcoesDePagamento}
+                    disabled={submitting || modalidadeTravada}
+                  />
+                  {modalidadeTravada && (
+                    <p className="pl-5 font-sans text-[13px] leading-[20px] text-[#345372]">
+                      É a forma que você escolheu na sua inscrição.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ⚠️ O CUPOM SÓ APARECE NO MENSAL (D-17). Os tipos de cupom
+                  foram desenhados para mensalidade, e o servidor recusa
+                  cupom nas outras formas. Desmontado — e não só escondido
+                  —, o campo não vai no FormData, e quem trocou para o Pix
+                  com um código do convite preenchido não recebe um 400 por
+                  um campo que nem está vendo. */}
+              {inscricaoAberta && aceitaCupom(modalidade) && (
                 <div className="flex flex-col gap-2 text-left">
                   <label htmlFor={cupomId} className={LABEL}>
                     Cupom de desconto (opcional)
@@ -1198,20 +1298,33 @@ export default function InscricaoModal({ onFechar }) {
                       porque cada grupo começa num dia diferente. O `?.`
                       cobre o caso de a safra não ter vindo — sem data, a
                       frase encolhe em vez de imprimir `undefined`. */}
-                  <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
-                    Nada é cobrado hoje. Na próxima tela você guarda o cartão
-                    {safra?.data_primeira_cobranca ? (
-                      <>
-                        , e a primeira mensalidade é debitada em{' '}
-                        <strong className="font-semibold text-ink">
-                          {formatarDataPorExtenso(paraDataUTC(safra.data_primeira_cobranca))}
-                        </strong>
-                      </>
-                    ) : (
-                      ', e a primeira mensalidade só é debitada quando a turma começa'
-                    )}
-                    .
-                  </p>
+                  {/* ⚠️ DESDE A D-17 A FRASE DEPENDE DA FORMA. O Pix é a
+                      única que cobra agora, e "nada é cobrado hoje" sobre
+                      ele seria a mentira que a pessoa descobre no extrato.
+                      As três de cartão continuam guardando o cartão e
+                      cobrando na data — só muda O QUE é debitado nela. */}
+                  {modalidade === 'a_vista_pix' ? (
+                    <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
+                      O pagamento à vista no Pix é feito agora, na próxima tela. Sua vaga é
+                      confirmada assim que o Pix cair.
+                    </p>
+                  ) : (
+                    <p className="text-center font-sans text-[13px] leading-[20px] text-[#345372]">
+                      Nada é cobrado hoje. Na próxima tela você guarda o cartão
+                      {safra?.data_primeira_cobranca ? (
+                        <>
+                          , e {oQueEDebitado(modalidade, contratoDaTela)} em{' '}
+                          <strong className="font-semibold text-ink">
+                            {formatarDataPorExtenso(paraDataUTC(safra.data_primeira_cobranca))}
+                          </strong>
+                          {modalidade === 'a_vista_cartao' ? ', uma vez só' : ''}
+                        </>
+                      ) : (
+                        `, e ${oQueEDebitado(modalidade, contratoDaTela)} só quando a turma começa`
+                      )}
+                      .
+                    </p>
+                  )}
 
                   {/* ⚠️ ESTA SEGUNDA LINHA NOMEIA O MAL-ENTENDIDO em vez de
                       torcer para ele não acontecer. Parece defensivo e é o
@@ -1223,10 +1336,13 @@ export default function InscricaoModal({ onFechar }) {
                       lugar do `trial_end`, por exemplo), esta linha sai
                       junto — ela descreve uma tela específica, e não uma
                       regra do produto. */}
-                  <p className="text-center font-sans text-[12px] leading-[18px] text-muted">
-                    A tela do Stripe chama esse intervalo de “período grátis”. É só o tempo
-                    até essa data — sua vaga não é um teste.
-                  </p>
+                  {/* Sem trial no Pix, sem "período grátis" para explicar. */}
+                  {modalidade !== 'a_vista_pix' && (
+                    <p className="text-center font-sans text-[12px] leading-[18px] text-muted">
+                      A tela do Stripe chama esse intervalo de “período grátis”. É só o tempo
+                      até essa data — sua vaga não é um teste.
+                    </p>
+                  )}
                 </>
               ) : (
                 /* Um botão só. Não há escolha de pagamento a oferecer quando
@@ -1265,6 +1381,22 @@ export default function InscricaoModal({ onFechar }) {
   )
 
   return createPortal(conteudo, document.body)
+}
+
+// ============================================================
+// O QUE É DEBITADO NA DATA DA SAFRA, para cada forma de cartão (D-17)
+//
+// A frase de baixo do botão diz "…e <isto> é debitado em <data>". Antes
+// da D-17 "isto" era sempre "a primeira mensalidade"; agora depende da
+// forma. A conta da parcela não é feita aqui — vem de `contrato`, que sai
+// de `contratoDaModalidade`, o mesmo que o servidor usa.
+// ============================================================
+function oQueEDebitado(modalidade, contrato) {
+  if (modalidade === 'parcelado' && contrato) {
+    return `a primeira de ${contrato.parcelas} parcelas é debitada`
+  }
+  if (modalidade === 'a_vista_cartao') return 'o valor à vista é debitado'
+  return 'a primeira mensalidade é debitada'
 }
 
 // ============================================================

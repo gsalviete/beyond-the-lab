@@ -5,6 +5,7 @@ import EtiquetaStatus from '@/components/admin/EtiquetaStatus.jsx'
 import { SetaEsquerda } from '@/components/admin/Icones.jsx'
 import { ROTULO_DIA_SEMANA, ROTULO_NIVEL_INGLES, listarDias } from '@/config/dominio'
 import { formatarValorMensal } from '@/config/curso'
+import { NOME_DA_MODALIDADE, modalidadeDoContrato } from '@/config/modalidade'
 import { buscarFicha } from '@/lib/supabase'
 
 // ============================================================
@@ -65,7 +66,7 @@ export default async function Page({ params }) {
 
   if (!ficha) notFound()
 
-  const { inscricao, pessoa, safra, grupo, assinatura } = ficha
+  const { inscricao, pessoa, safra, grupo, assinatura, pix } = ficha
 
   return (
     <>
@@ -130,15 +131,49 @@ export default async function Page({ params }) {
           painel diria um número e o cartão seria debitado com outro. */}
       {inscricao.valor_mensal_travado !== null && (
         <Bloco titulo="Contrato">
+          {/* ⚠️ A FORMA E O TOTAL DA D-17. `modalidadeDoContrato` é quem lê
+              o `null` dos contratos anteriores à `021` como mensal — a
+              ficha não interpreta por conta própria. */}
           <Linha
-            rotulo="Mensalidade combinada"
+            rotulo="Forma de pagamento"
+            valor={NOME_DA_MODALIDADE[modalidadeDoContrato(inscricao.modalidade)]}
+          />
+          <Linha
+            rotulo={
+              modalidadeDoContrato(inscricao.modalidade) === 'mensal'
+                ? 'Mensalidade combinada'
+                : modalidadeDoContrato(inscricao.modalidade) === 'parcelado'
+                  ? 'Parcela combinada'
+                  : 'Valor combinado'
+            }
             valor={formatarValorMensal(inscricao.valor_mensal_travado)}
           />
+          {inscricao.valor_total_travado !== null && (
+            <Linha
+              rotulo="Total do contrato"
+              valor={`${formatarValorMensal(inscricao.valor_total_travado)} em ${
+                inscricao.parcelas_travadas
+              } ${inscricao.parcelas_travadas === 1 ? 'cobrança' : 'cobranças'}`}
+            />
+          )}
           <Linha rotulo="Duração" valor={`${inscricao.duracao_meses_travada} meses`} />
-          <Linha
-            rotulo="Primeira cobrança"
-            valor={formatarData(inscricao.data_primeira_cobranca_travada)}
-          />
+          {/* No Pix a data é só referência — ele é pago na inscrição
+              (D-17). Mostrá-la como "primeira cobrança" diria que ainda
+              há algo para cobrar. */}
+          {modalidadeDoContrato(inscricao.modalidade) !== 'a_vista_pix' && (
+            <Linha
+              rotulo="Primeira cobrança"
+              valor={formatarData(inscricao.data_primeira_cobranca_travada)}
+            />
+          )}
+          {/* O Pix não tem assinatura — tem um pagamento só (D-17). */}
+          {pix && (
+            <Linha
+              rotulo="Pix recebido"
+              // `pago_em` é `timestamptz` — instante, e não dia de calendário.
+              valor={`${formatarValorMensal(pix.valor)} em ${formatarDataHora(pix.pago_em)}`}
+            />
+          )}
           {assinatura && (
             <>
               <Linha rotulo="Meses pagos" valor={String(assinatura.ciclos_pagos)} />

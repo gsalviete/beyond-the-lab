@@ -28,6 +28,7 @@
 import { z } from 'zod'
 import { VALORES_NIVEL_INGLES, VALORES_DIA_SEMANA } from '@/config/dominio'
 import { E164_BR_REGEX, e164EhValido } from '@/lib/telefone'
+import { MODALIDADES, MODALIDADE_PADRAO } from '@/config/modalidade'
 
 export const inscricaoSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -151,6 +152,30 @@ export const inscricaoSchema = z.object({
   // cupom sair para procurar um.
   // ------------------------------------------------------------
   cupom: z.string().trim().min(1).max(60).optional(),
+
+  // ------------------------------------------------------------
+  // A FORMA DE PAGAMENTO (D-17) — derivada do domínio, e com padrão
+  //
+  // `z.enum(MODALIDADES)` e não uma lista escrita aqui: a mesma tupla que
+  // o CHECK da `021` espelha e que a modal desenha. Uma quinta cópia do
+  // domínio é exatamente o que este arquivo existe para não ter.
+  //
+  // ⚠️ O PADRÃO É O MENSAL, e é por causa do bundle antigo, não por
+  // preferência de produto. Uma aba aberta antes do deploy da D-17 manda o
+  // POST sem este campo, e "nenhum passo derruba o formulário": a
+  // mensalidade era a única forma que aquela tela conhecia. Ver
+  // `MODALIDADE_PADRAO`.
+  //
+  // ⚠️ ESTE SCHEMA CONFERE SÓ A FORMA. Se a SAFRA oferece esta forma é
+  // pergunta para o banco, feita pela rota no ato da escrita
+  // (`contratoDaModalidade`) — a mesma separação do cupom logo acima.
+  //
+  // ⚠️ E ISTO NÃO É O `payment_choice` QUE A D-11 MATOU. Aquele perguntava
+  // "quer pagar agora?" numa tela onde pagar era impossível, e a resposta
+  // não mudava nada a jusante. Este decide qual cobrança é montada, e o
+  // servidor só aceita o que a safra oferece (REPORT §9.1).
+  // ------------------------------------------------------------
+  modalidade: z.enum(MODALIDADES).default(MODALIDADE_PADRAO),
 })
 
 export type InscricaoValidada = z.infer<typeof inscricaoSchema>

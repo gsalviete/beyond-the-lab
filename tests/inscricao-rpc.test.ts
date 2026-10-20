@@ -93,7 +93,9 @@ const { criarInscricao } = await import('@/lib/supabase')
 // É a mesma armadilha que fez o bloco 5 do `dominio.test.ts` reprovar
 // procurando `'sab'` num contraexemplo comentado.
 // ------------------------------------------------------------
-const MIGRACAO = 'supabase/migrations/016_rpc_criar_inscricao_travados.sql'
+// ⚠️ A `022` DESDE A D-17. A função que o código chama é a de 16
+// argumentos; a de 13 (`016`) só existe para o build antigo até a `023`.
+const MIGRACAO = 'supabase/migrations/022_rpc_criar_inscricao_modalidade.sql'
 const sql = readFileSync(MIGRACAO, 'utf8')
 
 const ABRE = 'create or replace function public.criar_inscricao('
@@ -150,11 +152,14 @@ const DADOS = {
   travados: null,
 }
 
-/** O contrato de uma inscrição em safra aberta (D-06). */
+/** O contrato de uma inscrição em safra aberta (D-06, D-17). */
 const CONTRATO = {
-  valorMensal: 299.99,
+  valorMensal: 166.67,
   duracaoMeses: 6,
-  dataPrimeiraCobranca: '2026-09-01',
+  dataPrimeiraCobranca: '2026-11-02',
+  modalidade: 'parcelado' as const,
+  parcelas: 12,
+  valorTotal: 2000,
 }
 
 /** O nome da função e o objeto de argumentos da última chamada. */
@@ -196,8 +201,8 @@ describe('a leitura da migração não é vácuo', () => {
     expect(listaDeParametros.length).toBeGreaterThan(100)
   })
 
-  it('saíram treze parâmetros, todos com o prefixo `p_`', () => {
-    expect(NOMES_NO_SQL).toHaveLength(13)
+  it('saíram dezesseis parâmetros, todos com o prefixo `p_`', () => {
+    expect(NOMES_NO_SQL).toHaveLength(16)
     for (const n of NOMES_NO_SQL) expect(n).toMatch(/^p_[a-z_]+$/)
   })
 
@@ -218,7 +223,7 @@ describe('a chamada casa com a assinatura da `011b`', () => {
     expect(sql).toContain('public.criar_inscricao(')
   })
 
-  it('manda exatamente os treze nomes do SQL — nem um a mais, nem um a menos', async () => {
+  it('manda exatamente os dezesseis nomes do SQL — nem um a mais, nem um a menos', async () => {
     await criarInscricao(DADOS)
     expect(Object.keys(chamada().args).sort()).toEqual([...NOMES_NO_SQL].sort())
   })
@@ -252,6 +257,9 @@ describe('a chamada casa com a assinatura da `011b`', () => {
     expect(args.p_valor_mensal_travado).toBe(CONTRATO.valorMensal)
     expect(args.p_duracao_meses_travada).toBe(CONTRATO.duracaoMeses)
     expect(args.p_data_primeira_cobranca_travada).toBe(CONTRATO.dataPrimeiraCobranca)
+    expect(args.p_modalidade).toBe(CONTRATO.modalidade)
+    expect(args.p_parcelas_travadas).toBe(CONTRATO.parcelas)
+    expect(args.p_valor_total_travado).toBe(CONTRATO.valorTotal)
 
     expect(args.p_nome).toBe(DADOS.nome)
     expect(args.p_email).toBe(DADOS.email)
@@ -360,6 +368,11 @@ describe('os travados viajam como null, e não como ausência', () => {
     expect(args.p_valor_mensal_travado).toBeNull()
     expect(args.p_duracao_meses_travada).toBeNull()
     expect(args.p_data_primeira_cobranca_travada).toBeNull()
+    // D-17: as três da `022`, pela mesma razão, um degrau acima — omiti-las
+    // devolveria o corpo de treze chaves da `016`.
+    expect(args.p_modalidade).toBeNull()
+    expect(args.p_parcelas_travadas).toBeNull()
+    expect(args.p_valor_total_travado).toBeNull()
   })
 
   // O que de fato atravessa. Uma chave `undefined` sumiria no
@@ -371,16 +384,20 @@ describe('os travados viajam como null, e não como ausência', () => {
     expect(corpo).toContain('p_valor_mensal_travado')
     expect(corpo).toContain('p_duracao_meses_travada')
     expect(corpo).toContain('p_data_primeira_cobranca_travada')
+    expect(corpo).toContain('p_modalidade')
+    expect(corpo).toContain('p_parcelas_travadas')
+    expect(corpo).toContain('p_valor_total_travado')
   })
 
   // ⚠️ Contagem de chaves, que é literalmente o que o PostgREST usa para
   // escolher a sobrecarga. Dez seria a função errada.
-  it('o corpo de uma lista de espera tem doze chaves, não dez', async () => {
+  it('o corpo de uma lista de espera tem quinze chaves — nem dez, nem doze', async () => {
     await criarInscricao({ ...DADOS, safra_id: null, travados: null })
     const chaves = Object.keys(JSON.parse(JSON.stringify(chamada().args)))
 
-    expect(chaves).toHaveLength(12) // 13 menos `p_safra_id`, que é omitido
-    expect(chaves).not.toHaveLength(10)
+    expect(chaves).toHaveLength(15) // 16 menos `p_safra_id`, que é omitido
+    expect(chaves).not.toHaveLength(10) // a `011b`
+    expect(chaves).not.toHaveLength(12) // a `016`
   })
 
   // A outra metade, e ela é sobre o `.sql`: se alguém der `default null`
@@ -391,6 +408,9 @@ describe('os travados viajam como null, e não como ausência', () => {
       'p_valor_mensal_travado',
       'p_duracao_meses_travada',
       'p_data_primeira_cobranca_travada',
+      'p_modalidade',
+      'p_parcelas_travadas',
+      'p_valor_total_travado',
     ]) {
       const decl = declaracoes.find((d) => d.startsWith(nome))
       expect(decl, `${nome} nao encontrado na assinatura`).toBeDefined()
@@ -423,15 +443,18 @@ describe('a tradução do retorno', () => {
   // ⚠️ O contrato que volta é o DA LINHA, e na duplicata ele é o da
   // PRIMEIRA vez (D-06) — pode diferir do que foi enviado. É ele que a
   // sessão de checkout tem que cobrar.
-  it('o contrato volta montado a partir das três colunas', async () => {
+  it('o contrato volta montado a partir das seis colunas', async () => {
     dubles.rpc.mockResolvedValue({
       data: [
         {
           inscricao_id: INSCRICAO_ID,
           criada: false,
-          valor_mensal_travado: 299.99,
+          valor_mensal_travado: 166.67,
           duracao_meses_travada: 6,
-          data_primeira_cobranca_travada: '2026-09-01',
+          data_primeira_cobranca_travada: '2026-11-02',
+          modalidade: 'parcelado',
+          parcelas_travadas: 12,
+          valor_total_travado: 2000,
         },
       ],
       error: null,
@@ -440,6 +463,62 @@ describe('a tradução do retorno', () => {
 
     const r = await criarInscricao({ ...DADOS, safra_id: SAFRA_ID, travados: CONTRATO })
     expect(r.ok === true && r.contrato).toEqual(CONTRATO)
+  })
+
+  // ⚠️ A FORMA QUE VOLTA É A DA LINHA (D-17). Quem volta pelo link da D-15
+  // depois de escolher o Pix paga o Pix, mesmo que tenha clicado em outra
+  // coisa agora — "mesma modalidade", decisão de 20/10/2026.
+  it('na duplicata, a forma é a da primeira vez, não a enviada', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: INSCRICAO_ID,
+          criada: false,
+          valor_mensal_travado: 1500,
+          duracao_meses_travada: 6,
+          data_primeira_cobranca_travada: '2026-11-02',
+          modalidade: 'a_vista_pix',
+          parcelas_travadas: 1,
+          valor_total_travado: 1500,
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
+    const r = await criarInscricao({ ...DADOS, safra_id: SAFRA_ID, travados: CONTRATO })
+    expect(r.ok === true && r.contrato?.modalidade).toBe('a_vista_pix')
+  })
+
+  // ⚠️ SEM BACKFILL (`021`): contrato anterior à D-17 volta com as três
+  // colunas novas nulas, e é mensal — com as parcelas e o total derivados.
+  it('contrato anterior à D-17 volta como mensal, com o total em centavos', async () => {
+    dubles.rpc.mockResolvedValue({
+      data: [
+        {
+          inscricao_id: INSCRICAO_ID,
+          criada: false,
+          valor_mensal_travado: 299.99,
+          duracao_meses_travada: 6,
+          data_primeira_cobranca_travada: '2026-09-01',
+          modalidade: null,
+          parcelas_travadas: null,
+          valor_total_travado: null,
+        },
+      ],
+      error: null,
+      status: 200,
+    })
+
+    const r = await criarInscricao({ ...DADOS, safra_id: SAFRA_ID, travados: CONTRATO })
+    expect(r.ok === true && r.contrato).toEqual({
+      valorMensal: 299.99,
+      duracaoMeses: 6,
+      dataPrimeiraCobranca: '2026-09-01',
+      modalidade: 'mensal',
+      parcelas: 6,
+      valorTotal: 1799.94,
+    })
   })
 
   // ⚠️ MEIO CONTRATO NÃO VIRA CONTRATO. É o

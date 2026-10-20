@@ -60,6 +60,47 @@ A `016` e a `017` foram conferidas com as consultas do próprio arquivo:
 `linhas_com_travado = 0` e `pessoas_com_token = 0`, que é o esperado (nenhuma
 das duas escreve dado).
 
+### Corte 4 — formas de pagamento (D-17), aberto em 20/10/2026
+
+Decisão em `00-DECISOES.md` (D-17). Árvore de commits `c80`…`c101` em
+`04-PLANO.md`. **Para este corte, aquela seção é operativa, não
+histórica.**
+
+**Implementado em 20/10/2026, NÃO deployado, NÃO exercitado contra banco
+nem Stripe.** `tsc` limpo, 510 testes verdes em 16 arquivos, `next build`
+compila (a pré-renderização da landing só não roda sem credencial de banco,
+como esperado).
+
+**Ordem de deploy — e ela é a regra de ouro do plano:**
+
+1. Rodar `020`, `021`, `022` no SQL Editor (nessa ordem; nenhuma escreve
+   dado; as três rodam com o formulário no ar).
+2. Regerar os tipos (`supabase gen types`). ⚠️ O `database.types.ts` do
+   working tree foi **espelhado à mão** a partir das migrações, para o
+   código compilar antes delas rodarem. A regeneração deve produzir o mesmo
+   conteúdo para as colunas novas; ela também vai **remover** a sobrecarga
+   de 10 argumentos e a `waitlist_legado`, que estão velhas no arquivo
+   desde a `018`/`019`.
+3. Deploy.
+4. Aceite em modo teste: uma inscrição de cada forma (ver `04-PLANO.md`).
+5. Só então a `023`.
+
+⚠️ **Sem a `022` no banco, o código novo não inscreve ninguém em safra
+aberta** — ele manda 16 chaves e a função de 16 não existiria. A ordem
+acima não é sugestão.
+
+### ⚠️ Achado no corte 4, não corrigido — decisão do dono
+
+O mensal tem, desde o corte 2, o mesmo deslocamento que o à vista sem trial
+tinha: quem se inscreve a **menos de 48h** da primeira cobrança é cobrada
+na hora, o Stripe ancora o ciclo naquele instante, e o `cancel_at` (que sai
+de `data_primeira_cobranca`) cai até dois dias **depois** do fim do 6º
+período. O efeito provável é uma 7ª fatura **proporcional, de até dois
+dias** de mensalidade. No à vista isso seria uma segunda cobrança de verdade
+e foi corrigido (`fimDoContrato`); no mensal foi deixado como está, por ser
+comportamento em produção e contrato de quem já paga. Corrigir é estender
+`fimDoContrato` ao mensal — uma linha — se o dono quiser.
+
 ### Validação atual
 
 `npx tsc --noEmit` limpo, **423 testes verdes** em 14 arquivos.

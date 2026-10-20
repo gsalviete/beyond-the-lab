@@ -25,7 +25,13 @@ import 'server-only'
 // tela de sucesso e o e-mail dizerem a MESMA frase a partir da MESMA
 // função, em vez de duas cópias que divergem na primeira edição — é o
 // padrão que `consentimento.ts` e `dominio.ts` já provaram no repositório.
-import { INSTAGRAM_URL, formatarSemanaDeInicio } from '@/config/curso'
+import {
+  INSTAGRAM_URL,
+  formatarDataPorExtenso,
+  formatarSemanaDeInicio,
+  formatarValorMensal,
+  paraDataUTC,
+} from '@/config/curso'
 // Os rótulos vêm do domínio, não de uma cópia local. Ver o bloco RÓTULOS
 // mais abaixo para o que isso desfaz.
 import {
@@ -34,7 +40,7 @@ import {
   type DiaDaSemana,
   type NivelIngles,
 } from '@/config/dominio'
-import type { Safra } from '@/lib/supabase'
+import type { ContratoTravado, Safra } from '@/lib/supabase'
 
 /**
  * O que os dois e-mails de fato leem da safra: o nome e a data de início.
@@ -452,7 +458,40 @@ Data e hora: ${quando}
 // na lista de espera não existe data de início nem vaga garantida, e
 // prometer qualquer uma das duas seria mentira.
 // ------------------------------------------------------------
-function montarInscrita(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
+/**
+ * A frase do que foi combinado em dinheiro, para cada forma (D-17).
+ *
+ * ⚠️ ELA SAI DO CONTRATO TRAVADO DA LINHA, e nunca da safra (D-06): quem
+ * se inscreveu pelo preço de outubro lê o preço de outubro, mesmo que a
+ * Giovanna tenha mudado a safra no dia seguinte.
+ *
+ * ⚠️ A DATA SAI SECA, e é a única do modelo que pode — cobrança tem dia
+ * exato. Ver `formatarDataPorExtenso`.
+ *
+ * ⚠️ O PARCELADO DIZ O TOTAL, e não a parcela, pelo motivo de
+ * `rotuloDaModalidade`: "12x de R$ 166,67" soma 2.000,04 na cabeça de
+ * quem lê.
+ */
+function fraseDoPagamento(contrato: ContratoTravado): string {
+  const data = formatarDataPorExtenso(paraDataUTC(contrato.dataPrimeiraCobranca))
+
+  switch (contrato.modalidade) {
+    case 'mensal':
+      return `Pagamento: ${contrato.parcelas} mensalidades de ${formatarValorMensal(contrato.valorMensal)} no cartão, a partir de ${data}.`
+    case 'parcelado':
+      return `Pagamento: ${contrato.parcelas} parcelas no cartão, total de ${formatarValorMensal(contrato.valorTotal)}, a partir de ${data}.`
+    case 'a_vista_cartao':
+      return `Pagamento: ${formatarValorMensal(contrato.valorTotal)} à vista no cartão, debitado em ${data}, uma vez só.`
+    case 'a_vista_pix':
+      return `Pagamento: ${formatarValorMensal(contrato.valorTotal)} à vista no Pix — recebido.`
+  }
+}
+
+function montarInscrita(
+  inscricao: InscricaoEmail,
+  turma: SafraDoEmail | null,
+  contrato: ContratoTravado | null,
+) {
   const { name, email, phone, nivel_ingles, curso, periodo, disponibilidade } = inscricao
 
   // Uma coisa só, e continua sendo duas: o TEXTO da semana de início e o
@@ -515,18 +554,30 @@ function montarInscrita(inscricao: InscricaoEmail, turma: SafraDoEmail | null) {
   // fallback, sem data inventada, sem `undefined` impresso. É a mesma regra
   // da landing — nunca afirmar o que não se sabe.
   //
-  // ⚠️ VALOR E DURAÇÃO NÃO ENTRAM AQUI, e a ausência é deliberada: não
-  // havia literal de preço nem de prazo neste arquivo para substituir, e
-  // acrescentar "R$ X/mês por N meses" ao e-mail seria escrever promessa
-  // nova de dinheiro, não desfazer um congelamento. A frase que este e-mail
-  // faz sobre pagamento continua sendo a mesma do rodapé do formulário e da
-  // tela de sucesso, palavra por palavra — uma promessa por evento.
+  // ⚠️ VALOR E DURAÇÃO NÃO ENTRAVAM AQUI, e o comentário que ocupava este
+  // lugar explicava por quê: "acrescentar 'R$ X/mês por N meses' ao e-mail
+  // seria escrever promessa nova de dinheiro, não desfazer um
+  // congelamento". Era verdade enquanto só existia uma forma de pagar.
+  //
+  // ⚠️ A D-17 MUDOU A CONTA. Com quatro formas, a pessoa precisa de uma
+  // confirmação POR ESCRITO de qual escolheu — e quem pagou o Pix precisa
+  // ler que o Pix foi recebido. A frase não é promessa nova: é o contrato
+  // que já está travado na linha (D-06), repetido para quem o aceitou. Ela
+  // só aparece quando quem chama é o webhook, depois do pagamento
+  // (`contrato` presente); a lista de espera continua sem número nenhum.
+  //
+  // ⚠️ E A FRASE ANTIGA SOBRE PAGAMENTO SAIU DO RAMO COM CONTRATO. Ela
+  // dizia "as informações de pagamento também vêm por e-mail, antes do
+  // início das aulas" — verdade antes do checkout, mentira depois dele: a
+  // pessoa acabou de pagar, ou de guardar o cartão.
+  const pagamento = contrato ? fraseDoPagamento(contrato) : null
+
   const proximos = semanaDeInicio
-    ? `As aulas começam <strong style="color:${COR.ink};">${esc(semanaDeInicio)}</strong>. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+    ? `As aulas começam <strong style="color:${COR.ink};">${esc(semanaDeInicio)}</strong>. Os próximos passos chegam por e-mail, aqui mesmo. ${pagamento ? esc(pagamento) : 'As informações de pagamento também vêm por e-mail, antes do início das aulas.'} O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
   const proximosTexto = semanaDeInicio
-    ? `As aulas começam ${semanaDeInicio}. Os próximos passos chegam por e-mail, aqui mesmo. As informações de pagamento também vêm por e-mail, antes do início das aulas. O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
+    ? `As aulas começam ${semanaDeInicio}. Os próximos passos chegam por e-mail, aqui mesmo. ${pagamento ?? 'As informações de pagamento também vêm por e-mail, antes do início das aulas.'} O convite para o grupo no WhatsApp é enviado mais perto da primeira aula.`
     : `Assim que a próxima turma abrir, você recebe um e-mail nosso — antes do anúncio público. Não é preciso fazer mais nada agora.`
 
   const html = moldura(`
@@ -799,13 +850,21 @@ export async function notificarAdmin(
   }
 }
 
-/** Confirma para quem se inscreveu. Não lança. */
+/**
+ * Confirma para quem se inscreveu. Não lança.
+ *
+ * `contrato` existe quando quem chama é o WEBHOOK — depois do pagamento,
+ * com o contrato travado da linha (D-06). A rota de inscrição não o
+ * passa: ela só confirma lista de espera, e lista de espera não tem
+ * contrato.
+ */
 export async function confirmarInscricao(
   inscricao: InscricaoEmail,
   turma: SafraDoEmail | null,
+  contrato: ContratoTravado | null = null,
 ): Promise<void> {
   try {
-    const { assunto, html, texto } = montarInscrita(inscricao, turma)
+    const { assunto, html, texto } = montarInscrita(inscricao, turma, contrato)
     await enviar({
       para: inscricao.email,
       assunto,

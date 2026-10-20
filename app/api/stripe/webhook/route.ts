@@ -1,8 +1,9 @@
 import type Stripe from 'stripe'
 import {
   declararFimDaAssinatura,
-  somarMeses,
-  paraEpoch,
+  declararParcelamento,
+  fimDoContrato,
+  precosDoParcelado,
   stripe,
   StripeNotConfiguredError,
   verificarEventoDoStripe,
@@ -13,14 +14,18 @@ import {
   buscarAssinaturaPorSubscription,
   buscarCupomPorId,
   buscarInscricaoParaEmail,
+  buscarSafraDaInscricao,
   buscarTravadosDaInscricao,
   contarUsoDeCupom,
   contarCicloPago,
+  contratoDosTravados,
   liberarEventoStripe,
   mudarStatusInscricao,
   registrarAssinatura,
+  registrarPagamentoPix,
   reservarEventoStripe,
   SupabaseNotConfiguredError,
+  type ContratoTravado,
 } from '@/lib/supabase'
 
 // ============================================================
@@ -225,6 +230,23 @@ async function processar(evento: Stripe.Event): Promise<void> {
       await assinaturaEncerrada(evento.data.object)
       break
 
+    // ------------------------------------------------------------
+    // OS TRÊS DO PIX (D-17) — o dono do repositório os acrescentou ao
+    // endpoint no Dashboard em 20/10/2026
+    //
+    // ⚠️ PIX É ASSÍNCRONO: `checkout.session.completed` chega quando a
+    // pessoa VÊ o QR, e o dinheiro chega depois, por
+    // `async_payment_succeeded`. Ver o bloco do Pix em `src/lib/stripe.ts`.
+    // ------------------------------------------------------------
+    case 'checkout.session.async_payment_succeeded':
+      await pixPago(evento.data.object)
+      break
+
+    case 'checkout.session.async_payment_failed':
+    case 'checkout.session.expired':
+      sessaoSemPagamento(evento.type, evento.data.object)
+      break
+
     default:
       console.info('[webhook] evento sem handler, so registrado', evento.id, evento.type)
   }
@@ -240,6 +262,12 @@ async function processar(evento: Stripe.Event): Promise<void> {
  * dois meses.
  */
 async function sessaoConcluida(sessao: Stripe.Checkout.Session): Promise<void> {
+  // ⚠️ SESSÃO DE PAGAMENTO ÚNICO É O PIX (D-17), e ela não tem assinatura
+  // para confirmar. Sem este desvio, a falta de `subscription` abaixo
+  // seria lida como "sessão criada fora do sistema" e o evento lançaria —
+  // o Stripe reentregaria um Pix legítimo para sempre.
+  if (sessao.mode === 'payment') return pixConcluido(sessao)
+
   const inscricaoId = sessao.client_reference_id
   const subscriptionId = idDe(sessao.subscription)
   const customerId = idDe(sessao.customer)
@@ -275,27 +303,23 @@ async function sessaoConcluida(sessao: Stripe.Checkout.Session): Promise<void> {
   // está sendo criada é a do contrato que a pessoa aceitou (D-06). Ler da
   // safra faria a assinatura terminar num mês que ninguém combinou.
   // ------------------------------------------------------------
-  const travados = await buscarTravadosDaInscricao(inscricaoId)
+  const contrato = contratoDosTravados(await buscarTravadosDaInscricao(inscricaoId))
 
-  if (
-    !travados?.data_primeira_cobranca_travada ||
-    travados.duracao_meses_travada === null
-  ) {
+  if (!contrato) {
     // Estado impossível pelo CHECK `inscricoes_paga_tem_travado_check` da
     // `015` — chegar aqui significa que a linha foi escrita por um caminho
-    // que não passa pela `016`. É falha, não ausência.
+    // que não passa pela `016`/`022`. É falha, não ausência.
     throw new Error(`inscricao ${inscricaoId} confirmada sem contrato travado`)
   }
-
-  const cancelAt = paraEpoch(
-    somarMeses(travados.data_primeira_cobranca_travada, travados.duracao_meses_travada),
-  )
 
   // ⚠️ O STRIPE PRIMEIRO, O ESPELHO DEPOIS. Se o `update` do Stripe
   // falhar, nada foi gravado do nosso lado e a reentrega refaz tudo. Na
   // ordem inversa, o nosso banco afirmaria um `cancel_at` que a assinatura
   // não tem — e a diferença só apareceria na sétima cobrança.
-  await declararFimDaAssinatura(subscriptionId, cancelAt)
+  //
+  // ⚠️ DESDE A D-17, "DECLARAR O FIM" DEPENDE DA FORMA — e quem decide é o
+  // contrato da LINHA, não o metadata da sessão. Ver `declararFim`.
+  await declararFim(subscriptionId, inscricaoId, contrato)
 
   // Relemos a assinatura do Stripe em vez de deduzir o estado dela: o
   // `status` e o `trial_end` reais são os que o Stripe diz que são, e
@@ -404,6 +428,9 @@ async function sessaoConcluida(sessao: Stripe.Checkout.Session): Promise<void> {
         disponibilidade: paraEmail.disponibilidade,
       },
       paraEmail.safra,
+      // D-17: o e-mail diz o que foi combinado — a forma e o valor da
+      // LINHA, nunca os da safra.
+      paraEmail.contrato,
     )
   } catch (err) {
     console.error('[webhook] falha ao enviar a confirmacao', inscricaoId, err)
@@ -438,18 +465,24 @@ async function faturaPaga(fatura: Stripe.Invoice): Promise<void> {
     )
   }
 
+  // ⚠️ NO PARCELADO, `cancel_at` NULO É O ESTADO NORMAL, e a rede não pode
+  // tratá-lo como falha. Quem decide o fim do parcelado é o schedule
+  // (D-17), e o Stripe só preenche `cancel_at` quando a assinatura entra
+  // na fase final. Pôr `cancel_at` à mão numa assinatura com schedule é
+  // recusado pelo Stripe — o 500 viraria reentrega eterna, e nenhum ciclo
+  // seria contado. A rede do parcelado é outra: garantir que o schedule
+  // foi declarado. `declararFim` sabe as duas e é idempotente nas duas.
   if (assinatura.cancel_at === null) {
-    const travados = await buscarTravadosDaInscricao(assinatura.inscricao_id)
+    const contrato = contratoDosTravados(await buscarTravadosDaInscricao(assinatura.inscricao_id))
 
-    if (travados?.data_primeira_cobranca_travada && travados.duracao_meses_travada !== null) {
-      const cancelAt = paraEpoch(
-        somarMeses(travados.data_primeira_cobranca_travada, travados.duracao_meses_travada),
-      )
-      console.warn(
-        '[webhook] assinatura sem cancel_at — declarando agora (rede da D-05)',
-        subscriptionId,
-      )
-      await declararFimDaAssinatura(subscriptionId, cancelAt)
+    if (contrato) {
+      if (contrato.modalidade !== 'parcelado') {
+        console.warn(
+          '[webhook] assinatura sem cancel_at — declarando agora (rede da D-05)',
+          subscriptionId,
+        )
+      }
+      await declararFim(subscriptionId, assinatura.inscricao_id, contrato)
     }
   }
 
@@ -604,6 +637,183 @@ async function assinaturaEncerrada(sub: Stripe.Subscription): Promise<void> {
   const chegouAoFim = sub.cancel_at !== null && sub.ended_at !== null && sub.ended_at >= sub.cancel_at
 
   await mudarStatusInscricao(assinatura.inscricao_id, chegouAoFim ? 'concluida' : 'cancelada')
+}
+
+/**
+ * Declara o fim da assinatura conforme a forma do contrato (D-05, D-17).
+ * Chamada pelo `completed` e pela rede do `invoice.paid`; idempotente nos
+ * dois ramos.
+ *
+ *   mensal, à vista no cartão → `cancel_at`, como desde o corte 2. O
+ *     à vista só difere na conta quando não houve trial — ver
+ *     `fimDoContrato`.
+ *   parcelado → subscription schedule de 11 + 1 fases, com
+ *     `end_behavior: 'cancel'` — ver `declararParcelamento`.
+ *
+ * ⚠️ OS `price` DO PARCELADO SAEM DO TOTAL DA LINHA, e não da safra
+ * (D-06). A safra entra só para o Stripe achar o `product` e a
+ * `lookup_key` — os mesmos que a rota usou ao abrir o checkout, então a
+ * parcela regular aqui é o MESMO `price` que a sessão cobrou.
+ */
+async function declararFim(
+  subscriptionId: string,
+  inscricaoId: string,
+  contrato: ContratoTravado,
+): Promise<void> {
+  if (contrato.modalidade === 'parcelado') {
+    const safra = await buscarSafraDaInscricao(inscricaoId)
+    if (!safra) throw new Error(`inscricao ${inscricaoId} parcelada sem safra`)
+
+    const precos = await precosDoParcelado(safra, contrato)
+    await declararParcelamento({ subscriptionId, parcelas: contrato.parcelas, ...precos })
+    return
+  }
+
+  // A assinatura só é lida quando a conta depende dela (à vista sem
+  // trial). O mensal segue com uma chamada a menos, como sempre foi.
+  const cancelAt =
+    contrato.modalidade === 'a_vista_cartao'
+      ? fimDoContrato(contrato, await stripe().subscriptions.retrieve(subscriptionId))
+      : fimDoContrato(contrato, null)
+
+  await declararFimDaAssinatura(subscriptionId, cancelAt)
+}
+
+// ============================================================
+// O PIX (D-17)
+// ============================================================
+
+/**
+ * `checkout.session.completed` de uma sessão Pix.
+ *
+ * ⚠️ NA MAIOR PARTE DAS VEZES ELA CHEGA SEM PAGAMENTO, e isso não é
+ * falha: a pessoa concluiu a sessão ao VER o QR. O dinheiro chega depois,
+ * em `async_payment_succeeded`. Responder 200 aqui sem escrever nada é o
+ * certo — a inscrição continua em `pendente_pagamento`, que é a verdade.
+ *
+ * Se ela já chegar paga (o Stripe pode confirmar dentro da mesma
+ * sessão), é tratada como pagamento.
+ */
+async function pixConcluido(sessao: Stripe.Checkout.Session): Promise<void> {
+  if (sessao.payment_status === 'paid') return pixPago(sessao)
+
+  console.info(
+    '[webhook] pix aguardando pagamento — inscricao segue pendente',
+    sessao.id,
+    sessao.client_reference_id,
+  )
+}
+
+/**
+ * O Pix caiu → a inscrição vira `ativa` (D-17).
+ *
+ * ⚠️ `ativa` DIRETO, SEM PASSAR POR `confirmada`. "Confirmada" significa
+ * "cartão salvo, cobrança agendada" (`c42`); no Pix o dinheiro inteiro já
+ * entrou, e o estado verdadeiro é `ativa`. Decisão do dono do
+ * repositório em 20/10/2026, junto com a consequência: ela NUNCA vira
+ * `concluida` sozinha, porque não existe evento do Stripe no fim do curso
+ * e a D-05 proíbe job nosso.
+ *
+ * ⚠️ A ORDEM É STATUS → REGISTRO → E-MAIL, e cada passo é idempotente:
+ *
+ *   1. status: escrever `ativa` duas vezes não muda nada;
+ *   2. registro: o unique da sessão faz a segunda vez virar `ja_registrado`;
+ *   3. e-mail: sai só quando o registro NASCEU agora. É o que impede a
+ *      reentrega — ou o segundo evento do mesmo Pix — de mandar dois.
+ *
+ * Se o registro falhar depois do status, a reentrega refaz o status (sem
+ * efeito) e o registro, e o e-mail sai na segunda passagem.
+ */
+async function pixPago(sessao: Stripe.Checkout.Session): Promise<void> {
+  const inscricaoId = sessao.client_reference_id
+
+  if (!inscricaoId) {
+    // Mesma regra de `sessaoConcluida`: sem o fio, o dinheiro entrou por
+    // uma porta que o sistema não conhece, e o log é o único aviso.
+    throw new Error(`sessao pix ${sessao.id} sem client_reference_id — nao foi criada por este sistema`)
+  }
+
+  if (sessao.amount_total === null) {
+    throw new Error(`sessao pix ${sessao.id} paga sem amount_total`)
+  }
+
+  await mudarStatusInscricao(inscricaoId, 'ativa')
+
+  const resultado = await registrarPagamentoPix({
+    inscricaoId,
+    stripeCheckoutSessionId: sessao.id,
+    stripePaymentIntentId: idDe(sessao.payment_intent),
+    // O que o Stripe diz ter recebido, de centavos para reais, para a
+    // coluna `numeric(10,2)`. Não é cópia do travado: é o espelho.
+    valor: sessao.amount_total / 100,
+    pagoEm: new Date().toISOString(),
+  })
+
+  if (resultado === 'pago_em_dobro') {
+    // ⚠️ ALARME, não duplicata. A mesma inscrição pagou dois Pix (duas
+    // abas, dois QRs), e o segundo dinheiro entrou de verdade. O
+    // reembolso é manual, no Dashboard (D-17) — este log é o aviso.
+    console.error(
+      '[webhook] ⚠️ PIX PAGO EM DOBRO — reembolsar no Dashboard do Stripe',
+      inscricaoId,
+      sessao.id,
+    )
+    return
+  }
+
+  if (resultado === 'ja_registrado') {
+    console.info('[webhook] pix ja registrado por outra entrega', sessao.id)
+    return
+  }
+
+  // Mesmo tratamento do e-mail do `completed` de cartão: por último, com
+  // try próprio, e falha de e-mail é log — nunca 500.
+  try {
+    const paraEmail = await buscarInscricaoParaEmail(inscricaoId)
+
+    if (!paraEmail) {
+      console.error('[webhook] pix pago sem perfil completo — e-mail nao enviado', inscricaoId)
+      return
+    }
+
+    await confirmarInscricao(
+      {
+        name: paraEmail.nome,
+        email: paraEmail.email,
+        phone: paraEmail.telefone,
+        nivel_ingles: paraEmail.nivel_ingles,
+        curso: paraEmail.curso,
+        periodo: paraEmail.periodo,
+        disponibilidade: paraEmail.disponibilidade,
+      },
+      paraEmail.safra,
+      paraEmail.contrato,
+    )
+  } catch (err) {
+    console.error('[webhook] falha ao enviar a confirmacao do pix', inscricaoId, err)
+  }
+}
+
+/**
+ * `async_payment_failed` e `checkout.session.expired` — NÃO ESCREVEM NADA.
+ *
+ * ⚠️ A INSCRIÇÃO JÁ ESTÁ ONDE TEM QUE ESTAR: `pendente_pagamento`. Pix
+ * expirado ou checkout abandonado é exatamente o estado que a fila da
+ * D-15 trabalha — a Giovanna vê, manda o link, e a pessoa paga sem
+ * preencher nada de novo. "Pix não pago volta para a fila" (D-17) não
+ * exige escrita: exige não escrever outra coisa por cima.
+ *
+ * O evento continua registrado em `eventos_stripe` (a reserva já
+ * aconteceu), que é onde alguém investigando "por que ela não pagou?"
+ * vai encontrar a resposta.
+ */
+function sessaoSemPagamento(tipo: string, sessao: Stripe.Checkout.Session): void {
+  console.info(
+    '[webhook] sessao sem pagamento — inscricao segue na fila da D-15',
+    tipo,
+    sessao.id,
+    sessao.client_reference_id,
+  )
 }
 
 // ------------------------------------------------------------
