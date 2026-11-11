@@ -2,7 +2,7 @@
 -- Beyond The Lab — REALOCA A SAFRA "Novembro 2026" → "Janeiro 2027"
 --
 --   safra 6ee444f2-9381-4a11-a461-3d347b2501f2
---   primeira cobrança  2026-11-12 → 2026-12-20
+--   primeira cobrança  2026-11-12 → 2027-01-04 (primeiro 2026-12-20, corrigido no mesmo dia)
 --   início das aulas   2026-11-16 → 2027-01-04
 --   nome               "Novembro 2026" → "Janeiro 2027"
 --
@@ -44,8 +44,8 @@
 --      cartão precisa ser avisada. Valor, duração e modalidade NÃO mudam.
 --
 --   3. A assinatura no Stripe da aluna confirmada
---      (`sub_1UYb581qWPHIjlkgBqYMeO5I`): `trial_end = 1797724800`
---      (2026-12-20 00:00 UTC), `cancel_at = 1813449600` (2027-06-20
+--      (`sub_1UYb581qWPHIjlkgBqYMeO5I`): `trial_end = 1799020800`
+--      (2027-01-04 00:00 UTC), `cancel_at = 1814659200` (2027-07-04
 --      00:00 UTC), `proration_behavior = none`. Feito FORA deste arquivo,
 --      com a chave live.
 --
@@ -58,7 +58,7 @@
 --      ainda não tem é o espelho afirmando o que não aconteceu.
 --
 -- ⚠️ O CHECK `safras_cobranca_antes_das_aulas_check` exige
--- `data_primeira_cobranca <= data_inicio_aulas`. 2026-12-20 <= 2027-01-04.
+-- `data_primeira_cobranca <= data_inicio_aulas`. 2027-01-04 <= 2027-01-04: passa (é `<=`).
 --
 -- ⚠️ 00:00 UTC É 21:00 DO DIA ANTERIOR EM BRASÍLIA. Não é deste ajuste:
 -- é a mesma conversão (`paraEpoch`) que toda assinatura do sistema usa.
@@ -88,14 +88,14 @@ begin
 
   update public.safras
      set nome                   = 'Janeiro 2027',
-         data_primeira_cobranca = date '2026-12-20',
+         data_primeira_cobranca = date '2027-01-04',
          data_inicio_aulas      = date '2027-01-04'
    where id = v_safra;
 
   -- Só quem tem contrato travado. `cancelada` fica como está: o contrato
   -- dela é história, não agenda.
   update public.inscricoes
-     set data_primeira_cobranca_travada = date '2026-12-20'
+     set data_primeira_cobranca_travada = date '2027-01-04'
    where safra_id = v_safra
      and status in ('confirmada', 'pendente_pagamento')
      and data_primeira_cobranca_travada is not null;
@@ -125,7 +125,7 @@ order by i.status;
 
 -- ============================================================
 -- SEÇÃO 3 — ESPELHO. ⚠️ SÓ DEPOIS de o Stripe confirmar a assinatura
--- com trial_end = 1797724800 e cancel_at = 1813449600.
+-- com trial_end = 1799020800 e cancel_at = 1814659200.
 -- ============================================================
 
 begin;
@@ -134,8 +134,8 @@ do $$
 declare n int;
 begin
   update public.assinaturas
-     set trial_end = timestamptz '2026-12-20 00:00:00+00',
-         cancel_at = timestamptz '2027-06-20 00:00:00+00'
+     set trial_end = timestamptz '2027-01-04 00:00:00+00',
+         cancel_at = timestamptz '2027-07-04 00:00:00+00'
    where stripe_subscription_id = 'sub_1UYb581qWPHIjlkgBqYMeO5I'
      and status_stripe = 'trialing';
   get diagnostics n = row_count;
